@@ -13,6 +13,7 @@ const SHUTDOWN_TIMEOUT_MS = 5000
 interface ManagedProcess {
   child: ChildProcess
   exited: Promise<number>
+  stopping: boolean
 }
 
 export class ProcessManager {
@@ -48,7 +49,8 @@ export class ProcessManager {
 
     instance.pid = child.pid
     this.instances.set(id, instance)
-    this.processes.set(id, { child, exited })
+    const managed: ManagedProcess = { child, exited, stopping: false }
+    this.processes.set(id, managed)
     log(
       'manager',
       `created instance ${id.slice(0, 8)} group=${group} pid=${child.pid} cmd="acp-link ${fullArgs.join(' ')}"`,
@@ -58,7 +60,7 @@ export class ProcessManager {
     this.pipeStream(child.stderr, id, 'stderr')
 
     void exited.then(code => {
-      instance.status = code === 0 ? 'stopped' : 'failed'
+      instance.status = managed.stopping || code === 0 ? 'stopped' : 'failed'
       instance.exitCode = code
       instance.pid = undefined
       this.processes.delete(id)
@@ -80,6 +82,7 @@ export class ProcessManager {
       'manager',
       `stopping instance ${id.slice(0, 8)} pid=${managed.child.pid}`,
     )
+    managed.stopping = true
     managed.child.kill('SIGTERM')
     // Immediately mark as stopped to prevent stale state
     if (inst) {
@@ -119,6 +122,11 @@ export class ProcessManager {
 
     log('manager', `shutting down ${running.length} running instance(s)...`)
     for (const [id, managed] of running) {
+      managed.stopping = true
+      const inst = this.instances.get(id)
+      if (inst) {
+        inst.status = 'stopped'
+      }
       try {
         managed.child.kill('SIGTERM')
         log(
@@ -130,15 +138,31 @@ export class ProcessManager {
       }
     }
 
-    const timeout = new Promise<void>(resolve =>
-      setTimeout(resolve, SHUTDOWN_TIMEOUT_MS),
-    )
-    await Promise.race([
-      Promise.all(running.map(([, managed]) => managed.exited.catch(() => {}))),
-      timeout,
-    ])
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<void>(resolve => {
+      timeoutTimer = setTimeout(resolve, SHUTDOWN_TIMEOUT_MS)
+      timeoutTimer.unref?.()
+    })
+    try {
+      await Promise.race([
+        Promise.all(
+          running.map(([, managed]) => managed.exited.catch(() => {})),
+        ),
+        timeout,
+      ])
+    } finally {
+      if (timeoutTimer !== undefined) {
+        clearTimeout(timeoutTimer)
+      }
+    }
 
     for (const [id, managed] of running) {
+      if (
+        managed.child.exitCode !== null ||
+        managed.child.signalCode !== null
+      ) {
+        continue
+      }
       try {
         managed.child.kill('SIGKILL')
         log('manager', `sent SIGKILL to ${id.slice(0, 8)}`)

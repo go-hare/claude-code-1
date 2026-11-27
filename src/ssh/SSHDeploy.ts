@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { logForDebugging } from 'src/utils/debug.js'
 
 const SSH_TIMEOUT_MS = 60_000
+const KILL_GRACE_MS = 2_000
 const REMOTE_BIN_DIR = '~/.local/bin'
 const REMOTE_CLI_FILE = 'claude-code-cli.js'
 const REMOTE_WRAPPER = 'claude'
@@ -17,7 +18,7 @@ export interface DeployOptions {
   onProgress?: (msg: string) => void
 }
 
-function runCommandCapture(
+export function runCommandCapture(
   command: string,
   args: string[],
   timeoutMs: number,
@@ -32,21 +33,61 @@ function runCommandCapture(
     proc.stdout?.on('data', (chunk: Buffer) => stdoutChunks.push(chunk))
     proc.stderr?.on('data', (chunk: Buffer) => stderrChunks.push(chunk))
 
+    let settled = false
+    let killTimer: ReturnType<typeof setTimeout> | undefined
+
+    const clearTimers = () => {
+      clearTimeout(timer)
+      if (killTimer !== undefined) {
+        clearTimeout(killTimer)
+        killTimer = undefined
+      }
+    }
+
     const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
       try {
-        proc.kill()
+        proc.kill('SIGTERM')
       } catch {
         // already exited
       }
+      proc.stdout?.destroy()
+      proc.stderr?.destroy()
+      killTimer = setTimeout(() => {
+        try {
+          proc.kill('SIGKILL')
+        } catch {
+          // already exited
+        }
+      }, KILL_GRACE_MS)
+      killTimer.unref?.()
+      reject(
+        new Error(
+          `Command "${command}" timed out after ${Math.max(1, Math.round(timeoutMs / 1000))}s`,
+        ),
+      )
     }, timeoutMs)
+    timer.unref?.()
+
+    proc.once('exit', () => {
+      if (killTimer !== undefined) {
+        clearTimeout(killTimer)
+        killTimer = undefined
+      }
+    })
 
     proc.once('error', err => {
-      clearTimeout(timer)
+      if (settled) return
+      settled = true
+      clearTimers()
       reject(err)
     })
 
     proc.once('close', code => {
-      clearTimeout(timer)
+      if (settled) return
+      settled = true
+      clearTimers()
       resolvePromise({
         stdout: Buffer.concat(stdoutChunks).toString('utf8').trim(),
         stderr: Buffer.concat(stderrChunks).toString('utf8').trim(),

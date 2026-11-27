@@ -223,12 +223,14 @@ export const ProjectsTool = buildTool({
         const providerHost = deps.session?.host ?? getBootstrapSessionHost()
         const provider = getProjectsToolProvider(providerHost)
         if (!provider) {
-          return { data: { hits: [], total: 0 } }
+          throw new Error(
+            'Projects tool is unavailable: no Projects provider is registered for this session.',
+          )
         }
         const result = await provider(normalizedInput, {
           signal: callCtx.signal,
         })
-        const hits = Array.isArray(result.hits) ? result.hits : []
+        const hits = Array.isArray(result?.hits) ? result.hits : []
         const limitedHits =
           normalizedInput.limit !== undefined
             ? hits.slice(0, normalizedInput.limit)
@@ -236,7 +238,7 @@ export const ProjectsTool = buildTool({
         return {
           data: {
             hits: limitedHits,
-            total: result.total ?? hits.length,
+            total: result?.total ?? hits.length,
           },
         }
       },

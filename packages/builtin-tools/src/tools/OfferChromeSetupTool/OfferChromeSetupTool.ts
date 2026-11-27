@@ -75,7 +75,6 @@ const outputSchema = lazySchema(() =>
   z.object({
     outcome: z.enum(['connected', 'not_now']),
     message: z.string(),
-    mobileApp: z.boolean().optional(),
   }),
 )
 type OutputSchema = ReturnType<typeof outputSchema>

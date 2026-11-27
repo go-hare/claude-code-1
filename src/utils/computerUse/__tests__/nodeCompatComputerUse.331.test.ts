@@ -13,9 +13,14 @@ import {
   setComputerUseSystemKeyCombosReader,
 } from '../hostAdapter.js'
 import { platform as linuxPlatform } from '../platforms/linux.js'
-import { stopAllBridges, stopBridge } from '../win32/bridgeClient.js'
-import { closeExcel } from '../win32/comExcel.js'
-import { closeWord } from '../win32/comWord.js'
+import {
+  callSync,
+  ensureBridge,
+  stopAllBridges,
+  stopBridge,
+} from '../win32/bridgeClient.js'
+import { closeExcel, readCell } from '../win32/comExcel.js'
+import { closeWord, readText } from '../win32/comWord.js'
 import {
   hideAllIndicators,
   hideIndicator,
@@ -24,6 +29,7 @@ import {
   indicateKey,
   indicateScroll,
   indicateTyping,
+  showIndicator,
   updateIndicator,
 } from '../win32/inputIndicator.js'
 import {
@@ -38,7 +44,9 @@ import {
   hideVirtualCursor,
   isVirtualCursorActive,
   moveVirtualCursor,
+  showVirtualCursor,
 } from '../win32/virtualCursor.js'
+import { captureWindow } from '../win32/windowCapture.js'
 
 const REPO_ROOT = resolve(import.meta.dir, '../../../..')
 
@@ -264,5 +272,160 @@ describe('Node.js compatibility for ComputerUse (Bun.* elimination)', () => {
     const linuxSize = linuxPlatform.display.getSize()
     expect(linuxSize.width).toBeGreaterThan(0)
     expect(linuxSize.height).toBeGreaterThan(0)
+  })
+
+  test('R4-P0-1 & R4-P1-6: spawnSync callers configure explicit maxBuffer and reject error/non-zero status before parsing stdout', () => {
+    const bufferChecks: Array<{ relPath: string; expectedMaxBuffer: string }> =
+      [
+        {
+          relPath: 'src/utils/computerUse/win32/windowCapture.ts',
+          expectedMaxBuffer: '64 * 1024 * 1024',
+        },
+        {
+          relPath: 'src/utils/computerUse/win32/bridgeClient.ts',
+          expectedMaxBuffer: '64 * 1024 * 1024',
+        },
+        {
+          relPath: 'src/utils/computerUse/win32/comExcel.ts',
+          expectedMaxBuffer: '32 * 1024 * 1024',
+        },
+        {
+          relPath: 'src/utils/computerUse/win32/comWord.ts',
+          expectedMaxBuffer: '32 * 1024 * 1024',
+        },
+        {
+          relPath: 'src/utils/computerUse/win32/shared.ts',
+          expectedMaxBuffer: '32 * 1024 * 1024',
+        },
+        {
+          relPath: 'src/utils/computerUse/executorCrossPlatform.ts',
+          expectedMaxBuffer: '32 * 1024 * 1024',
+        },
+      ]
+
+    for (const { relPath, expectedMaxBuffer } of bufferChecks) {
+      const src = readFileSync(resolve(REPO_ROOT, relPath), 'utf8')
+      expect(src).toContain(expectedMaxBuffer)
+      expect(src).toContain('maxBuffer')
+      expect(src).toMatch(/result\.status\s*!==\s*0/)
+      expect(src).toContain('result.error')
+    }
+
+    if (process.platform !== 'win32') {
+      expect(captureWindow('NonExistentWindow')).toBeNull()
+      expect(callSync('ping')).toBeNull()
+      expect(() => readCell('/tmp/missing.xlsx', 1, 1, 1)).toThrow()
+    }
+  })
+
+  test('R4-P0-2: openTerminal avoids nested PowerShell quote interpolation using direct spawn + -EncodedCommand', () => {
+    const src = readFileSync(
+      resolve(REPO_ROOT, 'src/utils/computerUse/executorCrossPlatform.ts'),
+      'utf8',
+    )
+    expect(src).not.toContain('Start-Process powershell -ArgumentList')
+    expect(src).toContain("'-NoExit', '-EncodedCommand', encodedCmd")
+    expect(src).toContain("Buffer.from(cmd, 'utf16le').toString('base64')")
+    expect(src).toContain('windowsHide: false')
+  })
+
+  test('R4-P0-3: darwin and win32 computer-use-swift backends avoid shell and script interpolation', async () => {
+    const darwinSrc = readFileSync(
+      resolve(
+        REPO_ROOT,
+        'packages/@ant/computer-use-swift/src/backends/darwin.ts',
+      ),
+      'utf8',
+    )
+    expect(darwinSrc).toContain('on run argv')
+    expect(darwinSrc).toContain('item 1 of argv')
+    expect(darwinSrc).not.toContain('tell application id "${bundleId}"')
+    expect(darwinSrc).not.toContain("spawnCollectStdout('bash'")
+    expect(darwinSrc).toContain("from 'node:fs/promises'")
+    expect(darwinSrc).toContain("spawnCollectStdout('mdls'")
+
+    const win32Src = readFileSync(
+      resolve(
+        REPO_ROOT,
+        'packages/@ant/computer-use-swift/src/backends/win32.ts',
+      ),
+      'utf8',
+    )
+    expect(win32Src).toContain("Get-Process -Name '${escaped}'")
+    expect(win32Src).not.toContain('Get-Process -Name "${name}"')
+
+    if (process.platform === 'darwin') {
+      const installed = await darwinSwift.apps.listInstalled()
+      expect(Array.isArray(installed)).toBe(true)
+    }
+  })
+
+  test('R4-P1-2 & R4-P2-4: bridgeClient, inputIndicator, and virtualCursor guard missing pid and reject pending bridge requests on stop', async () => {
+    const bridgeSrc = readFileSync(
+      resolve(REPO_ROOT, 'src/utils/computerUse/win32/bridgeClient.ts'),
+      'utf8',
+    )
+    expect(bridgeSrc).toContain('if (proc.pid == null)')
+    expect(bridgeSrc).toContain('timer.unref?.()')
+    expect(bridgeSrc).toContain(
+      'const pending = [...state.pendingRequests.values()]',
+    )
+
+    const indicatorSrc = readFileSync(
+      resolve(REPO_ROOT, 'src/utils/computerUse/win32/inputIndicator.ts'),
+      'utf8',
+    )
+    expect(indicatorSrc).toContain('if (proc.pid == null)')
+
+    const cursorSrc = readFileSync(
+      resolve(REPO_ROOT, 'src/utils/computerUse/win32/virtualCursor.ts'),
+      'utf8',
+    )
+    expect(cursorSrc).toContain('if (proc.pid == null)')
+
+    if (process.platform !== 'win32') {
+      expect(showIndicator('12345')).toBe(false)
+      expect(showVirtualCursor('12345')).toBe(false)
+      expect(isVirtualCursorActive()).toBe(false)
+      expect(await readText('/tmp/missing.docx')).toBe('')
+      // Ensure ensureBridge never throws even if python is missing or present
+      const started = ensureBridge()
+      expect(typeof started).toBe('boolean')
+      stopBridge()
+    }
+  })
+
+  test('R4-P2-1 & R4-P2-5: xdotool commands terminate flags with -- and dead async helpers are removed', () => {
+    const inputLinuxSrc = readFileSync(
+      resolve(
+        REPO_ROOT,
+        'packages/@ant/computer-use-input/src/backends/linux.ts',
+      ),
+      'utf8',
+    )
+    expect(inputLinuxSrc).toContain(
+      "run(['xdotool', 'type', '--delay', '12', '--', text])",
+    )
+    expect(inputLinuxSrc).not.toContain('function runAsync')
+
+    const inputWin32Src = readFileSync(
+      resolve(
+        REPO_ROOT,
+        'packages/@ant/computer-use-input/src/backends/win32.ts',
+      ),
+      'utf8',
+    )
+    expect(inputWin32Src).not.toContain('function psAsync')
+
+    const platformLinuxSrc = readFileSync(
+      resolve(REPO_ROOT, 'src/utils/computerUse/platforms/linux.ts'),
+      'utf8',
+    )
+    expect(platformLinuxSrc).toContain(
+      "run(['xdotool', 'type', '--delay', '12', '--', text])",
+    )
+    expect(platformLinuxSrc).toContain(
+      "run(['xdotool', 'search', '--name', '--', title])",
+    )
   })
 })

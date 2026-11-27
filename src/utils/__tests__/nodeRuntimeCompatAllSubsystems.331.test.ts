@@ -11,7 +11,8 @@ import {
 import { createServer, type Server } from 'node:http'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { ProcessManager } from '../../../packages/acp-link/src/manager/manager.js'
 import {
   buildPluginScaffoldFiles,
   renderHookHandlerTs,
@@ -21,6 +22,7 @@ import {
   createTcpAuthProxy,
   MAX_PROXY_REQUEST_BODY_BYTES,
 } from '../../ssh/SSHAuthProxy.js'
+import { runCommandCapture } from '../../ssh/SSHDeploy.js'
 import { triggerGcIfAvailable } from '../heapDumpService.js'
 
 const REPO_ROOT = resolve(import.meta.dir, '../../..')
@@ -306,13 +308,17 @@ describe('Node.js runtime compatibility across all subsystems (#331)', () => {
       }
     })
 
-    test('createAuthProxy binds cleanly via node:http with 0o600 unix socket and cleans up on stop()', async () => {
+    test('createAuthProxy binds proxy.sock inside a private 0o700 directory and cleans up both on stop()', async () => {
       const info = await createAuthProxy()
+      const socketDir = dirname(info.localAddress)
       try {
         if (process.platform === 'win32') {
           expect(info.localAddress).toMatch(/^127\.0\.0\.1:\d+$/)
         } else {
           expect(info.authEnv.ANTHROPIC_UNIX_SOCKET).toBe(info.localAddress)
+          expect(info.localAddress.endsWith('/proxy.sock')).toBe(true)
+          expect(existsSync(socketDir)).toBe(true)
+          expect(statSync(socketDir).mode & 0o777).toBe(0o700)
           expect(existsSync(info.localAddress)).toBe(true)
           expect(statSync(info.localAddress).mode & 0o777).toBe(0o600)
         }
@@ -321,6 +327,130 @@ describe('Node.js runtime compatibility across all subsystems (#331)', () => {
       }
       if (process.platform !== 'win32') {
         expect(existsSync(info.localAddress)).toBe(false)
+        expect(existsSync(socketDir)).toBe(false)
+      }
+    })
+
+    test('R4-P1-4: parses absolute-form request targets, strips hop-by-hop response headers, and aborts upstream on client disconnect', async () => {
+      let receivedPath: string | undefined
+      let upstreamSawAbort = false
+      let resolveUpstreamStarted: (() => void) | undefined
+      const upstreamStarted = new Promise<void>(r => {
+        resolveUpstreamStarted = r
+      })
+      let resolveUpstreamAborted: (() => void) | undefined
+      const upstreamAborted = new Promise<void>(r => {
+        resolveUpstreamAborted = r
+      })
+
+      const upstream: Server = createServer((req, res) => {
+        receivedPath = req.url
+        if (req.url === '/v1/stream-abort') {
+          res.writeHead(200, {
+            'content-type': 'text/event-stream',
+            'keep-alive': 'timeout=5',
+          })
+          res.write('data: hello\n\n')
+          resolveUpstreamStarted?.()
+          const onAbort = () => {
+            if (!res.writableEnded) {
+              upstreamSawAbort = true
+              resolveUpstreamAborted?.()
+            }
+          }
+          res.on('close', onAbort)
+          req.socket?.on('close', onAbort)
+          return
+        }
+        res.writeHead(200, {
+          'content-type': 'application/json',
+          'keep-alive': 'timeout=5, max=100',
+        })
+        res.end(JSON.stringify({ url: req.url }))
+      })
+
+      await new Promise<void>(resolveListen => {
+        upstream.listen(0, '127.0.0.1', () => resolveListen())
+      })
+      const addr = upstream.address()
+      if (!addr || typeof addr === 'string') {
+        throw new Error('Failed to resolve upstream port')
+      }
+
+      const prevBaseUrl = process.env.ANTHROPIC_BASE_URL
+      const prevApiKey = process.env.ANTHROPIC_API_KEY
+      process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${addr.port}`
+      process.env.ANTHROPIC_API_KEY = 'sk-ant-test-r4-p1-4'
+
+      const info = await createTcpAuthProxy('test-tcp-r4-p1-4')
+      const [host, portStr] = info.localAddress.split(':')
+      const port = Number(portStr)
+      const nonce = info.authEnv.ANTHROPIC_AUTH_NONCE!
+
+      try {
+        // 1. Absolute-form HTTP/1.1 request target + hop-by-hop response header stripping
+        const rawResponse = await new Promise<string>(
+          (resolveReq, rejectReq) => {
+            const sock = createConnection({ host, port }, () => {
+              sock.write(
+                `GET http://example.invalid/v1/abs-check?k=1 HTTP/1.1\r\nHost: ${host}:${port}\r\nx-auth-nonce: ${nonce}\r\nConnection: close\r\n\r\n`,
+              )
+            })
+            let data = ''
+            sock.on('data', chunk => {
+              data += chunk.toString('utf8')
+            })
+            sock.on('end', () => resolveReq(data))
+            sock.on('error', rejectReq)
+          },
+        )
+        expect(rawResponse).toContain('200 OK')
+        expect(receivedPath).toBe('/v1/abs-check?k=1')
+        const headerSection = rawResponse.split('\r\n\r\n')[0]!.toLowerCase()
+        expect(headerSection).not.toContain('keep-alive:')
+
+        // 2. Client disconnect cancels upstream request via AbortController
+        const abortController = new AbortController()
+        const streamRes = await fetch(
+          `http://${info.localAddress}/v1/stream-abort`,
+          {
+            headers: { 'x-auth-nonce': nonce },
+            signal: abortController.signal,
+          },
+        )
+        await upstreamStarted
+        const reader = streamRes.body!.getReader()
+        await reader.read()
+        abortController.abort()
+        await reader.cancel().catch(() => {})
+        await Promise.race([
+          upstreamAborted,
+          new Promise<void>(r => setTimeout(r, 2000)),
+        ])
+        expect(upstreamSawAbort).toBe(true)
+
+        // 3. Source-level check for backpressure and zero-copy body forwarding
+        const proxySrc = readFileSync(
+          join(REPO_ROOT, 'src/ssh/SSHAuthProxy.ts'),
+          'utf8',
+        )
+        expect(proxySrc).toContain('waitForDrainOrClose')
+        expect(proxySrc).not.toContain('merged.buffer.slice(')
+        expect(proxySrc).not.toContain('req.arrayBuffer()')
+      } finally {
+        info.proxy.stop()
+        upstream.closeAllConnections?.()
+        upstream.close()
+        if (prevBaseUrl === undefined) {
+          delete process.env.ANTHROPIC_BASE_URL
+        } else {
+          process.env.ANTHROPIC_BASE_URL = prevBaseUrl
+        }
+        if (prevApiKey === undefined) {
+          delete process.env.ANTHROPIC_API_KEY
+        } else {
+          process.env.ANTHROPIC_API_KEY = prevApiKey
+        }
       }
     })
   })
@@ -477,5 +607,80 @@ describe('Node.js runtime compatibility across all subsystems (#331)', () => {
         }
       })
     }
+  })
+
+  describe('6. Post-review hardening regressions (R4-P1 & R4-P2)', () => {
+    test('R4-P1-1 & R4-P2-5: bgManager/bgWorker resolve non-zero on signal kills and drop stale Bun.spawn comments', () => {
+      for (const relPath of [
+        'src/daemon/bgManager.ts',
+        'src/daemon/bgWorker.ts',
+      ]) {
+        const src = readFileSync(join(REPO_ROOT, relPath), 'utf8')
+        expect(src).not.toContain('resolve(code ?? 0)')
+        expect(
+          src.match(/resolve\(code \?\? \(signal \? 1 : 0\)\)/g)?.length,
+        ).toBe(2)
+        expect(src).not.toContain('Bun.spawn')
+      }
+      const spareSrc = readFileSync(
+        join(REPO_ROOT, 'src/daemon/bgSpare.ts'),
+        'utf8',
+      )
+      expect(spareSrc).not.toContain('Bun.spawn')
+    })
+
+    test('R4-P1-3 & R4-P2-4: createSSHSession drains pwdProc stdout concurrently with timeout and captures spawn errors', () => {
+      const src = readFileSync(
+        join(REPO_ROOT, 'src/ssh/createSSHSession.ts'),
+        'utf8',
+      )
+      expect(src).toContain('Promise.all([pwdProc.exited, stdoutPromise])')
+      expect(src).toContain('PWD_PROBE_TIMEOUT_MS')
+      expect(src).toContain('resolvedSpawnError')
+      expect(src).toContain('getSubprocessSpawnError')
+    })
+
+    test('R4-P1-5: SSHDeploy runCommandCapture rejects promptly on timeout and escalates kill', async () => {
+      await expect(
+        runCommandCapture(
+          process.execPath,
+          ['-e', 'setTimeout(() => {}, 10000)'],
+          150,
+        ),
+      ).rejects.toThrow(/timed out/)
+    })
+
+    test('R4-P2-2: acp-link ProcessManager preserves stopped status on stop() and clears/unrefs shutdown timeout', async () => {
+      const mgrSrc = readFileSync(
+        join(REPO_ROOT, 'packages/acp-link/src/manager/manager.ts'),
+        'utf8',
+      )
+      expect(mgrSrc).toContain('managed.stopping')
+      expect(mgrSrc).toContain('timeoutTimer.unref?.()')
+      expect(mgrSrc).toContain('clearTimeout(timeoutTimer)')
+
+      const manager = new ProcessManager()
+      // Empty shutdownAll resolves immediately
+      await manager.shutdownAll()
+    })
+
+    test('R4-P2-3 & R4-P2-4: workflow-engine build.ts uses local typescript/bin/tsc and ripgrep argv0 probe has 5s timeout', () => {
+      const wfBuildSrc = readFileSync(
+        join(REPO_ROOT, 'packages/workflow-engine/scripts/build.ts'),
+        'utf8',
+      )
+      expect(wfBuildSrc).not.toContain("'bunx'")
+      expect(wfBuildSrc).toContain("require.resolve('typescript/bin/tsc')")
+      expect(wfBuildSrc).toContain('process.execPath')
+
+      const rgSrc = readFileSync(
+        join(REPO_ROOT, 'src/utils/ripgrep.ts'),
+        'utf8',
+      )
+      expect(rgSrc).toContain(
+        'Embedded ripgrep --version probe timed out after 5000ms',
+      )
+      expect(rgSrc).toContain('timer.unref?.()')
+    })
   })
 })

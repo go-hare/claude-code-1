@@ -29,9 +29,19 @@ export { GrepTool } from './tools/GrepTool/GrepTool.js'
 export { LSPTool } from './tools/LSPTool/LSPTool.js'
 export { ListMcpResourcesTool } from './tools/ListMcpResourcesTool/ListMcpResourcesTool.js'
 export { McpTaskResumePollingTool } from './tools/McpTaskResumePollingTool/McpTaskResumePollingTool.js'
-export { OfferChromeSetupTool } from './tools/OfferChromeSetupTool/OfferChromeSetupTool.js'
-export { ProjectsTool } from './tools/ProjectsTool/ProjectsTool.js'
-export { ShowOnboardingRolePickerTool } from './tools/ShowOnboardingRolePickerTool/ShowOnboardingRolePickerTool.js'
+export {
+  markChromeExtensionNotConnectedReported,
+  OfferChromeSetupTool,
+} from './tools/OfferChromeSetupTool/OfferChromeSetupTool.js'
+export { setHostRendersChromeSetupOffer } from 'src/utils/sessionHost.js'
+export {
+  ProjectsTool,
+  registerProjectsToolProvider,
+} from './tools/ProjectsTool/ProjectsTool.js'
+export {
+  setOnboardingRolePickerEnabled,
+  ShowOnboardingRolePickerTool,
+} from './tools/ShowOnboardingRolePickerTool/ShowOnboardingRolePickerTool.js'
 export { ReadMcpResourceDirTool } from './tools/ReadMcpResourceDirTool/ReadMcpResourceDirTool.js'
 export { ReadMcpResourceTool } from './tools/ReadMcpResourceTool/ReadMcpResourceTool.js'
 export { ReadNotificationsTool } from './tools/ReadNotificationsTool/ReadNotificationsTool.js'

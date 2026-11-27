@@ -55,7 +55,12 @@ function getBridgeHostState(): BridgeClientHostState {
   return bridgeClientHostSlot.of(getBootstrapSessionHost())
 }
 
-function stopBridgeState(state: BridgeClientHostState): void {
+const BRIDGE_SYNC_MAX_BUFFER = 64 * 1024 * 1024
+
+function stopBridgeState(
+  state: BridgeClientHostState,
+  reason = 'Python bridge stopped',
+): void {
   const proc = state.bridgeProc
   state.bridgeProc = null
   activeBridgeStates.delete(state)
@@ -68,8 +73,15 @@ function stopBridgeState(state: BridgeClientHostState): void {
       proc.kill()
     } catch {}
   }
+  const pending = [...state.pendingRequests.values()]
   state.pendingRequests.clear()
   state.outputBuffer = ''
+  const err = new Error(reason)
+  for (const req of pending) {
+    try {
+      req.reject(err)
+    } catch {}
+  }
 }
 
 /**
@@ -86,21 +98,28 @@ export function ensureBridge(): boolean {
       // LOCAL: keep the Python bridge from flashing a console window on Windows.
       windowsHide: true,
     })
+    proc.stdin?.on('error', () => {})
+    proc.on('error', err => {
+      if (state.bridgeProc === proc) {
+        stopBridgeState(state, `Python bridge error: ${err.message}`)
+      }
+    })
+    if (proc.pid == null) {
+      stopBridgeState(state, 'Python bridge failed to start')
+      return false
+    }
     state.bridgeProc = proc
     activeBridgeStates.add(state)
     state.unregisterCleanup?.()
     state.unregisterCleanup = registerCleanup(() => {
       stopBridgeState(state)
     })
-    proc.stdin?.on('error', () => {})
-    proc.on('error', () => {
+    proc.on('exit', (code, signal) => {
       if (state.bridgeProc === proc) {
-        stopBridgeState(state)
-      }
-    })
-    proc.on('exit', () => {
-      if (state.bridgeProc === proc) {
-        stopBridgeState(state)
+        stopBridgeState(
+          state,
+          `Python bridge exited (${signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`})`,
+        )
       }
     })
 
@@ -158,16 +177,12 @@ export async function call<T = unknown>(
   const req: BridgeRequest = { id, method, params }
 
   return new Promise<T>((resolve, reject) => {
-    state.pendingRequests.set(id, {
-      resolve: resolve as (v: unknown) => void,
-      reject,
-    })
-
     // Timeout
     const timer = setTimeout(() => {
       state.pendingRequests.delete(id)
       reject(new Error(`Bridge call ${method} timed out after ${timeoutMs}ms`))
     }, timeoutMs)
+    timer.unref?.()
 
     // Clear timeout on resolve/reject
     const origResolve = resolve as (v: unknown) => void
@@ -185,9 +200,13 @@ export async function call<T = unknown>(
 
     try {
       const stdin = state.bridgeProc?.stdin
-      if (stdin) {
-        stdin.write(JSON.stringify(req) + '\n')
+      if (!stdin) {
+        clearTimeout(timer)
+        state.pendingRequests.delete(id)
+        reject(new Error('Python bridge stdin is unavailable'))
+        return
       }
+      stdin.write(JSON.stringify(req) + '\n')
     } catch (err) {
       clearTimeout(timer)
       state.pendingRequests.delete(id)
@@ -214,9 +233,11 @@ export function callSync<T = unknown>(
       input: req + '\n',
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+      maxBuffer: BRIDGE_SYNC_MAX_BUFFER,
       timeout: timeoutMs,
       windowsHide: true,
     })
+    if (result.error || result.status !== 0) return null
     const out = result.stdout ? result.stdout.toString('utf8').trim() : ''
     if (!out) return null
     const resp: BridgeResponse = JSON.parse(out)

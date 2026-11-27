@@ -40,7 +40,7 @@ ToolSearch 采用 **延迟加载（Deferred Loading）** 模式：
 | 文件操作 | Bash/Shell, Read, Edit, Write, Glob, Grep, NotebookEdit |
 | Agent 交互 | Agent, AskUserQuestion |
 | 任务管理 | TaskOutput, TaskStop, TaskCreate, TaskGet, TaskList, TaskUpdate, TodoWrite |
-| 规划 | EnterPlanMode, ExitPlanMode, VerifyPlanExecution |
+| 规划 | EnterPlanMode, ExitPlanMode |
 | Web | WebFetch, WebSearch |
 | 代码智能 | LSP |
 | 技能 | Skill |

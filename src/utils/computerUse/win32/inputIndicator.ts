@@ -245,6 +245,17 @@ export function showIndicator(hwnd: string): boolean {
       ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptFile],
       { stdio: 'ignore', windowsHide: true },
     )
+    proc.on('error', () => {
+      if (state.indicatorProc === proc) {
+        hideIndicatorState(state, true)
+      }
+    })
+    if (proc.pid == null) {
+      try {
+        fs.unlinkSync(scriptFile)
+      } catch {}
+      return false
+    }
     state.stopFile = stopFile
     state.scriptFile = scriptFile
     state.msgFile = msgFile
@@ -253,11 +264,6 @@ export function showIndicator(hwnd: string): boolean {
     state.unregisterCleanup?.()
     state.unregisterCleanup = registerCleanup(() => {
       hideIndicatorState(state, true)
-    })
-    proc.on('error', () => {
-      if (state.indicatorProc === proc) {
-        hideIndicatorState(state, true)
-      }
     })
     proc.on('exit', () => {
       if (state.indicatorProc === proc) {

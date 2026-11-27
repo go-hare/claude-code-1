@@ -278,6 +278,17 @@ export function showVirtualCursor(hwnd: string): boolean {
       ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptFile],
       { stdio: 'ignore', windowsHide: true },
     )
+    proc.on('error', () => {
+      if (state.cursorProc === proc) {
+        hideVirtualCursorState(state, true)
+      }
+    })
+    if (proc.pid == null) {
+      try {
+        fs.unlinkSync(scriptFile)
+      } catch {}
+      return false
+    }
     state.cursorProc = proc
     state.cursorStopFile = stopFile
     state.cursorScriptFile = scriptFile
@@ -285,11 +296,6 @@ export function showVirtualCursor(hwnd: string): boolean {
     state.unregisterCleanup?.()
     state.unregisterCleanup = registerCleanup(() => {
       hideVirtualCursorState(state, true)
-    })
-    proc.on('error', () => {
-      if (state.cursorProc === proc) {
-        hideVirtualCursorState(state, true)
-      }
     })
     proc.on('exit', () => {
       if (state.cursorProc === proc) {

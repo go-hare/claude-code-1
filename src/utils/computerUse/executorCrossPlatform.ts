@@ -379,22 +379,27 @@ export function createCrossPlatformExecutor(opts: {
     },
 
     async readClipboard(): Promise<string> {
+      const maxBuffer = 32 * 1024 * 1024
       if (process.platform === 'win32') {
         const result = spawnSync(
           'powershell',
           ['-NoProfile', '-Command', 'Get-Clipboard'],
           {
             stdio: ['ignore', 'pipe', 'pipe'],
+            maxBuffer,
             windowsHide: true,
           },
         )
+        if (result.error || result.status !== 0) return ''
         return result.stdout ? result.stdout.toString('utf8').trim() : ''
       }
       // Linux
       const result = spawnSync('xclip', ['-selection', 'clipboard', '-o'], {
         stdio: ['ignore', 'pipe', 'pipe'],
+        maxBuffer,
         windowsHide: true,
       })
+      if (result.error || result.status !== 0) return ''
       return result.stdout ? result.stdout.toString('utf8').trim() : ''
     },
 
@@ -711,20 +716,23 @@ $i = New-Object MUp+INPUT; $i.type=0; $i.mi.dwFlags=0x0004; [MUp]::SendInput(1, 
         // Snapshot current windows
         const beforeHwnds = new Set(enumWindows().map(w => w.hwnd))
         const cwd = opts.workingDirectory ?? process.cwd()
-        const escapedCwd = cwd.replace(/'/g, "''")
 
-        // Start-Process powershell opens a NEW visible PowerShell window
-        spawnSync(
+        // Launch a new visible PowerShell window directly via CreateProcess
+        // with cwd passed out-of-band and the command UTF-16LE base64-encoded
+        // via -EncodedCommand, avoiding nested PowerShell quote interpolation.
+        const encodedCmd = Buffer.from(cmd, 'utf16le').toString('base64')
+        const child = spawn(
           'powershell',
-          [
-            '-Command',
-            `Start-Process powershell -ArgumentList '-NoExit','-Command','cd ''${escapedCwd}''; ${cmd}'`,
-          ],
+          ['-NoExit', '-EncodedCommand', encodedCmd],
           {
+            cwd,
+            detached: true,
             stdio: 'ignore',
-            windowsHide: true,
+            windowsHide: false,
           },
         )
+        child.on('error', () => {})
+        child.unref()
 
         // Poll for new terminal window (up to 5s)
         let newHwnd: string | null = null

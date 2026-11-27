@@ -500,11 +500,8 @@ CLAUDE_CODE_FORK_SUBAGENT=1 claude
 | `WebBrowserTool` | 终端内网页交互 | AI 需要查看网页时调用 |
 | `SubscribePRTool` | 订阅 GitHub PR 变更 | `/subscribe-pr` 或 AI 调用 |
 | `PushNotificationTool` | 推送桌面通知 | AI 在长任务完成时调用 |
-| `CtxInspectTool` | 检查上下文窗口使用 | AI 判断上下文剩余空间 |
-| `TerminalCaptureTool` | 截取终端屏幕 | AI 需要看终端输出时调用 |
 | `SendUserFileTool` | 向用户发送文件 | AI 导出文件时调用 |
 | `REPLTool` | 启动子 REPL 会话 | AI 需要独立交互环境时调用 |
-| `VerifyPlanExecutionTool` | 验证执行计划完成度 | AI 完成计划后自动验证 |
 | `SuggestBackgroundPRTool` | 建议创建后台 PR | AI 发现可独立的变更时提议 |
 | `ListPeersTool` | 列出已发现的 peer | AI 查询多实例状态时调用 |
 

@@ -42,15 +42,19 @@ export interface AppendTextOptions {
 // PowerShell runner
 // ---------------------------------------------------------------------------
 
+const COM_WORD_MAX_BUFFER = 32 * 1024 * 1024
+
 function runPs(script: string): string {
   const result = spawnSync(
     'powershell',
     ['-NoProfile', '-NonInteractive', '-Command', script],
     {
       stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: COM_WORD_MAX_BUFFER,
       windowsHide: true,
     },
   )
+  if (result.error || result.status !== 0) return ''
   return result.stdout ? result.stdout.toString('utf8').trim() : ''
 }
 

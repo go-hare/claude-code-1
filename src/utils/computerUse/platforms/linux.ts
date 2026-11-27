@@ -181,7 +181,7 @@ const input: InputPlatform = {
   },
 
   async typeText(text) {
-    run(['xdotool', 'type', '--delay', '12', text])
+    run(['xdotool', 'type', '--delay', '12', '--', text])
   },
 
   async key(name, action) {
@@ -403,7 +403,7 @@ const apps: AppsPlatform = {
       }
 
       // Fallback: xdotool search
-      const raw = run(['xdotool', 'search', '--name', ''])
+      const raw = run(['xdotool', 'search', '--name', '--', ''])
       const handles: WindowHandle[] = []
       for (const windowId of raw.split('\n').filter(Boolean).slice(0, 50)) {
         const title = run(['xdotool', 'getwindowname', windowId])
@@ -510,7 +510,7 @@ const apps: AppsPlatform = {
   findWindowByTitle(title): WindowHandle | null {
     try {
       // xdotool search by name
-      const raw = run(['xdotool', 'search', '--name', title])
+      const raw = run(['xdotool', 'search', '--name', '--', title])
       const windowId = raw.split('\n')[0]
       if (!windowId) return null
 

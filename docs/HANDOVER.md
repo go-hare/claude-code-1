@@ -746,7 +746,6 @@ async generator 协议在编排层（`runToolUse`）。
 | `PowerShellTool/` | `PowerShell` | Windows PowerShell |
 | `REPLTool/` | `REPL` | VM 包装器，隐藏底层原语（ant + REPL 模式） |
 | `SleepTool/` | `Sleep` | 暂停 agent 循环（Kairos/proactive） |
-| `TerminalCaptureTool/` | `TerminalCapture` | 抓终端面板输出 |
 
 **文件操作**
 
@@ -769,7 +768,6 @@ async generator 协议在编排层（`runToolUse`）。
 | `TaskStopTool/` | `TaskStop`（别名 `KillShell`） | 停后台任务 |
 | `EnterPlanModeTool/` | `EnterPlanMode` | 进 plan 模式 |
 | `ExitPlanModeTool/` | `ExitPlanMode` | 出 plan / 提交计划 |
-| `VerifyPlanExecutionTool/` | `VerifyPlanExecution` | 验证计划执行 |
 | `AskUserQuestionTool/` | `AskUserQuestion` | 结构化提问 |
 | `BriefTool/` | `SendUserMessage`（别名 `Brief`） | 给用户发消息（Kairos） |
 | `SendUserFileTool/` | `SendUserFile` | 给用户发文件 |
@@ -809,7 +807,6 @@ async generator 协议在编排层（`runToolUse`）。
 | `SkillTool/` | `Skill` |
 | `DiscoverSkillsTool/` | `DiscoverSkills`（实验） |
 | `ConfigTool/` | `Config` |
-| `LocalMemoryRecallTool/` | `LocalMemoryRecall` |
 | `GoalTool/` | `GoalTool`（feature） |
 
 **工具发现（核心机制，见 §6.5）**
@@ -828,7 +825,7 @@ async generator 协议在编排层（`runToolUse`）。
 
 **Worktree / workflow / artifact**：`EnterWorktreeTool/`、`ExitWorktreeTool/`、
 `ArtifactTool/`（`artifact`）、`ReviewArtifactTool/`、`ReportFindingsTool/`、
-`ObserverReportTool/`、`CtxInspectTool/`
+`ObserverReportTool/`
 
 **ant 内部 / 杂项**：`TungstenTool/`、`SuggestBackgroundPRTool/`、`OverflowTestTool/`、
 `testing/TestingPermissionTool`

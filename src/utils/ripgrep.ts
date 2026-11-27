@@ -1138,9 +1138,34 @@ const testRipgrepOnFirstUse = memoizePerHost(async (): Promise<void> => {
             stdio: ['ignore', 'pipe', 'ignore'],
           })
           const stdoutChunks: Buffer[] = []
+          let settled = false
+          const timer = setTimeout(() => {
+            if (settled) return
+            settled = true
+            try {
+              proc.kill('SIGKILL')
+            } catch {
+              // already exited
+            }
+            proc.stdout?.destroy()
+            reject(
+              new Error(
+                'Embedded ripgrep --version probe timed out after 5000ms',
+              ),
+            )
+          }, 5000)
+          timer.unref?.()
           proc.stdout?.on('data', (chunk: Buffer) => stdoutChunks.push(chunk))
-          proc.once('error', reject)
+          proc.once('error', err => {
+            if (settled) return
+            settled = true
+            clearTimeout(timer)
+            reject(err)
+          })
           proc.once('close', code => {
+            if (settled) return
+            settled = true
+            clearTimeout(timer)
             resolve({
               code: code ?? 1,
               stdout: Buffer.concat(stdoutChunks).toString('utf8'),

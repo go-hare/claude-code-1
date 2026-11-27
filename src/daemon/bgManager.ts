@@ -563,7 +563,7 @@ export function createAuthenticatedDefaultSpawnPty(
         child.once('exit', (code, signal) => {
           child.removeListener('error', reject)
           handle.signalCode = signal ?? null
-          resolve(code ?? 0)
+          resolve(code ?? (signal ? 1 : 0))
         })
       }).catch(() => -1)
       child.unref()
@@ -616,7 +616,7 @@ export function createAuthenticatedDefaultSpawnPty(
       child.once('exit', (code, signal) => {
         child.removeListener('error', reject)
         handle.signalCode = signal ?? null
-        resolve(code ?? 0)
+        resolve(code ?? (signal ? 1 : 0))
       })
     }).catch(() => -1)
     child.unref()
@@ -643,7 +643,7 @@ export async function startBgManager(opts?: {
   const ptyAuthBySock = new Map<string, string>()
   const pendingSettleWrites = new Set<Promise<unknown>>()
   // Official: O = _.spawnPty ?? nqq(); j = _.spawnPty === void 0
-  // Spare only uses the default Bun.spawn path when caller did not inject spawnPty.
+  // Spare only uses the default node:child_process spawn path when caller did not inject spawnPty.
   const usingDefaultSpawnPty = opts?.spawnPty === undefined
   const spawnPty =
     opts?.spawnPty ?? createAuthenticatedDefaultSpawnPty(ptyAuthBySock)

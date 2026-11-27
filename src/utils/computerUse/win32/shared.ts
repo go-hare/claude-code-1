@@ -13,6 +13,8 @@ export function validateHwnd(hwnd: string): string {
   return hwnd
 }
 
+const WIN32_PS_MAX_BUFFER = 32 * 1024 * 1024
+
 /** Run a PowerShell script synchronously, return stdout trimmed. */
 export function ps(script: string): string {
   const result = spawnSync(
@@ -20,10 +22,12 @@ export function ps(script: string): string {
     ['-NoProfile', '-NonInteractive', '-Command', script],
     {
       stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: WIN32_PS_MAX_BUFFER,
       // LOCAL: suppress the conhost flash on Windows for headless PowerShell calls.
       windowsHide: true,
     },
   )
+  if (result.error || result.status !== 0) return ''
   return result.stdout ? result.stdout.toString('utf8').trim() : ''
 }
 
@@ -35,6 +39,7 @@ export function runPs(script: string): string | null {
       ['-NoProfile', '-NonInteractive', '-Command', script],
       {
         stdio: ['ignore', 'pipe', 'pipe'],
+        maxBuffer: WIN32_PS_MAX_BUFFER,
         // LOCAL: suppress the conhost flash on Windows for headless PowerShell calls.
         windowsHide: true,
       },

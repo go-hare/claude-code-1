@@ -17,7 +17,14 @@ import { logForDebugging } from '../utils/debug.js'
 import { jsonParse } from '../utils/slowOperations.js'
 
 const INIT_TIMEOUT_MS = 30_000
+const PWD_PROBE_TIMEOUT_MS = 10_000
 const STDERR_TAIL_LINES = 20
+
+const subprocessSpawnErrors = new WeakMap<Subprocess, () => Error | null>()
+
+function getSubprocessSpawnError(proc: Subprocess): Error | null {
+  return subprocessSpawnErrors.get(proc)?.() ?? null
+}
 
 function spawnSubprocess(
   command: string,
@@ -44,8 +51,11 @@ function spawnSubprocess(
 
   let resolvedExitCode: number | null = null
   let resolvedSignalCode: NodeJS.Signals | null = null
+  let resolvedSpawnError: Error | null = null
   const exited = new Promise<number>(resolve => {
-    child.once('error', () => {
+    child.once('error', err => {
+      resolvedSpawnError = err
+      logForDebugging(`[SSH] spawn error (${command}): ${err.message}`)
       if (resolvedExitCode === null) resolvedExitCode = 1
       resolve(resolvedExitCode)
     })
@@ -75,6 +85,9 @@ function spawnSubprocess(
     get signalCode() {
       return resolvedSignalCode
     },
+    get spawnError() {
+      return resolvedSpawnError
+    },
     get killed() {
       return child.killed
     },
@@ -93,7 +106,9 @@ function spawnSubprocess(
     },
   }
 
-  return adapter as unknown as Subprocess
+  const subprocess = adapter as unknown as Subprocess
+  subprocessSpawnErrors.set(subprocess, () => resolvedSpawnError)
+  return subprocess
 }
 
 export interface SSHSession {
@@ -146,15 +161,34 @@ export async function createSSHSession(
           stderr: 'ignore',
         },
       )
-      await pwdProc.exited
-      const pwd = pwdProc.stdout
-        ? (
-            await new Response(
-              pwdProc.stdout as ReadableStream<Uint8Array>,
-            ).text()
-          ).trim()
-        : ''
-      if (pwd.startsWith('/')) defaultCwd = pwd
+      // Drain stdout concurrently with process exit (with timeout) so >64 KiB
+      // login banners/MOTDs cannot deadlock waiting for pipe space.
+      let pwdTimer: ReturnType<typeof setTimeout> | undefined
+      try {
+        const stdoutPromise = pwdProc.stdout
+          ? new Response(pwdProc.stdout as ReadableStream<Uint8Array>).text()
+          : Promise.resolve('')
+        const [, rawPwd] = await Promise.race([
+          Promise.all([pwdProc.exited, stdoutPromise]),
+          new Promise<never>((_, reject) => {
+            pwdTimer = setTimeout(() => {
+              try {
+                pwdProc.kill('SIGKILL')
+              } catch {
+                // already exited
+              }
+              reject(new Error('SSH pwd probe timed out'))
+            }, PWD_PROBE_TIMEOUT_MS)
+            pwdTimer.unref?.()
+          }),
+        ])
+        const pwd = rawPwd.trim()
+        if (pwd.startsWith('/')) defaultCwd = pwd
+      } finally {
+        if (pwdTimer !== undefined) {
+          clearTimeout(pwdTimer)
+        }
+      }
     } catch {
       /* use fallback */
     }
@@ -271,7 +305,8 @@ export async function createSSHSession(
     ])
     if (earlyExit !== null) {
       proxy.stop()
-      const tail = stderrChunks.join('').trim()
+      const spawnErr = getSubprocessSpawnError(proc)
+      const tail = stderrChunks.join('').trim() || spawnErr?.message || ''
       throw new SSHSessionError(
         `Remote process exited immediately (code ${earlyExit})${tail ? `: ${tail}` : ''}`,
       )
@@ -462,10 +497,11 @@ async function waitForInit(
   try {
     while (Date.now() < deadline) {
       const remaining = deadline - Date.now()
+      let readTimer: ReturnType<typeof setTimeout> | undefined
       const result = await Promise.race([
         reader.read(),
-        new Promise<{ done: true; value: undefined }>((_, reject) =>
-          setTimeout(
+        new Promise<{ done: true; value: undefined }>((_, reject) => {
+          readTimer = setTimeout(
             () =>
               reject(
                 new SSHSessionError(
@@ -473,13 +509,21 @@ async function waitForInit(
                 ),
               ),
             remaining,
-          ),
-        ),
-      ])
+          )
+          readTimer.unref?.()
+        }),
+      ]).finally(() => {
+        if (readTimer !== undefined) {
+          clearTimeout(readTimer)
+        }
+      })
 
       if (result.done) {
+        const spawnErr = getSubprocessSpawnError(proc)
         throw new SSHSessionError(
-          'Child process exited before sending init message',
+          spawnErr
+            ? `Failed to spawn child process: ${spawnErr.message}`
+            : 'Child process exited before sending init message',
         )
       }
 

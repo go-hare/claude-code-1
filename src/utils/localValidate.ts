@@ -1,9 +1,9 @@
 /**
  * Shared validation utilities for /local-memory and /local-vault input names.
  *
- * Both LocalMemoryRecallTool (PR-1) and VaultHttpFetchTool (PR-2) need a
- * consistent, path-safe, OS-portable key naming scheme. multiStore.ts also
- * uses validateKey for entry keys after PR-0a key-collision fix.
+ * Local session memory stores (`multiStore.ts`) and `VaultHttpFetchTool` need
+ * a consistent, path-safe, OS-portable key naming scheme (added with the
+ * PR-0a key-collision fix).
  *
  * Allowed: letters, digits, dot, underscore, hyphen.
  * Length 1..128.

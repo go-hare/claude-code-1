@@ -5,7 +5,7 @@
  * Requires: xdotool (apt install xdotool)
  */
 
-import { spawn, spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import type { FrontmostAppInfo, InputBackend } from '../types.js'
 
 // ---------------------------------------------------------------------------
@@ -20,28 +20,6 @@ function run(cmd: string[]): string {
     windowsHide: true,
   })
   return result.stdout ? result.stdout.toString('utf8').trim() : ''
-}
-
-async function runAsync(cmd: string[]): Promise<string> {
-  const [bin, ...args] = cmd
-  if (!bin) return ''
-  return new Promise((resolve, reject) => {
-    const proc = spawn(bin, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    })
-    const chunks: Buffer[] = []
-    proc.stdout?.on('data', (chunk: Buffer | string) => {
-      chunks.push(
-        typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk,
-      )
-    })
-    proc.stderr?.resume()
-    proc.on('error', reject)
-    proc.on('close', () => {
-      resolve(Buffer.concat(chunks).toString('utf8').trim())
-    })
-  })
 }
 
 // ---------------------------------------------------------------------------
@@ -222,7 +200,7 @@ export const keys: InputBackend['keys'] = async parts => {
 }
 
 export const typeText: InputBackend['typeText'] = async text => {
-  run(['xdotool', 'type', '--delay', '12', text])
+  run(['xdotool', 'type', '--delay', '12', '--', text])
 }
 
 export const getFrontmostAppInfo: InputBackend['getFrontmostAppInfo'] = () => {

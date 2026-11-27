@@ -1444,17 +1444,17 @@ export type SpawnPtyFn = (
 ) => PtyConnection
 
 /**
- * Default spawnPty using Bun.spawn + PTY host — official nqq.
+ * Default spawnPty using node:child_process spawn + PTY host — official nqq.
  *
- * densable nqq: Bun.spawn(argv, {cwd, env, detached:!0, windowsHide:!0,
- *   stdio:['ignore','ignore', Bun.file(stderrBreadcrumb)]}) with ignore
- * fallback. On Windows, Bun's CREATE_NO_WINDOW is not honoured with
- * detached:true → multi console flash on BackgroundAndExit / cold spawn.
+ * Spawns argv with {cwd, env, detached:true, windowsHide:true, stdio:['ignore',
+ * 'ignore', errFd]} and falls back to 'ignore' if opening the stderr breadcrumb
+ * file fails. On Windows, detached:true with CREATE_NO_WINDOW can still flash a
+ * console on BackgroundAndExit / cold spawn.
  *
  * LOCAL win32: densable dAO/cAO WMI path (ShowWindow=0 + DETACHED_PROCESS)
  * via spawnViaWmiSync so neither powershell helper nor pty-host opens a
  * console. Fall back to node:child_process spawn (windowsHide+detached)
- * only when WMI fails. Non-Windows keeps densable Bun.spawn.
+ * only when WMI fails. Non-Windows uses node:child_process spawn directly.
  */
 export function createDefaultSpawnPty(): SpawnPtyFn {
   return (cmd, args, opts) => {
@@ -1498,8 +1498,8 @@ export function createDefaultSpawnPty(): SpawnPtyFn {
         )
       }
 
-      // Fallback: node CreateProcess with windowsHide+detached (still better
-      // than Bun.spawn on some hosts; may flash if hide is ignored).
+      // Fallback: node CreateProcess with windowsHide+detached (may flash
+      // on some hosts if hide is ignored).
       const child = nodeSpawn(spawnArgs[0]!, spawnArgs.slice(1), {
         cwd: opts.cwd,
         env: opts.env as NodeJS.ProcessEnv,
@@ -1519,7 +1519,7 @@ export function createDefaultSpawnPty(): SpawnPtyFn {
         child.once('exit', (code, signal) => {
           child.removeListener('error', reject)
           handle.signalCode = signal ?? null
-          resolve(code ?? 0)
+          resolve(code ?? (signal ? 1 : 0))
         })
       }).catch(() => -1)
       child.unref()
@@ -1576,7 +1576,7 @@ export function createDefaultSpawnPty(): SpawnPtyFn {
       child.once('exit', (code, signal) => {
         child.removeListener('error', reject)
         handle.signalCode = signal ?? null
-        resolve(code ?? 0)
+        resolve(code ?? (signal ? 1 : 0))
       })
     }).catch(() => -1)
     child.unref()

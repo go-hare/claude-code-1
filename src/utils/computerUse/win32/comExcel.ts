@@ -24,12 +24,15 @@ export interface ExcelInfo {
   sheetNames: string[]
 }
 
+const COM_EXCEL_MAX_BUFFER = 32 * 1024 * 1024
+
 function ps(script: string): string {
   const result = spawnSync(
     'powershell',
     ['-NoProfile', '-NonInteractive', '-Command', script],
     {
       stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: COM_EXCEL_MAX_BUFFER,
       windowsHide: true,
     },
   )
@@ -37,8 +40,12 @@ function ps(script: string): string {
   if (result.error) {
     throw result.error
   }
-  if (result.status !== 0 && stderr) {
-    throw new Error(`PowerShell error: ${stderr}`)
+  if (result.status !== 0) {
+    throw new Error(
+      stderr
+        ? `PowerShell error: ${stderr}`
+        : `PowerShell exited with status ${result.status}`,
+    )
   }
   return result.stdout ? result.stdout.toString('utf8').trim() : ''
 }

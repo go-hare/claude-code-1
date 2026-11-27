@@ -1,11 +1,13 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
-import { chmodSync, unlinkSync } from 'node:fs'
+import { chmodSync, mkdtempSync, rmSync, unlinkSync } from 'node:fs'
 import {
   createServer,
   type IncomingMessage,
   type Server as HttpServer,
   type ServerResponse,
 } from 'node:http'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { getClaudeAIOAuthTokens } from 'src/utils/auth.js'
 import { getOauthConfig } from 'src/constants/oauth.js'
 import { logForDebugging } from 'src/utils/debug.js'
@@ -75,6 +77,36 @@ function rejectPayloadTooLarge(
   res.end('Payload Too Large')
 }
 
+function toArrayBufferView(buf: Buffer): Uint8Array<ArrayBuffer> {
+  if (buf.buffer instanceof ArrayBuffer) {
+    // Zero-copy view over the underlying ArrayBuffer slice
+    return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+  }
+  const copy = new Uint8Array(buf.byteLength)
+  copy.set(buf)
+  return copy
+}
+
+function waitForDrainOrClose(res: ServerResponse): Promise<void> {
+  if (res.destroyed || res.writableEnded) {
+    return Promise.resolve()
+  }
+  return new Promise<void>(resolve => {
+    const cleanup = () => {
+      res.off('drain', onDone)
+      res.off('close', onDone)
+      res.off('error', onDone)
+    }
+    const onDone = () => {
+      cleanup()
+      resolve()
+    }
+    res.once('drain', onDone)
+    res.once('close', onDone)
+    res.once('error', onDone)
+  })
+}
+
 async function readRequestBodyCapped(
   req: IncomingMessage,
   maxBytes: number,
@@ -115,15 +147,11 @@ async function readRequestBodyCapped(
         resolve({ tooLarge: false, body: undefined })
         return
       }
-      const merged = Buffer.concat(chunks)
+      const merged =
+        chunks.length === 1 ? chunks[0]! : Buffer.concat(chunks, totalBytes)
       resolve({
         tooLarge: false,
-        body: new Uint8Array(
-          merged.buffer.slice(
-            merged.byteOffset,
-            merged.byteOffset + merged.byteLength,
-          ),
-        ),
+        body: toArrayBufferView(merged),
       })
     }
 
@@ -149,18 +177,24 @@ async function readRequestBodyCapped(
 }
 
 async function proxyFetch(
-  req: Request,
+  input: {
+    method: string
+    url: string
+    headers: Headers
+    body?: Uint8Array<ArrayBuffer>
+    signal: AbortSignal
+  },
   nonce: string | null,
 ): Promise<Response> {
   if (
     nonce &&
-    !timingSafeNonceMatches(req.headers.get('x-auth-nonce'), nonce)
+    !timingSafeNonceMatches(input.headers.get('x-auth-nonce'), nonce)
   ) {
     return new Response('Forbidden', { status: 403 })
   }
 
   const upstreamBase = resolveUpstreamBaseUrl()
-  const url = new URL(req.url)
+  const url = new URL(input.url)
   const upstreamUrl = `${upstreamBase}${url.pathname}${url.search}`
 
   const authHeaders = resolveAuthHeaders()
@@ -173,7 +207,7 @@ async function proxyFetch(
     )
   }
 
-  const forwardHeaders = new Headers(req.headers)
+  const forwardHeaders = new Headers(input.headers)
   for (const [k, v] of Object.entries(authHeaders)) {
     forwardHeaders.set(k, v)
   }
@@ -182,23 +216,25 @@ async function proxyFetch(
   forwardHeaders.delete('transfer-encoding')
 
   logForDebugging(
-    `[SSHAuthProxy] ${req.method} ${url.pathname} -> ${upstreamUrl}`,
+    `[SSHAuthProxy] ${input.method} ${url.pathname} -> ${upstreamUrl}`,
   )
 
   try {
     const body =
-      req.method !== 'GET' && req.method !== 'HEAD' && req.body
-        ? await req.arrayBuffer()
-        : undefined
+      input.method !== 'GET' && input.method !== 'HEAD' ? input.body : undefined
     const upstreamRes = await fetch(upstreamUrl, {
-      method: req.method,
+      method: input.method,
       headers: forwardHeaders,
       body,
+      signal: input.signal,
     })
 
     const responseHeaders = new Headers(upstreamRes.headers)
     responseHeaders.delete('content-encoding')
     responseHeaders.delete('content-length')
+    responseHeaders.delete('transfer-encoding')
+    responseHeaders.delete('connection')
+    responseHeaders.delete('keep-alive')
 
     return new Response(upstreamRes.body, {
       status: upstreamRes.status,
@@ -273,59 +309,82 @@ async function handleProxyRequest(
     body = bodyResult.body
   }
 
-  const webReq = new Request(`http://127.0.0.1${rawUrl}`, {
-    method,
-    headers,
-    body,
-  })
-  const webRes = await proxyFetch(webReq, nonce)
-
-  const resHeaders: Record<string, string | string[]> = {}
-  webRes.headers.forEach((value, key) => {
-    const existing = resHeaders[key]
-    if (existing === undefined) {
-      resHeaders[key] = value
-    } else if (Array.isArray(existing)) {
-      existing.push(value)
-    } else {
-      resHeaders[key] = [existing, value]
-    }
-  })
-
-  res.writeHead(webRes.status, webRes.statusText, resHeaders)
-
-  if (!webRes.body) {
-    res.end()
-    return
-  }
-
-  const reader = webRes.body.getReader()
+  const targetUrl = new URL(rawUrl, 'http://127.0.0.1').toString()
+  const abortController = new AbortController()
+  let activeReader: ReadableStreamDefaultReader<Uint8Array> | undefined
   const onResClose = () => {
     if (!res.writableEnded) {
-      void reader.cancel().catch(() => {})
+      abortController.abort()
+      void activeReader?.cancel().catch(() => {})
     }
   }
   res.once('close', onResClose)
+  req.socket?.once('close', onResClose)
+
   try {
-    while (true) {
-      if (res.destroyed) {
-        await reader.cancel().catch(() => {})
-        break
+    const webRes = await proxyFetch(
+      {
+        method,
+        url: targetUrl,
+        headers,
+        body,
+        signal: abortController.signal,
+      },
+      nonce,
+    )
+
+    if (res.destroyed || abortController.signal.aborted) {
+      void webRes.body?.cancel().catch(() => {})
+      return
+    }
+
+    const resHeaders: Record<string, string | string[]> = {}
+    webRes.headers.forEach((value, key) => {
+      const existing = resHeaders[key]
+      if (existing === undefined) {
+        resHeaders[key] = value
+      } else if (Array.isArray(existing)) {
+        existing.push(value)
+      } else {
+        resHeaders[key] = [existing, value]
       }
-      const { done, value } = await reader.read()
-      if (done) break
-      if (res.destroyed) {
-        await reader.cancel().catch(() => {})
-        break
+    })
+
+    res.writeHead(webRes.status, webRes.statusText, resHeaders)
+
+    if (!webRes.body) {
+      res.end()
+      return
+    }
+
+    const reader = webRes.body.getReader()
+    activeReader = reader
+    try {
+      while (true) {
+        if (res.destroyed || abortController.signal.aborted) {
+          await reader.cancel().catch(() => {})
+          break
+        }
+        const { done, value } = await reader.read()
+        if (done) break
+        if (res.destroyed || abortController.signal.aborted) {
+          await reader.cancel().catch(() => {})
+          break
+        }
+        if (!res.write(value)) {
+          await waitForDrainOrClose(res)
+        }
       }
-      res.write(value)
+    } finally {
+      activeReader = undefined
+      reader.releaseLock()
+      if (!res.writableEnded) {
+        res.end()
+      }
     }
   } finally {
     res.off('close', onResClose)
-    reader.releaseLock()
-    if (!res.writableEnded) {
-      res.end()
-    }
+    req.socket?.off('close', onResClose)
   }
 }
 
@@ -372,22 +431,34 @@ export async function createAuthProxy(): Promise<AuthProxyInfo> {
   return createUnixSocketAuthProxy(id)
 }
 
-async function createUnixSocketAuthProxy(id: string): Promise<AuthProxyInfo> {
-  const socketPath = `/tmp/claude-ssh-auth-${id}.sock`
+async function createUnixSocketAuthProxy(_id: string): Promise<AuthProxyInfo> {
+  const socketDir = mkdtempSync(join(tmpdir(), 'claude-ssh-auth-'))
+  const socketPath = join(socketDir, 'proxy.sock')
 
-  const server = createProxyHttpServer(null)
-  await listenServer(server, () => {
-    server.listen(socketPath)
-  })
-  try {
-    chmodSync(socketPath, 0o600)
-  } catch (err) {
-    server.close()
+  const cleanupSocketDir = () => {
     try {
       unlinkSync(socketPath)
     } catch {
       // Socket file may already be cleaned up
     }
+    try {
+      rmSync(socketDir, { recursive: true, force: true })
+    } catch {
+      // Directory may already be cleaned up
+    }
+  }
+
+  let server: HttpServer | undefined
+  try {
+    chmodSync(socketDir, 0o700)
+    server = createProxyHttpServer(null)
+    await listenServer(server, () => {
+      server!.listen(socketPath)
+    })
+    chmodSync(socketPath, 0o600)
+  } catch (err) {
+    server?.close()
+    cleanupSocketDir()
     throw err
   }
 
@@ -395,13 +466,9 @@ async function createUnixSocketAuthProxy(id: string): Promise<AuthProxyInfo> {
 
   const proxy: SSHAuthProxy = {
     stop() {
-      server.closeAllConnections?.()
-      server.close()
-      try {
-        unlinkSync(socketPath)
-      } catch {
-        // Socket file may already be cleaned up
-      }
+      server?.closeAllConnections?.()
+      server?.close()
+      cleanupSocketDir()
     },
   }
 

@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { ALL_AGENT_DISALLOWED_TOOLS } from 'src/constants/tools.js'
 import {
   createExplicitToolDeps,
   createToolCallContext,
@@ -6,6 +9,8 @@ import {
   type Tool,
 } from 'src/Tool.js'
 import { getAllBaseTools, getTools } from 'src/tools.js'
+import { filterParentToolsForFork } from 'src/utils/agentToolFilter.js'
+import { createChromeContext } from 'src/utils/claudeInChrome/mcpServer.js'
 import {
   createSessionHost,
   hasActiveSessionAls,
@@ -14,6 +19,7 @@ import {
   setHostRendersChromeSetupOffer,
 } from 'src/utils/sessionHost.js'
 import { createRootSession } from 'src/utils/sessionRoot.js'
+import * as builtinToolsIndex from '../../index.js'
 import {
   hasChromeExtensionNotConnectedReport,
   markChromeExtensionNotConnectedReported,
@@ -26,6 +32,7 @@ import {
   PROJECTS_TOOL_NAME,
   ProjectsTool,
   type ProjectsToolInput,
+  type ProjectsToolOutput,
   registerProjectsToolProvider,
 } from '../ProjectsTool/ProjectsTool.js'
 import {
@@ -283,10 +290,12 @@ describe('Official 2.1.331 Missing 3 Tools (OfferChromeSetup, ShowOnboardingRole
         }).success,
       ).toBe(false)
       expect(
+        Object.hasOwn(OfferChromeSetupTool.outputSchema.shape, 'mobileApp'),
+      ).toBe(false)
+      expect(
         OfferChromeSetupTool.outputSchema.safeParse({
           outcome: 'not_now',
-          message: 'Not available on mobile',
-          mobileApp: true,
+          message: 'Not available now',
         }).success,
       ).toBe(true)
     })
@@ -590,13 +599,14 @@ describe('Official 2.1.331 Missing 3 Tools (OfferChromeSetup, ShowOnboardingRole
         expect(block.tool_use_id).toBe('tu_proj_1')
         expect(JSON.parse(String(block.content))).toEqual(readRes.data)
 
-        // Unconfigured diskless host B returns empty result cleanly (never leaks host A)
+        // Unconfigured diskless host B fails loudly instead of silently returning empty hits (never leaks host A)
         const depsB = createExplicitToolDeps({ session: disklessSessionB })
-        const emptyRes = await ProjectsTool.create(depsB).call(
-          { action: 'search', query: 'secret' },
-          callCtx,
-        )
-        expect(emptyRes.data).toEqual({ hits: [], total: 0 })
+        await expect(
+          ProjectsTool.create(depsB).call(
+            { action: 'search', query: 'secret' },
+            callCtx,
+          ),
+        ).rejects.toThrow('no Projects provider is registered')
         expect(receivedCalls).toHaveLength(3)
 
         // Input schema defaults, action-specific requirements (P2-6), & bounds validation
@@ -682,6 +692,91 @@ describe('Official 2.1.331 Missing 3 Tools (OfferChromeSetup, ShowOnboardingRole
         'TerminalCapture',
       ]) {
         expect(names.has(retired)).toBe(false)
+      }
+    })
+
+    test('R4-P1-7: OfferChromeSetup and ShowOnboardingRolePicker are disallowed for subagents/forks', () => {
+      expect(ALL_AGENT_DISALLOWED_TOOLS.has(OFFER_CHROME_SETUP_TOOL_NAME)).toBe(
+        true,
+      )
+      expect(
+        ALL_AGENT_DISALLOWED_TOOLS.has(SHOW_ONBOARDING_ROLE_PICKER_TOOL_NAME),
+      ).toBe(true)
+
+      const filtered = filterParentToolsForFork([
+        OfferChromeSetupTool as unknown as Tool,
+        ShowOnboardingRolePickerTool as unknown as Tool,
+        ProjectsTool as unknown as Tool,
+      ])
+      expect(filtered.map(t => t.name)).toEqual([PROJECTS_TOOL_NAME])
+    })
+
+    test('R4-P1-8: builtin-tools barrel re-exports host wiring setters and Chrome disconnect reports per-session', () => {
+      expect(
+        typeof builtinToolsIndex.markChromeExtensionNotConnectedReported,
+      ).toBe('function')
+      expect(typeof builtinToolsIndex.setHostRendersChromeSetupOffer).toBe(
+        'function',
+      )
+      expect(typeof builtinToolsIndex.setOnboardingRolePickerEnabled).toBe(
+        'function',
+      )
+      expect(typeof builtinToolsIndex.registerProjectsToolProvider).toBe(
+        'function',
+      )
+
+      const sessionA = makeTestSession()
+      const sessionB = makeTestSession()
+
+      runWithSession(sessionA, () => {
+        setHostRendersChromeSetupOffer(true)
+        expect(OfferChromeSetupTool.isEnabled()).toBe(false)
+        const ctx = createChromeContext({})
+        ctx.onToolCallDisconnected()
+        expect(hasChromeExtensionNotConnectedReport()).toBe(true)
+        expect(OfferChromeSetupTool.isEnabled()).toBe(true)
+      })
+
+      runWithSession(sessionB, () => {
+        expect(hasChromeExtensionNotConnectedReport()).toBe(false)
+        expect(OfferChromeSetupTool.isEnabled()).toBe(false)
+      })
+    })
+
+    test('R4-P2-6: ProjectsTool guards null/undefined provider results and stale retired tool comments are cleaned up', async () => {
+      const session = makeTestSession(true)
+      const dispose = registerProjectsToolProvider(
+        () => undefined as unknown as ProjectsToolOutput,
+        session.host,
+      )
+      try {
+        const deps = createExplicitToolDeps({ session })
+        const callCtx = createToolCallContext({ toolUseId: 'tu_proj_null' })
+        const res = await ProjectsTool.create(deps).call(
+          { action: 'list' },
+          callCtx,
+        )
+        expect(res.data).toEqual({ hits: [], total: 0 })
+      } finally {
+        dispose()
+      }
+
+      const repoRoot = resolve(import.meta.dir, '../../../../..')
+      for (const relPath of [
+        'packages/builtin-tools/src/tools/ExitPlanModeTool/ExitPlanModeV2Tool.ts',
+        'src/schemas/hooks.ts',
+        'src/services/SessionMemory/multiStore.ts',
+        'src/types/logs.ts',
+        'src/utils/localValidate.ts',
+        'docs/HANDOVER.md',
+        'docs/features/all-features-guide.md',
+        'docs/design/tool-search-design-guide.md',
+        'docs/internals/ant-only-world.mdx',
+      ]) {
+        const content = readFileSync(resolve(repoRoot, relPath), 'utf8')
+        expect(content).not.toMatch(
+          /LocalMemoryRecallTool|CtxInspectTool|VerifyPlanExecutionTool|TerminalCaptureTool|ctx_inspect/,
+        )
       }
     })
   })

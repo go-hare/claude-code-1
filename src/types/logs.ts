@@ -488,7 +488,7 @@ export type ContextCollapseCommitEntry = {
   summaryUuid: string
   /** Full <collapsed id="...">text</collapsed> string for the placeholder. */
   summaryContent: string
-  /** Plain summary text for ctx_inspect. */
+  /** Plain summary text for context-collapse inspection and logging. */
   summary: string
   /** Span boundaries — projectView finds these in the resumed Message[]. */
   firstArchivedUuid: string

@@ -37,6 +37,8 @@ import {
 import { OBSERVER_REPORT_TOOL_NAME } from '@claude-code/builtin-tools/tools/ObserverReportTool/constants.js'
 import { SUBAGENT_HANDBACK_TOOL_NAME } from '@claude-code/builtin-tools/tools/SubagentHandbackTool/constants.js'
 import { ARTIFACT_TOOL_NAME } from '@claude-code/builtin-tools/tools/ArtifactTool/prompt.js'
+import { OFFER_CHROME_SETUP_TOOL_NAME } from '@claude-code/builtin-tools/tools/OfferChromeSetupTool/OfferChromeSetupTool.js'
+import { SHOW_ONBOARDING_ROLE_PICKER_TOOL_NAME } from '@claude-code/builtin-tools/tools/ShowOnboardingRolePickerTool/ShowOnboardingRolePickerTool.js'
 import { GET_TASK_TOOL_NAME } from '../utils/bashTaskDeliveryOutcomes.js'
 
 // Legacy retired tool names retained for backwards-compatible filtering and
@@ -52,6 +54,8 @@ export const ALL_AGENT_DISALLOWED_TOOLS = new Set([
   // Allow Agent tool for agents when user is ant (enables nested agents)
   ...(process.env.USER_TYPE === 'ant' ? [] : [AGENT_TOOL_NAME]),
   ASK_USER_QUESTION_TOOL_NAME,
+  OFFER_CHROME_SETUP_TOOL_NAME,
+  SHOW_ONBOARDING_ROLE_PICKER_TOOL_NAME,
   TASK_STOP_TOOL_NAME,
   // Prevent recursive workflow execution inside subagents.
   ...(feature('WORKFLOW_SCRIPTS') ? [WORKFLOW_TOOL_NAME] : []),

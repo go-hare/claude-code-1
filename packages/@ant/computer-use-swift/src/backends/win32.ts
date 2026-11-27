@@ -218,6 +218,7 @@ if (Test-Path '${escaped}') {
   async unhide(bundleIds) {
     // Windows: bring window to foreground
     for (const name of bundleIds) {
+      const escaped = name.replace(/'/g, "''")
       await psAsync(`
 Add-Type @'
 using System;
@@ -227,7 +228,7 @@ public class WinShow {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
 }
 '@
-$proc = Get-Process -Name "${name}" -ErrorAction SilentlyContinue | Select-Object -First 1
+$proc = Get-Process -Name '${escaped}' -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($proc) { [WinShow]::ShowWindow($proc.MainWindowHandle, 9) | Out-Null; [WinShow]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null }
 `)
     }

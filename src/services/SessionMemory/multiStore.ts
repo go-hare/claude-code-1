@@ -217,13 +217,12 @@ export function getEntry(store: string, key: string): string | null {
  * M4 fix: bounded read variant. Returns at most `maxBytes` bytes from the
  * entry file. If the on-disk file is larger, returns the prefix and sets
  * truncated=true. Caller should not assume the returned string is a complete
- * entry. Used by LocalMemoryRecallTool to defend against externally written
- * 1GB markdown files (the in-tool 1MB cap only guards setEntry; an attacker
- * with file system access could write any size).
+ * entry. Defends against externally written 1GB markdown files (the in-app
+ * 1MB cap only guards setEntry; an attacker with file system access could
+ * write any size).
  *
  * Bytes are read from a single fd, not the whole file. Result is decoded as
- * UTF-8 with truncate-at-codepoint-boundary semantics handled by the caller
- * (truncateUtf8 in LocalMemoryRecallTool).
+ * UTF-8, with any further codepoint-boundary truncation handled by callers.
  */
 export function getEntryBounded(
   store: string,

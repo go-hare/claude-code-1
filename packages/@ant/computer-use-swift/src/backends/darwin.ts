@@ -6,8 +6,9 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process'
+import { readdir, stat } from 'node:fs/promises'
 import { readFileSync, unlinkSync } from 'fs'
-import { tmpdir } from 'os'
+import { homedir, tmpdir } from 'os'
 import { join } from 'path'
 import type {
   AppInfo,
@@ -74,8 +75,9 @@ function osascriptSync(script: string): string {
   return result.stdout ? result.stdout.toString('utf8').trim() : ''
 }
 
-async function osascript(script: string): Promise<string> {
-  const text = await spawnCollectStdout('osascript', ['-e', script])
+async function osascript(script: string, args: string[] = []): Promise<string> {
+  const argv = args.length > 0 ? ['-e', script, '--', ...args] : ['-e', script]
+  const text = await spawnCollectStdout('osascript', argv)
   return text.trim()
 }
 
@@ -200,25 +202,67 @@ export const apps: AppsAPI = {
 
   async listInstalled() {
     try {
-      // Use mdls to enumerate apps and get real bundle identifiers.
-      // The previous AppleScript approach generated fake bundle IDs
-      // (com.app.display-name) which prevented request_access from matching
-      // apps by their real bundle ID (e.g. com.google.Chrome).
+      // Use fs.readdir + mdls directly (no shell interpolation) to enumerate
+      // apps and read real bundle identifiers (e.g. com.google.Chrome).
       const dirs = ['/Applications', '~/Applications', '/System/Applications']
       const allApps: InstalledApp[] = []
+      const candidates: Array<{ appPath: string; displayName: string }> = []
+      const home = process.env.HOME || homedir()
       for (const dir of dirs) {
-        const expanded = dir.startsWith('~')
-          ? join(process.env.HOME ?? '~', dir.slice(1))
-          : dir
-        const text = await spawnCollectStdout('bash', [
-          '-c',
-          `for f in "${expanded}"/*.app; do [ -d "$f" ] || continue; bid=$(mdls -name kMDItemCFBundleIdentifier "$f" 2>/dev/null | sed 's/.*= "//;s/"//'); name=$(basename "$f" .app); echo "$f|$name|$bid"; done`,
-        ])
-        for (const line of text.split('\n').filter(Boolean)) {
-          const [path, displayName, bundleId] = line.split('|', 3)
-          if (path && displayName && bundleId && bundleId !== '(null)') {
-            allApps.push({ bundleId, displayName, path })
+        const expanded = dir.startsWith('~') ? join(home, dir.slice(1)) : dir
+        let entries: import('node:fs').Dirent[]
+        try {
+          entries = await readdir(expanded, { withFileTypes: true })
+        } catch {
+          continue
+        }
+        for (const entry of entries) {
+          if (!entry.name.endsWith('.app')) continue
+          const appPath = join(expanded, entry.name)
+          let isDir = entry.isDirectory()
+          if (!isDir && entry.isSymbolicLink()) {
+            try {
+              isDir = (await stat(appPath)).isDirectory()
+            } catch {
+              isDir = false
+            }
           }
+          if (!isDir) continue
+          const displayName = entry.name.slice(0, -'.app'.length)
+          if (displayName) {
+            candidates.push({ appPath, displayName })
+          }
+        }
+      }
+
+      // Query mdls in bounded parallel batches so large /Applications folders
+      // resolve quickly without spawning unbounded concurrent processes.
+      const MDLS_CONCURRENCY = 16
+      for (let i = 0; i < candidates.length; i += MDLS_CONCURRENCY) {
+        const batch = candidates.slice(i, i + MDLS_CONCURRENCY)
+        const batchResults = await Promise.all(
+          batch.map(async ({ appPath, displayName }) => {
+            try {
+              const mdlsOut = await spawnCollectStdout('mdls', [
+                '-name',
+                'kMDItemCFBundleIdentifier',
+                appPath,
+              ])
+              const match = mdlsOut.match(
+                /kMDItemCFBundleIdentifier\s*=\s*"([^"]+)"/,
+              )
+              const bundleId = match?.[1]
+              if (bundleId && bundleId !== '(null)') {
+                return { bundleId, displayName, path: appPath }
+              }
+            } catch {
+              // Skip unreadable app bundles
+            }
+            return null
+          }),
+        )
+        for (const app of batchResults) {
+          if (app) allApps.push(app)
         }
       }
       // Deduplicate by bundleId (prefer /Applications over ~/Applications)
@@ -257,16 +301,25 @@ export const apps: AppsAPI = {
   },
 
   async open(bundleId) {
-    await osascript(`tell application id "${bundleId}" to activate`)
+    await osascript(
+      `on run argv
+        tell application id (item 1 of argv) to activate
+      end run`,
+      [bundleId],
+    )
   },
 
   async unhide(bundleIds) {
     for (const bundleId of bundleIds) {
-      await osascript(`
-        tell application "System Events"
-          set visible of application process (name of application process whose bundle identifier is "${bundleId}") to true
-        end tell
-      `)
+      await osascript(
+        `on run argv
+          set targetBundleId to item 1 of argv
+          tell application "System Events"
+            set visible of application process (name of application process whose bundle identifier is targetBundleId) to true
+          end tell
+        end run`,
+        [bundleId],
+      )
     }
   },
 }

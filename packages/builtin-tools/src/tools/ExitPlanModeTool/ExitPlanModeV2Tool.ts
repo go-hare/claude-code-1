@@ -394,7 +394,7 @@ export const ExitPlanModeV2Tool = buildTool({
             : undefined
         const plan = inputPlan ?? getPlan(deps.agentId)
 
-        // Sync disk so VerifyPlanExecution / Read see the edit. Re-snapshot
+        // Sync disk so subsequent Read calls see the approved plan edit. Re-snapshot
         // after: the only other persistFileSnapshotIfRemote call (api.ts) runs
         // in normalizeToolInput, pre-permission — it captured the old plan.
         // 2.1.325 #2268 (SEA `N6s` @284740124): if `plansDirectory` cannot accept

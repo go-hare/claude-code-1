@@ -15,6 +15,7 @@ import {
   logEvent,
 } from '../../services/analytics/index.js'
 
+import { markChromeExtensionNotConnectedReported } from '@claude-code/builtin-tools/tools/OfferChromeSetupTool/OfferChromeSetupTool.js'
 import { getClaudeAIOAuthTokens } from '../auth.js'
 import { enableConfigs, getGlobalConfig, saveGlobalConfig } from '../config.js'
 import { logForDebugging } from '../debug.js'
@@ -124,6 +125,7 @@ export function createChromeContext(
       )
     },
     onToolCallDisconnected: () => {
+      markChromeExtensionNotConnectedReported(true)
       // Local native socket path does NOT require claude.ai login. densable's
       // stock copy mentioned account matching for bridge/Web Store users and
       // misled local unpacked + API-key sessions.

@@ -624,7 +624,7 @@ export async function spawnSpare(opts: {
   await unlink(claimSock).catch(() => {})
 
   const bin = getSpareBinaryArgv()
-  // Official: Bun.spawn([cmd,...,--bg-pty-host,pty,200,50,--,cmd,...,--bg-spare,claim])
+  // Official argv shape: [cmd,...,--bg-pty-host,pty,200,50,--,cmd,...,--bg-spare,claim] (spawned via node:child_process)
   const spawnArgv = [
     ...bin,
     '--bg-pty-host',
