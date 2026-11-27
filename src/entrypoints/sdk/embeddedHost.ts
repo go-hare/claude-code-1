@@ -304,10 +304,14 @@ export function createEmbeddedHost(
 ): EmbeddedHost {
   const tenantId = options.tenantId ?? randomUUID()
   const diskless = Boolean(options.diskless ?? options.ccsTenant ?? false)
+  const ownsStorageV5 =
+    options.storageV5 === undefined &&
+    diskless &&
+    options.autoMemoryStorage !== false
   const storageV5: StorageV5 | undefined =
     options.storageV5 !== undefined
       ? options.storageV5
-      : diskless && options.autoMemoryStorage !== false
+      : ownsStorageV5
         ? createMemoryStorageV5Backend()
         : undefined
   const strictGatewayHosts = options.strictGatewayHosts
@@ -551,6 +555,89 @@ export function createEmbeddedHost(
                 }
               : undefined
 
+          const currentRunner = getRemoteNativeToolRunner(session, tool.name)
+          const effectiveRunner =
+            resolvedRunnerCheckedHere !== undefined &&
+            currentRunner !== undefined &&
+            hasRemoteNativeToolCheck(session, tool.name)
+              ? resolvedRunnerCheckedHere
+              : currentRunner
+
+          if (
+            opts?.permissionCheckedFor !== undefined &&
+            (opts.permissionCheckedFor ?? undefined) !== effectiveRunner
+          ) {
+            throw new NativeToolElsewhereError(
+              `${tool.name} was not run: where it runs changed after its permission was checked. Send the call again.`,
+              'NOT_RUN',
+            )
+          }
+
+          if (effectiveRunner !== undefined) {
+            const dispatchCtx = resolveToolUseContext(deps, callCtx)
+            if (
+              tool.outputSchema !== undefined ||
+              tool.outputSchemaAcrossProcesses !== undefined
+            ) {
+              return (await dispatchRemoteNativeToolCall(
+                tool as unknown as Tool,
+                effectiveRunner,
+                input as Record<string, unknown>,
+                dispatchCtx.abortController.signal,
+                dispatchCtx,
+                execOpts,
+              )) as ToolResult<TOutput>
+            }
+            let remoteResult: Awaited<ReturnType<RemoteNativeToolRunner>>
+            try {
+              remoteResult =
+                (await effectiveRunner(
+                  tool.name,
+                  input,
+                  dispatchCtx.abortController.signal,
+                  dispatchCtx,
+                )) ?? {}
+            } catch (err) {
+              throw normalizeDirectRemoteNativeToolError(err)
+            }
+            remoteResult.afterRead?.ok?.()
+            const rawOutput = remoteResult.output
+            const mergedData = (
+              remoteResult.fieldsFromThisSide === undefined ||
+              rawOutput === null ||
+              typeof rawOutput !== 'object' ||
+              Array.isArray(rawOutput)
+                ? rawOutput
+                : {
+                    ...(rawOutput as Record<string, unknown>),
+                    ...remoteResult.fieldsFromThisSide,
+                  }
+            ) as TOutput
+            const hydrated =
+              tool.fromAnotherProcess?.(
+                mergedData as never,
+                input as never,
+                execOpts,
+                undefined,
+                dispatchCtx.agentId,
+              ) ?? {}
+            const combinedMessages = [
+              ...(hydrated.newMessages ?? []),
+              ...(remoteResult.newMessages ?? []),
+            ]
+            return {
+              data: (hydrated.data ?? mergedData) as TOutput,
+              ...(combinedMessages.length > 0
+                ? { newMessages: combinedMessages }
+                : {}),
+              ...(remoteResult.subagentFrameResult !== undefined
+                ? { subagentFrameResult: remoteResult.subagentFrameResult }
+                : {}),
+            }
+          }
+
+          assertNativeToolCanRunLocally(tool.name, session)
+
           if (typeof tool.call === 'function') {
             const toolUseContext = resolveToolUseContext(deps, callCtx)
             return await tool.call(
@@ -564,64 +651,6 @@ export function createEmbeddedHost(
           }
 
           if (typeof tool.create === 'function') {
-            const currentRunner = getRemoteNativeToolRunner(session, tool.name)
-            const effectiveRunner =
-              resolvedRunnerCheckedHere !== undefined &&
-              currentRunner !== undefined &&
-              hasRemoteNativeToolCheck(session, tool.name)
-                ? resolvedRunnerCheckedHere
-                : currentRunner
-
-            if (
-              opts?.permissionCheckedFor !== undefined &&
-              (opts.permissionCheckedFor ?? undefined) !== effectiveRunner
-            ) {
-              throw new NativeToolElsewhereError(
-                `${tool.name} was not run: where it runs changed after its permission was checked. Send the call again.`,
-                'NOT_RUN',
-              )
-            }
-
-            if (effectiveRunner !== undefined) {
-              const dispatchCtx = resolveToolUseContext(deps, callCtx)
-              if (
-                tool.outputSchema !== undefined ||
-                tool.outputSchemaAcrossProcesses !== undefined
-              ) {
-                return (await dispatchRemoteNativeToolCall(
-                  tool as unknown as Tool,
-                  effectiveRunner,
-                  input as Record<string, unknown>,
-                  dispatchCtx.abortController.signal,
-                  dispatchCtx,
-                  execOpts,
-                )) as ToolResult<TOutput>
-              }
-              let remoteResult: Awaited<ReturnType<RemoteNativeToolRunner>>
-              try {
-                remoteResult =
-                  (await effectiveRunner(
-                    tool.name,
-                    input,
-                    dispatchCtx.abortController.signal,
-                    dispatchCtx,
-                  )) ?? {}
-              } catch (err) {
-                throw normalizeDirectRemoteNativeToolError(err)
-              }
-              return {
-                data: remoteResult.output as TOutput,
-                ...(remoteResult.newMessages !== undefined &&
-                remoteResult.newMessages.length > 0
-                  ? { newMessages: remoteResult.newMessages }
-                  : {}),
-                ...(remoteResult.subagentFrameResult !== undefined
-                  ? { subagentFrameResult: remoteResult.subagentFrameResult }
-                  : {}),
-              }
-            }
-
-            assertNativeToolCanRunLocally(tool.name, session)
             const instance = tool.create(deps)
             return await instance.call(input, callCtx)
           }
@@ -800,6 +829,15 @@ export function createEmbeddedHost(
           })
         } catch (err) {
           recordError(err)
+        }
+
+        // 3b. Close auto-created memory StorageV5 (never close caller-supplied storageV5).
+        if (ownsStorageV5 && storageV5 !== undefined) {
+          try {
+            await storageV5.close()
+          } catch (err) {
+            recordError(err)
+          }
         }
 
         // 4. Release shared-backend lease cleanly (idempotent).

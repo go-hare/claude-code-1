@@ -1251,17 +1251,25 @@ export const SDKControlRemoteToolsAnnounceRequestSchema = lazySchema(() =>
     .object({
       subtype: z.literal('remote_tools_announce'),
       instance_id: z.string().min(1),
-      host_name: z.string().min(1),
+      host: z.object({
+        name: z.string().min(1),
+        epoch: z.string().min(1),
+        home_dir: z.string().min(1).max(1024).optional(),
+      }),
       tools: z.array(
-        z.union([
-          z.string().min(1),
+        z.object({
+          name: z.string().min(1),
+          protocol_versions: z.array(z.number().int().positive()).optional(),
+        }),
+      ),
+      passthrough: z
+        .array(
           z.object({
             name: z.string().min(1),
-            protocol_versions: z.array(z.number().int()).optional(),
           }),
-        ]),
-      ),
-      protocol_versions: z.array(z.number().int()).optional(),
+        )
+        .optional(),
+      plumbing: z.array(z.string().min(1)).optional(),
     })
     .describe('Announces remote tools served by a connected host machine.'),
 )
@@ -1306,7 +1314,7 @@ export const SDKControlSelectChromeBrowserRequestSchema = lazySchema(() =>
   z
     .object({
       subtype: z.literal('select_chrome_browser'),
-      browser_id: z.string().min(1),
+      device_id: z.string().min(1),
     })
     .describe('Selects the active Chrome browser instance.'),
 )
@@ -1315,7 +1323,9 @@ export const SDKControlSetChromeBrowserHintsRequestSchema = lazySchema(() =>
   z
     .object({
       subtype: z.literal('set_chrome_browser_hints'),
-      hints: z.record(z.string(), z.unknown()),
+      localDeviceIds: z.array(z.string().min(1)).max(32),
+      preferredDeviceId: z.string().min(1).nullable().optional(),
+      hostPlatform: z.enum(['darwin', 'win32', 'linux']).optional(),
     })
     .describe('Sets preferred Chrome browser pairing hints.'),
 )
@@ -1435,8 +1445,8 @@ export const SDKControlReadFileRequestSchema = lazySchema(() =>
     .object({
       subtype: z.literal('read_file'),
       path: z.string().min(1),
-      offset: z.number().int().nonnegative().optional(),
-      limit: z.number().int().positive().optional(),
+      max_bytes: z.number().int().positive().optional(),
+      encoding: z.enum(['base64', 'utf-8']).optional(),
     })
     .describe('Reads a workspace file over the control channel.'),
 )

@@ -899,6 +899,9 @@ export async function runWithCrossProcessAuthRefreshLock(
   run: () => Promise<boolean>,
   opts?: { lockDir?: string; pollMs?: number; maxWaitMs?: number },
 ): Promise<boolean> {
+  if (isDisklessActive()) {
+    return await run()
+  }
   const lockDir = opts?.lockDir ?? getClaudeConfigHomeDir()
   const lockPath = join(lockDir, `.${kind}-auth-refresh.lock`)
   const donePath = join(lockDir, `.${kind}-auth-refresh.done`)

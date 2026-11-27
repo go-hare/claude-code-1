@@ -1730,6 +1730,9 @@ export async function discoverSkillDirsForPaths(
   cwd: string,
   trustedCwdInfo?: { cwd: string; workTree: string },
 ): Promise<string[]> {
+  if (isDisklessActive()) {
+    return []
+  }
   // #1812: Suppress nested `.claude/skills` auto-loading when Bash sandbox is on.
   if (shouldWithholdNestedSkillDiscovery()) {
     return []

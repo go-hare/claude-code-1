@@ -104,6 +104,7 @@ type ConfigHostState = {
     | ((curr: { mtimeMs: number; size: number }) => void)
     | undefined
   configReadingAllowed: boolean
+  disklessWriteChain: Promise<void>
 }
 
 const configStateByHost = new HostSlot<ConfigHostState>(() => ({
@@ -130,6 +131,7 @@ const configStateByHost = new HostSlot<ConfigHostState>(() => ({
   freshnessWatchedFile: undefined,
   freshnessWatcherListener: undefined,
   configReadingAllowed: defaultConfigReadingAllowed,
+  disklessWriteChain: Promise.resolve(),
 }))
 
 function getConfigHostState(): ConfigHostState {
@@ -1544,9 +1546,10 @@ export function saveGlobalConfig(
     const current =
       hostState.globalConfigCache.config ?? createDefaultGlobalConfig()
     const next = updater(current)
-    if (next !== current) {
-      writeThroughGlobalConfigCache(next)
+    if (next === current) {
+      return true
     }
+    writeThroughGlobalConfigCache(next)
     const rawStorage = _storageV5 ?? getRegisteredPinnedStorageV5()
     const storage =
       rawStorage !== null &&
@@ -1562,13 +1565,15 @@ export function saveGlobalConfig(
           jsonStringify(value) !==
           jsonStringify(defaults[key as keyof GlobalConfig]),
       )
-      void storage
-        .write(
-          { namespace: 'globalConfig' },
-          jsonStringify(filtered, null, 2),
-          {
-            precondition: { type: 'none' },
-          },
+      const payload = jsonStringify(filtered, null, 2)
+      hostState.disklessWriteChain = hostState.disklessWriteChain
+        .catch(() => {})
+        .then(() =>
+          storage
+            .write({ namespace: 'globalConfig' }, payload, {
+              precondition: { type: 'none' },
+            })
+            .then(() => undefined),
         )
         .catch(() => {})
       return true
@@ -2056,6 +2061,9 @@ export function getAutoScrollEnabled(): boolean {
  * getGlobalConfig() last loaded. Does not write-through the cache.
  */
 export function readGlobalConfigFromDisk(): GlobalConfig | undefined {
+  if (isDisklessActive()) {
+    return getGlobalConfig()
+  }
   if (process.env.NODE_ENV === 'test') {
     return TEST_GLOBAL_CONFIG_FOR_TESTING
   }
@@ -2499,6 +2507,32 @@ function asStorageV5TextReader(
 export async function readStoredRemoteHomeSettingsMode(
   storageV5?: unknown,
 ): Promise<{ mode: RemoteHomeSettingsMode | undefined } | null> {
+  if (isDisklessActive()) {
+    const hostState = getConfigHostState()
+    await hostState.disklessWriteChain.catch(() => {})
+    const reader = asStorageV5TextReader(
+      storageV5 ?? getRegisteredPinnedStorageV5(),
+    )
+    if (!reader) {
+      return { mode: getRemoteHomeSettingsMode() }
+    }
+    const s = await reader.readText([{ namespace: 'globalConfig' }])
+    if (!s.ok) throw new Error('global config not readable through storage')
+    const item = s.value.items[0]
+    if (!item?.found || item.value === undefined) return null
+    const parsed = safeParseJSON(item.value)
+    if (typeof parsed !== 'object' || parsed === null) {
+      throw new Error('global config not parseable')
+    }
+    const record = parsed as Record<string, unknown>
+    return {
+      mode: parseRemoteHomeSettingsMode(
+        'remoteHomeSettingsMode' in record
+          ? record.remoteHomeSettingsMode
+          : undefined,
+      ),
+    }
+  }
   if (process.env.NODE_ENV === 'test') {
     return { mode: getRemoteHomeSettingsMode() }
   }
@@ -2872,6 +2906,23 @@ export function enableConfigs(storageV5?: StorageV5): void {
   const hostState = getConfigHostState()
   if (!hasActiveSessionAls()) {
     defaultConfigReadingAllowed = true
+  }
+  if (isDisklessActive()) {
+    hostState.configReadingAllowed = true
+    const rawStorage = storageV5 ?? getRegisteredPinnedStorageV5()
+    const effectiveStorage =
+      rawStorage !== null &&
+      typeof rawStorage === 'object' &&
+      typeof (rawStorage as { read?: unknown }).read === 'function'
+        ? (rawStorage as StorageV5)
+        : undefined
+    if (effectiveStorage !== undefined) {
+      hostState.reloadThroughStorageOwed = false
+      hostState.reloadThroughStoragePromise =
+        refreshGlobalConfigFromStorage(effectiveStorage)
+      void hostState.reloadThroughStoragePromise
+    }
+    return
   }
   if (hostState.configReadingAllowed) {
     // Official `h3t` (#1662): when called again once StorageV5 is handed in,
@@ -3579,7 +3630,7 @@ function createGetProjectPathForConfig() {
 export const getProjectPathForConfig = createGetProjectPathForConfig()
 
 export function getCurrentProjectConfig(): ProjectConfig {
-  if (process.env.NODE_ENV === 'test') {
+  if (!isDisklessActive() && process.env.NODE_ENV === 'test') {
     return TEST_PROJECT_CONFIG_FOR_TESTING
   }
 
@@ -3609,6 +3660,24 @@ export function saveCurrentProjectConfig(
    */
   _storageV5?: unknown,
 ): boolean {
+  if (isDisklessActive()) {
+    const absolutePath = getProjectPathForConfig()
+    return saveGlobalConfig(current => {
+      const currentProjectConfig =
+        current.projects?.[absolutePath] ?? DEFAULT_PROJECT_CONFIG
+      const newProjectConfig = updater(currentProjectConfig)
+      if (newProjectConfig === currentProjectConfig) {
+        return current
+      }
+      return {
+        ...current,
+        projects: {
+          ...current.projects,
+          [absolutePath]: newProjectConfig,
+        },
+      }
+    }, _storageV5)
+  }
   void _storageV5
   if (process.env.NODE_ENV === 'test') {
     const config = updater(TEST_PROJECT_CONFIG_FOR_TESTING)

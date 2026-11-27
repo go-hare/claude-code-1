@@ -2623,7 +2623,11 @@ export function dispatchPrintControlExtra(
           return
         }
         const deviceId =
-          typeof request.device_id === 'string' ? request.device_id : ''
+          typeof request.device_id === 'string'
+            ? request.device_id
+            : typeof request.browser_id === 'string'
+              ? request.browser_id
+              : ''
         const result = await callMCPToolWithUrlElicitationRetry({
           client: chrome as never,
           clientConnection: chrome as never,
@@ -3357,6 +3361,10 @@ export function dispatchPrintControlExtra(
   }
 
   if (subtype === 'turn_handoff') {
+    if (trustLevel === 'refused') {
+      deps.sendError(NOT_AVAILABLE_ON_CONNECTION(subtype))
+      return true
+    }
     const admission =
       deps.turnHandoffAdmission ??
       resolveTurnHandoffAdmission({
@@ -3980,6 +3988,21 @@ export function dispatchPrintControlExtra(
   if (subtype === 'worker_shutting_down') {
     if (trustLevel === 'refused') {
       deps.sendError(NOT_AVAILABLE_ON_CONNECTION(subtype))
+      return true
+    }
+    const admission =
+      deps.turnHandoffAdmission ??
+      resolveTurnHandoffAdmission({
+        sdkUrl: deps.getSdkUrl?.(),
+        remoteSessionId: process.env.CLAUDE_CODE_REMOTE_SESSION_ID,
+        environmentKind: process.env.CLAUDE_CODE_ENVIRONMENT_KIND,
+        disabled:
+          process.env.CLAUDE_CODE_DISABLE_TURN_HANDOFF === '1' ||
+          process.env.CLAUDE_CODE_DISABLE_TURN_HANDOFF === 'true',
+        sharedBackend: isSharedBackend(),
+      })
+    if (!admission.admitted && !isSharedBackend()) {
+      deps.sendError(`${TURN_HANDOFF_DISABLED_PREFIX}${admission.reason}`)
       return true
     }
     const manager = getTurnHandoffManager()

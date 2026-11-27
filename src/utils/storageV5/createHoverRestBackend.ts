@@ -20,15 +20,18 @@ import type {
   StorageV5ScopeKind,
 } from './createLocalFsBackend.js'
 import type { HostFilesResult, LocalHostFiles } from './createLocalHostFiles.js'
-import type {
-  ResolveKeyHit,
-  ResolveKeyOpts,
-  StorageV5EditCurrent,
-  StorageV5EditDecision,
+import {
+  type ResolveKeyHit,
+  type ResolveKeyOpts,
+  type StorageV5EditCurrent,
+  type StorageV5EditDecision,
+  stagingScopeBesidePf,
+  stagingScopeWithinLf,
 } from './storageHbMutate.js'
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
 const DEFAULT_TIMEOUT_MS = 30_000
+const DEFAULT_MAX_RESPONSE_BODY_BYTES = 32 * 1024 * 1024
 const TEXT_ENCODER = new TextEncoder()
 const TEXT_DECODER = new TextDecoder()
 
@@ -40,6 +43,8 @@ export type HoverRestBackendOptions = {
     init?: RequestInit,
   ) => Promise<Response>
   defaultTimeoutMs?: number
+  maxResponseBodyBytes?: number
+  servesHostFiles?: boolean | ((path: string) => boolean)
   headers?: Record<string, string>
   configHome?: string
   globalConfigFile?: string
@@ -177,6 +182,57 @@ function isAbortOrTimeoutError(error: unknown): boolean {
   return error.name === 'TimeoutError' || error.name === 'AbortError'
 }
 
+async function readResponseTextBounded(
+  response: Response,
+  maxBytes: number,
+): Promise<StorageV5Result<string>> {
+  try {
+    const body = response.body
+    if (body && typeof body.getReader === 'function') {
+      const reader = body.getReader()
+      const chunks: Uint8Array[] = []
+      let totalBytes = 0
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          const chunk =
+            value instanceof Uint8Array
+              ? value
+              : typeof value === 'string'
+                ? TEXT_ENCODER.encode(value)
+                : new Uint8Array(value)
+          totalBytes += chunk.byteLength
+          if (totalBytes > maxBytes) {
+            await reader.cancel().catch(() => {})
+            return fail('TooLarge', { telemetryCode: 'RESPONSE_TOO_LARGE' })
+          }
+          chunks.push(chunk)
+        }
+      } finally {
+        reader.releaseLock()
+      }
+      const merged = new Uint8Array(totalBytes)
+      let offset = 0
+      for (const chunk of chunks) {
+        merged.set(chunk, offset)
+        offset += chunk.byteLength
+      }
+      return ok(TEXT_DECODER.decode(merged))
+    }
+    const text = await response.text()
+    if (Buffer.byteLength(text, 'utf8') > maxBytes) {
+      return fail('TooLarge', { telemetryCode: 'RESPONSE_TOO_LARGE' })
+    }
+    return ok(text)
+  } catch (error) {
+    if (isAbortOrTimeoutError(error)) {
+      return fail('Unavailable', { telemetryCode: 'TIMEOUT' })
+    }
+    return fail('IoError', { telemetryCode: 'BODY_READ_ERROR' })
+  }
+}
+
 export function createHoverRestBackend(
   options: HoverRestBackendOptions,
 ): StorageV5 {
@@ -187,6 +243,24 @@ export function createHoverRestBackend(
       // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
       fetch(input, init))
   const defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS
+  if (!Number.isFinite(defaultTimeoutMs) || defaultTimeoutMs <= 0) {
+    throw new Error(
+      `Hover REST defaultTimeoutMs must be a positive finite number (got ${String(options.defaultTimeoutMs)})`,
+    )
+  }
+  const maxResponseBodyBytes =
+    options.maxResponseBodyBytes ?? DEFAULT_MAX_RESPONSE_BODY_BYTES
+  if (!Number.isFinite(maxResponseBodyBytes) || maxResponseBodyBytes <= 0) {
+    throw new Error(
+      `Hover REST maxResponseBodyBytes must be a positive finite number (got ${String(options.maxResponseBodyBytes)})`,
+    )
+  }
+  const servesHostFilesFn: (path: string) => boolean =
+    typeof options.servesHostFiles === 'function'
+      ? options.servesHostFiles
+      : options.servesHostFiles === true
+        ? () => true
+        : () => false
   const clock = options.clock ?? (() => Date.now())
   const instanceId = `hover-rest-v5-${randomUUID()}`
   const roots: StorageV5['roots'] = {
@@ -210,6 +284,7 @@ export function createHoverRestBackend(
   async function postJson<T>(
     endpoint: string,
     payload: unknown,
+    requestOpts?: { allowEmpty?: boolean },
   ): Promise<StorageV5Result<T>> {
     if (closed) {
       return fail('Closed')
@@ -256,8 +331,16 @@ export function createHoverRestBackend(
       return fail('IoError', { telemetryCode: 'NETWORK_ERROR' })
     }
 
+    const bodyRes = await readResponseTextBounded(
+      response,
+      maxResponseBodyBytes,
+    )
+    if (!bodyRes.ok) {
+      return bodyRes
+    }
+    const text = bodyRes.value
+
     let parsedBody: unknown
-    const text = await response.text().catch(() => '')
     if (text.trim().length > 0) {
       try {
         parsedBody = JSON.parse(text)
@@ -283,6 +366,9 @@ export function createHoverRestBackend(
     // Support both raw REST payloads and explicit `{ ok, value | error }` envelopes
     if (isRecord(parsedBody) && typeof parsedBody.ok === 'boolean') {
       if (parsedBody.ok) {
+        if (!requestOpts?.allowEmpty && !isRecord(parsedBody.value)) {
+          return fail('IoError', { telemetryCode: 'EMPTY_RESPONSE' })
+        }
         return ok(parsedBody.value as T)
       }
       const details = extractErrorDetails(parsedBody)
@@ -292,14 +378,22 @@ export function createHoverRestBackend(
       })
     }
 
+    if (
+      !requestOpts?.allowEmpty &&
+      (text.trim().length === 0 || !isRecord(parsedBody))
+    ) {
+      return fail('IoError', { telemetryCode: 'EMPTY_RESPONSE' })
+    }
+
     return ok(parsedBody as T)
   }
 
   async function postHostFiles<T>(
     endpoint: string,
     payload: unknown,
+    requestOpts?: { allowEmpty?: boolean },
   ): Promise<HostFilesResult<T>> {
-    const res = await postJson<T>(endpoint, payload)
+    const res = await postJson<T>(endpoint, payload, requestOpts)
     if (!res.ok) {
       return {
         ok: false,
@@ -318,8 +412,8 @@ export function createHoverRestBackend(
   }
 
   const hostFiles: LocalHostFiles = {
-    serves: () => false,
-    serving: () => 'absent',
+    serves: space => !closed && servesHostFilesFn(space),
+    serving: space => (!closed && servesHostFilesFn(space) ? 'host' : 'absent'),
     readText: async path =>
       await postHostFiles('/v5/host-files/read-text', { path }),
     readBytes: async path => {
@@ -334,6 +428,12 @@ export function createHoverRestBackend(
           }
       >('/v5/host-files/read-bytes', { path })
       if (!res.ok) return res
+      if (!isRecord(res.value)) {
+        return {
+          ok: false,
+          error: { code: 'IoError', telemetryCode: 'INVALID_RESPONSE' },
+        }
+      }
       if (!res.value.found) return { ok: true, value: { found: false } }
       const decoded = decodeBytesField(
         res.value.value,
@@ -375,7 +475,11 @@ export function createHoverRestBackend(
     access: async (path, opts) =>
       await postHostFiles('/v5/host-files/access', { path, opts }),
     rename: async (from, to) =>
-      await postHostFiles('/v5/host-files/rename', { from, to }),
+      await postHostFiles(
+        '/v5/host-files/rename',
+        { from, to },
+        { allowEmpty: true },
+      ),
     delete: async (path, opts) =>
       await postHostFiles('/v5/host-files/delete', { path, opts }),
     realPath: async path =>
@@ -580,10 +684,18 @@ export function createHoverRestBackend(
         expiresAtMs: number
       }>('/v5/leases/acquire', { target, ttlMs, opts })
       if (!res.ok) return res
+      if (
+        !isRecord(res.value) ||
+        typeof res.value.holder !== 'string' ||
+        typeof res.value.expiresAtMs !== 'number'
+      ) {
+        return fail('IoError', { telemetryCode: 'INVALID_RESPONSE' })
+      }
 
       let expiresAtMs = res.value.expiresAtMs
       const holder = res.value.holder
-      const leaseId = res.value.leaseId
+      const leaseId =
+        typeof res.value.leaseId === 'string' ? res.value.leaseId : undefined
 
       const handle: StorageV5LeaseHandle = {
         get expiresAtMs(): number {
@@ -602,17 +714,26 @@ export function createHoverRestBackend(
               ttlMs: nextTtlMs,
             },
           )
-          if (renewRes.ok) {
-            expiresAtMs = renewRes.value.expiresAtMs
+          if (!renewRes.ok) return renewRes
+          if (
+            !isRecord(renewRes.value) ||
+            typeof renewRes.value.expiresAtMs !== 'number'
+          ) {
+            return fail('IoError', { telemetryCode: 'INVALID_RESPONSE' })
           }
+          expiresAtMs = renewRes.value.expiresAtMs
           return renewRes
         },
         async release(): Promise<StorageV5Result<void>> {
-          const releaseRes = await postJson<unknown>('/v5/leases/release', {
-            target,
-            holder,
-            ...(leaseId !== undefined ? { leaseId } : {}),
-          })
+          const releaseRes = await postJson<unknown>(
+            '/v5/leases/release',
+            {
+              target,
+              holder,
+              ...(leaseId !== undefined ? { leaseId } : {}),
+            },
+            { allowEmpty: true },
+          )
           if (!releaseRes.ok) return releaseRes
           return ok(undefined)
         },
@@ -722,10 +843,45 @@ export function createHoverRestBackend(
     ): Promise<
       StorageV5Result<{ items: StorageV5ListEntry[]; cursor?: unknown }>
     > {
-      return await postJson<{ items: StorageV5ListEntry[]; cursor?: unknown }>(
-        '/v5/scopes/list-recursive',
-        { scope, opts },
-      )
+      const res = await postJson<{
+        items: Array<
+          StorageV5ListEntry & {
+            value?: unknown
+            valueBase64?: string
+            encoding?: string
+          }
+        >
+        cursor?: unknown
+      }>('/v5/scopes/list-recursive', { scope, opts })
+      if (!res.ok) return res
+      if (!isRecord(res.value) || !Array.isArray(res.value.items)) {
+        return fail('IoError', { telemetryCode: 'INVALID_RESPONSE' })
+      }
+      if (!opts?.includeValue) {
+        return ok({
+          items: res.value.items,
+          ...(res.value.cursor !== undefined
+            ? { cursor: res.value.cursor }
+            : {}),
+        })
+      }
+      const items = res.value.items.map(rawItem => {
+        if (
+          rawItem.value === undefined &&
+          typeof rawItem.valueBase64 !== 'string'
+        ) {
+          return rawItem
+        }
+        const { value, valueBase64, encoding, ...rest } = rawItem
+        return {
+          ...rest,
+          value: decodeBytesField(value, encoding, valueBase64),
+        } as StorageV5ListEntry
+      })
+      return ok({
+        items,
+        ...(res.value.cursor !== undefined ? { cursor: res.value.cursor } : {}),
+      })
     },
 
     async resolveKey(
@@ -793,13 +949,11 @@ export function createHoverRestBackend(
     },
 
     stagingScopeBeside(scope: unknown): Record<string, unknown> {
-      const rec = isRecord(scope) ? scope : {}
-      return { ...rec, staging: `beside-${randomUUID()}` }
+      return stagingScopeBesidePf(scope)
     },
 
     stagingScopeWithin(scope: unknown): Record<string, unknown> {
-      const rec = isRecord(scope) ? scope : {}
-      return { ...rec, staging: `within-${randomUUID()}` }
+      return stagingScopeWithinLf(scope)
     },
 
     async replaceRecords(
@@ -871,20 +1025,41 @@ export function createHoverRestBackend(
       },
     ): Promise<StorageV5Result<{ bytes: number; version?: string }>> {
       if (closed) return fail('Closed')
+      if (
+        opts === null ||
+        typeof opts !== 'object' ||
+        typeof opts.maxBytes !== 'number' ||
+        !Number.isFinite(opts.maxBytes) ||
+        opts.maxBytes < 0
+      ) {
+        return fail('InvalidArgument', { argument: 'opts.maxBytes' })
+      }
+      if (
+        body === null ||
+        typeof body !== 'object' ||
+        typeof body[Symbol.asyncIterator] !== 'function'
+      ) {
+        return fail('InvalidArgument', { argument: 'body' })
+      }
       const chunks: Uint8Array[] = []
       let total = 0
-      for await (const chunk of body) {
-        const bytes =
-          chunk instanceof Uint8Array
-            ? chunk
-            : typeof chunk === 'string'
-              ? TEXT_ENCODER.encode(chunk)
-              : null
-        if (!bytes) return fail('InvalidArgument', { argument: 'body' })
-        total += bytes.byteLength
-        if (total > opts.maxBytes) return fail('TooLarge')
-        chunks.push(bytes)
+      try {
+        for await (const chunk of body) {
+          const bytes =
+            chunk instanceof Uint8Array
+              ? chunk
+              : typeof chunk === 'string'
+                ? TEXT_ENCODER.encode(chunk)
+                : null
+          if (!bytes) return fail('InvalidArgument', { argument: 'body' })
+          total += bytes.byteLength
+          if (total > opts.maxBytes) return fail('TooLarge')
+          chunks.push(bytes)
+        }
+      } catch {
+        return fail('IoError')
       }
+      if (closed) return fail('Closed')
       const out = new Uint8Array(total)
       let pos = 0
       for (const chunk of chunks) {
@@ -897,7 +1072,15 @@ export function createHoverRestBackend(
         mode: opts.mode,
       })
       if (!writeRes.ok) return writeRes
-      return ok({ bytes: out.byteLength, version: writeRes.value.version })
+      if (!isRecord(writeRes.value)) {
+        return fail('IoError', { telemetryCode: 'INVALID_RESPONSE' })
+      }
+      return ok({
+        bytes: out.byteLength,
+        ...(typeof writeRes.value.version === 'string'
+          ? { version: writeRes.value.version }
+          : {}),
+      })
     },
 
     async close(): Promise<StorageV5Result<void>> {
@@ -949,6 +1132,9 @@ export function createHoverRestBackend(
     > {
       const readRes = await backend.read([key as StorageV5ReadReq])
       if (!readRes.ok) return readRes
+      if (!isRecord(readRes.value) || !Array.isArray(readRes.value.items)) {
+        return fail('IoError', { telemetryCode: 'INVALID_RESPONSE' })
+      }
       const item = readRes.value.items[0]
       const found = Boolean(item?.found && item.value !== undefined)
       const current: StorageV5EditCurrent<Uint8Array> | undefined =
@@ -960,15 +1146,43 @@ export function createHoverRestBackend(
             }
           : undefined
 
-      const decision = edit(current)
-      if ('skip' in decision) {
+      let decision: unknown
+      try {
+        decision = edit(current)
+      } catch {
+        return fail('Failed', { argument: 'edit' })
+      }
+      if (!isRecord(decision)) {
+        return fail('InvalidArgument', { argument: 'edit' })
+      }
+      if ('then' in decision && typeof decision.then === 'function') {
+        Promise.resolve(decision).catch(() => {})
+        return fail('InvalidArgument', { argument: 'edit' })
+      }
+      const hasWrite = 'write' in decision
+      const hasSkip = 'skip' in decision
+      if (hasWrite === hasSkip) {
+        return fail('InvalidArgument', { argument: 'edit' })
+      }
+      if (hasSkip) {
+        if (decision.skip !== true) {
+          return fail('InvalidArgument', { argument: 'edit' })
+        }
         return ok({ written: false, found, version: item?.version })
+      }
+      if (
+        typeof decision.write !== 'string' &&
+        !(decision.write instanceof Uint8Array)
+      ) {
+        return fail('InvalidArgument', { argument: 'edit' })
       }
 
       const precondition =
         opts?.precondition ??
-        (found && item?.version !== undefined
-          ? { type: 'ifMatch', version: item.version }
+        (found
+          ? item?.version !== undefined
+            ? { type: 'ifMatch', version: item.version }
+            : { type: 'exists' }
           : { type: 'ifAbsent' })
 
       const writeRes = await backend.write(key, decision.write, {
@@ -977,7 +1191,16 @@ export function createHoverRestBackend(
         precondition,
       })
       if (!writeRes.ok) return writeRes
-      return ok({ written: true, found, version: writeRes.value.version })
+      if (!isRecord(writeRes.value)) {
+        return fail('IoError', { telemetryCode: 'INVALID_RESPONSE' })
+      }
+      return ok({
+        written: true,
+        found,
+        ...(typeof writeRes.value.version === 'string'
+          ? { version: writeRes.value.version }
+          : {}),
+      })
     },
 
     async updateText(
@@ -1101,6 +1324,9 @@ export function createHoverRestBackend(
     ): Promise<StorageV5Result<Array<Record<string, unknown>>>> {
       const res = await backend.listRecursive(scope)
       if (!res.ok) return res
+      if (!isRecord(res.value) || !Array.isArray(res.value.items)) {
+        return fail('IoError', { telemetryCode: 'INVALID_RESPONSE' })
+      }
       const keys = res.value.items
         .map(item => item.key)
         .filter((k): k is Record<string, unknown> => k !== undefined)

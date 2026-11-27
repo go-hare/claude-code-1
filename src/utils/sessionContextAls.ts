@@ -171,7 +171,7 @@ export function runWithNewHostSession<T>(
     opts.originalCwd ??
     opts.cwd ??
     opts.projectRoot ??
-    resolveDefaultSessionCwd()
+    (opts.diskless === true ? '/workspace' : resolveDefaultSessionCwd())
   const originalCwd = (opts.originalCwd ?? baseCwd).normalize('NFC')
   const projectRoot = (opts.projectRoot ?? originalCwd).normalize('NFC')
   const sessionCwd = (opts.cwd ?? originalCwd).normalize('NFC')

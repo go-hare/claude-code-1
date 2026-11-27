@@ -7,6 +7,7 @@ import {
 import { isToolServerDaemonMode } from '../../services/mcp/sessionTunnel.js'
 import { registerCleanup } from '../cleanupRegistry.js'
 import { logForDebugging } from '../debug.js'
+import { isDisklessActive } from '../disklessGuards.js'
 import { errorMessage } from '../errors.js'
 import {
   executeCwdChangedHooks,
@@ -315,7 +316,7 @@ function createHostFileChangedWatcher(): HostFileChangedWatcher {
   }
 
   function updateWatchPaths(paths: string[]): void {
-    if (isToolServerDaemonMode()) return
+    if (isToolServerDaemonMode() || isDisklessActive()) return
     if (!initialized) return
     // densable: store pre-filter dynamic list; resolveWatchPaths re-filters
     const sorted = paths.slice().sort()
@@ -364,9 +365,11 @@ function createHostFileChangedWatcher(): HostFileChangedWatcher {
       notifyCallback = cb
     },
     initializeFileChangedWatcher(cwd: string) {
-      if (isToolServerDaemonMode()) {
+      if (isToolServerDaemonMode() || isDisklessActive()) {
         logForDebugging(
-          'FileChanged: skipping watcher because claude mcp serve --transport http never runs them (intended)',
+          isDisklessActive()
+            ? 'FileChanged: skipping watcher in a diskless session'
+            : 'FileChanged: skipping watcher because claude mcp serve --transport http never runs them (intended)',
         )
         return
       }
@@ -390,9 +393,11 @@ function createHostFileChangedWatcher(): HostFileChangedWatcher {
     },
     updateWatchPaths,
     async onCwdChangedForHooks(oldCwd: string, newCwd: string): Promise<void> {
-      if (isToolServerDaemonMode()) {
+      if (isToolServerDaemonMode() || isDisklessActive()) {
         logForDebugging(
-          'CwdChanged: skipping hooks because claude mcp serve --transport http never runs them (intended)',
+          isDisklessActive()
+            ? 'CwdChanged: skipping hooks in a diskless session'
+            : 'CwdChanged: skipping hooks because claude mcp serve --transport http never runs them (intended)',
         )
         return
       }

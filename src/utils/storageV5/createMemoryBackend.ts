@@ -21,12 +21,15 @@ import {
 } from './createLocalFsBackend.js'
 import type { HostFilesResult, LocalHostFiles } from './createLocalHostFiles.js'
 import { resolveScopeListDirectories } from './listEntriesZa.js'
-import type {
-  ResolveKeyHit,
-  ResolveKeyOpts,
-  StorageV5EditCurrent,
-  StorageV5EditDecision,
+import {
+  type ResolveKeyHit,
+  type ResolveKeyOpts,
+  type StorageV5EditCurrent,
+  type StorageV5EditDecision,
+  stagingScopeBesidePf,
+  stagingScopeWithinLf,
 } from './storageHbMutate.js'
+import { validateStorageScope } from './writeValidate.js'
 
 const TEXT_ENCODER = new TextEncoder()
 const TEXT_DECODER = new TextDecoder()
@@ -417,9 +420,61 @@ export function createMemoryStorageV5Backend(
   function resolveScopeDirs(scope: unknown): string[] | null {
     const rec = asRecord(scope)
     if (!rec || typeof rec.namespace !== 'string') return null
+    if (validateStorageScope(rec) !== undefined) return null
     const pages = resolveScopeListDirectories(roots, rec)
     if (pages.length === 0) return null
-    return pages.map(page => normalizeVirtualPath(page.directory))
+    const dirs = pages.map(page => normalizeVirtualPath(page.directory))
+    if (
+      dirs.some(
+        dir =>
+          dir === '/' || dir === configHome || !isUnderDir(dir, configHome),
+      )
+    ) {
+      return null
+    }
+    return dirs
+  }
+
+  function matchesLeaseScope(scope: unknown, target: unknown): boolean {
+    if (scope === undefined || scope === null) return true
+    const scopeDirs = resolveScopeDirs(scope)
+    if (scopeDirs) {
+      const targetPath = resolveKeyPath(target)
+      if (targetPath !== null) {
+        return scopeDirs.some(
+          dir => targetPath === dir || isUnderDir(targetPath, dir),
+        )
+      }
+      const targetDirs = resolveScopeDirs(target)
+      if (targetDirs) {
+        return targetDirs.some(td =>
+          scopeDirs.some(dir => td === dir || isUnderDir(td, dir)),
+        )
+      }
+      return false
+    }
+    const scopeKeyPath = resolveKeyPath(scope)
+    if (scopeKeyPath !== null) {
+      const targetPath = resolveKeyPath(target)
+      return (
+        targetPath !== null &&
+        (targetPath === scopeKeyPath || isUnderDir(targetPath, scopeKeyPath))
+      )
+    }
+    const scopeRec = asRecord(scope)
+    const targetRec = asRecord(target)
+    if (scopeRec && targetRec) {
+      for (const [k, v] of Object.entries(scopeRec)) {
+        if (v === undefined) continue
+        if (
+          canonicalizeLeaseTarget(targetRec[k]) !== canonicalizeLeaseTarget(v)
+        ) {
+          return false
+        }
+      }
+      return true
+    }
+    return canonicalizeLeaseTarget(target) === canonicalizeLeaseTarget(scope)
   }
 
   function checkClosed(): StorageV5Result<never> | undefined {
@@ -823,12 +878,11 @@ export function createMemoryStorageV5Backend(
       return ok(handle)
     },
 
-    async listLeases(_scope: unknown): Promise<
+    async listLeases(scope: unknown): Promise<
       StorageV5Result<{
         items: Array<{ target: unknown; holder: string; expiresAtMs: number }>
       }>
     > {
-      void _scope
       const closedErr = checkClosed()
       if (closedErr) return closedErr
       const now = clock()
@@ -840,6 +894,9 @@ export function createMemoryStorageV5Backend(
       for (const [key, lease] of leases.entries()) {
         if (lease.expiresAtMs <= now) {
           leases.delete(key)
+          continue
+        }
+        if (!matchesLeaseScope(scope, lease.target)) {
           continue
         }
         items.push({
@@ -907,19 +964,24 @@ export function createMemoryStorageV5Backend(
         return ok({ items: [] })
       }
       const list = getOrInitStream(path)
+      const isBackward = opts?.order === 'backward'
       let filtered = list.filter(rec => {
-        if (opts?.fromSeq !== undefined && rec.seq < opts.fromSeq) {
-          return false
+        if (opts?.fromSeq !== undefined) {
+          return isBackward ? rec.seq <= opts.fromSeq : rec.seq >= opts.fromSeq
         }
         return true
       })
-      if (opts?.order === 'backward') {
+      if (isBackward) {
         filtered = [...filtered].reverse()
       }
       const items: StorageV5RecordItem[] = []
       let usedBytes = 0
+      let stoppedEarly = false
       for (const rec of filtered) {
-        if (opts?.limit !== undefined && items.length >= opts.limit) break
+        if (opts?.limit !== undefined && items.length >= opts.limit) {
+          stoppedEarly = true
+          break
+        }
         let data = rec.data.slice()
         let truncated = false
         if (
@@ -934,6 +996,7 @@ export function createMemoryStorageV5Backend(
           items.length > 0 &&
           usedBytes + data.byteLength > opts.maxBytes
         ) {
+          stoppedEarly = true
           break
         }
         usedBytes += data.byteLength
@@ -947,8 +1010,26 @@ export function createMemoryStorageV5Backend(
           ...(rec.tombstoned ? { tombstoned: true } : {}),
         })
       }
-      const lastSeq = list.length > 0 ? list[list.length - 1]!.endSeq + 1 : 1
-      return ok({ items, nextSeq: lastSeq })
+      let nextSeq: number | undefined
+      if (isBackward) {
+        if (stoppedEarly && items.length > 0) {
+          const oldestReturnedSeq = items[items.length - 1]!.seq
+          nextSeq = oldestReturnedSeq > 1 ? oldestReturnedSeq - 1 : undefined
+        } else {
+          nextSeq = undefined
+        }
+      } else if (stoppedEarly && items.length > 0) {
+        const lastReturned = items[items.length - 1]!
+        nextSeq = (lastReturned.endSeq ?? lastReturned.seq) + 1
+      } else if (stoppedEarly && items.length === 0) {
+        nextSeq = filtered.length > 0 ? filtered[0]!.seq : (opts?.fromSeq ?? 1)
+      } else {
+        nextSeq = list.length > 0 ? list[list.length - 1]!.endSeq + 1 : 1
+      }
+      return ok({
+        items,
+        ...(nextSeq !== undefined ? { nextSeq } : {}),
+      })
     },
 
     async listEntries(
@@ -1058,7 +1139,7 @@ export function createMemoryStorageV5Backend(
       if (closedErr) return closedErr
       const path = resolveKeyPath(key)
       if (!path) return fail('InvalidArgument', 'key')
-      const withinDirs = resolveScopeDirs(opts.within)
+      const withinDirs = resolveScopeDirs(opts?.within)
       if (!withinDirs) return fail('InvalidArgument', 'opts.within')
       if (withinDirs.some(dir => path === dir || isUnderDir(path, dir))) {
         return ok({ kind: 'inPlace' })
@@ -1176,6 +1257,9 @@ export function createMemoryStorageV5Backend(
       }
       const srcDir = fromDirs[0]!
       const dstDir = toDirs[0]!
+      if (isUnderDir(srcDir, dstDir) || isUnderDir(dstDir, srcDir)) {
+        return fail('InvalidArgument', 'to')
+      }
       const srcFiles = Array.from(files.entries()).filter(([p]) =>
         isUnderDir(p, srcDir),
       )
@@ -1185,15 +1269,21 @@ export function createMemoryStorageV5Backend(
       if (srcDir === dstDir) {
         return ok({ moved: true })
       }
+      const dstFiles = Array.from(files.keys()).filter(p =>
+        isUnderDir(p, dstDir),
+      )
+      const dstExists = scopes.has(dstDir) || dstFiles.length > 0
+      if (dstExists && !opts?.replace) {
+        return fail('AlreadyExists')
+      }
       if (opts?.replace) {
-        for (const p of Array.from(files.keys())) {
-          if (isUnderDir(p, dstDir)) {
-            files.delete(p)
-            streams.delete(p)
-          }
+        for (const p of dstFiles) {
+          files.delete(p)
+          streams.delete(p)
+          notifyChange('delete', p)
         }
         for (const s of Array.from(scopes)) {
-          if (isUnderDir(s, dstDir)) {
+          if (s === dstDir || isUnderDir(s, dstDir)) {
             scopes.delete(s)
           }
         }
@@ -1217,6 +1307,8 @@ export function createMemoryStorageV5Backend(
           streams.delete(nextPath)
         }
         recordAncestors(nextPath)
+        notifyChange('write', nextPath, entry.version)
+        notifyChange('delete', oldPath)
       }
       for (const s of Array.from(scopes)) {
         if (isUnderDir(s, srcDir)) {
@@ -1231,13 +1323,11 @@ export function createMemoryStorageV5Backend(
     },
 
     stagingScopeBeside(scope: unknown): Record<string, unknown> {
-      const rec = asRecord(scope) ?? {}
-      return { ...rec, staging: `beside-${randomUUID()}` }
+      return stagingScopeBesidePf(scope)
     },
 
     stagingScopeWithin(scope: unknown): Record<string, unknown> {
-      const rec = asRecord(scope) ?? {}
-      return { ...rec, staging: `within-${randomUUID()}` }
+      return stagingScopeWithinLf(scope)
     },
 
     async replaceRecords(
@@ -1305,6 +1395,7 @@ export function createMemoryStorageV5Backend(
       const entry = putFile(destPath, src.bytes, {
         key: asRecord(key) ?? undefined,
       })
+      streams.delete(destPath)
       notifyChange('write', destPath, entry.version)
       return ok({ bytes: entry.bytes.byteLength, version: entry.version })
     },
@@ -1323,22 +1414,46 @@ export function createMemoryStorageV5Backend(
       if (closedErr) return closedErr
       const path = resolveKeyPath(key)
       if (!path) return fail('InvalidArgument', 'key')
+      if (
+        opts === null ||
+        typeof opts !== 'object' ||
+        typeof opts.maxBytes !== 'number' ||
+        !Number.isFinite(opts.maxBytes) ||
+        opts.maxBytes < 0
+      ) {
+        return fail('InvalidArgument', 'opts.maxBytes')
+      }
+      if (
+        body === null ||
+        typeof body !== 'object' ||
+        typeof body[Symbol.asyncIterator] !== 'function'
+      ) {
+        return fail('InvalidArgument', 'body')
+      }
       const preErr = checkPrecondition(files.get(path), opts.precondition)
       if (preErr) return preErr
       const chunks: Uint8Array[] = []
       let total = 0
-      for await (const chunk of body) {
-        const bytes =
-          chunk instanceof Uint8Array
-            ? chunk
-            : typeof chunk === 'string'
-              ? TEXT_ENCODER.encode(chunk)
-              : null
-        if (!bytes) return fail('InvalidArgument', 'body')
-        total += bytes.byteLength
-        if (total > opts.maxBytes) return fail('TooLarge')
-        chunks.push(bytes)
+      try {
+        for await (const chunk of body) {
+          const bytes =
+            chunk instanceof Uint8Array
+              ? chunk
+              : typeof chunk === 'string'
+                ? TEXT_ENCODER.encode(chunk)
+                : null
+          if (!bytes) return fail('InvalidArgument', 'body')
+          total += bytes.byteLength
+          if (total > opts.maxBytes) return fail('TooLarge')
+          chunks.push(bytes)
+        }
+      } catch {
+        return fail('IoError')
       }
+      const closedAfterErr = checkClosed()
+      if (closedAfterErr) return closedAfterErr
+      const preAfterErr = checkPrecondition(files.get(path), opts.precondition)
+      if (preAfterErr) return preAfterErr
       const out = new Uint8Array(total)
       let pos = 0
       for (const c of chunks) {
@@ -1411,7 +1526,12 @@ export function createMemoryStorageV5Backend(
         return fail('TooLarge')
       }
       const algo = opts?.algorithm ?? 'sha256'
-      const digest = createHash(algo).update(entry.bytes).digest('hex')
+      let digest: string
+      try {
+        digest = createHash(algo).update(entry.bytes).digest('hex')
+      } catch {
+        return fail('InvalidArgument', 'opts.algorithm')
+      }
       return ok({
         digest,
         totalBytes: entry.bytes.byteLength,

@@ -2977,6 +2977,9 @@ function getHooksConfig(
     logForDebugging(
       `Skipping settings/plugin hooks for ${hookEvent}: claude mcp serve --transport http never runs them (intended)`,
     )
+    if (tiers?.managedHooksOnly) {
+      return []
+    }
     return registeredHooks
       ? registeredHooks.filter(matcher => !('pluginRoot' in matcher))
       : []

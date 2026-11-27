@@ -2461,18 +2461,8 @@ export async function storageAppendRecords(
   })
 }
 
-/** densable leftover `S` @207282858. */
+/** densable leftover `S` @207282858 — deterministic cross-runtime version hash (Bun + Node.js). */
 function hashContentVersion(value: string | Uint8Array): string {
-  if (typeof Bun !== 'undefined') {
-    const bunHash = Bun.hash as
-      | (typeof Bun.hash & {
-          xxHash64?: (input: string | Uint8Array) => bigint
-        })
-      | undefined
-    if (typeof bunHash?.xxHash64 === 'function') {
-      return bunHash.xxHash64(value).toString(16).padStart(16, '0')
-    }
-  }
   return createHash('sha256')
     .update(value)
     .digest()

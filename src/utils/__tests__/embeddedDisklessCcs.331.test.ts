@@ -23,6 +23,7 @@ import {
   isGatewayHostHeldStrict,
   isGatewayRequiredByHostPolicy,
   markSdkHostLeftCallUnanswered,
+  registerHookCallbacks,
   releaseGatewayHost,
   setDesktopAppHostsTenant,
   setDisklessLaunch,
@@ -37,15 +38,27 @@ import {
   setToolsMachine,
   setToolsMayBeOnHost,
 } from '../../bootstrap/state.js'
-import { getSkillDirCommands } from '../../skills/loadSkillsDir.js'
+import {
+  discoverSkillDirsForPaths,
+  getSkillDirCommands,
+} from '../../skills/loadSkillsDir.js'
 import type { ToolUseContext } from '../../Tool.js'
 import { resumeAgentBackground } from '../../../packages/builtin-tools/src/tools/AgentTool/resumeAgent.js'
 import { spawnTeammate } from '../../../packages/builtin-tools/src/tools/shared/spawnMultiAgent.js'
+import { runWithCrossProcessAuthRefreshLock } from '../auth.js'
 import {
   cleanupOldMessageFilesInBackground,
   getRetentionCleanupSkipReason,
 } from '../cleanup.js'
-import { getGlobalConfig, saveGlobalConfig } from '../config.js'
+import {
+  enableConfigs,
+  getCurrentProjectConfig,
+  getGlobalConfig,
+  readGlobalConfigFromDisk,
+  readStoredRemoteHomeSettingsMode,
+  saveCurrentProjectConfig,
+  saveGlobalConfig,
+} from '../config.js'
 import {
   assertProgramStartAllowedInDiskless,
   assertTempDirAllowedInDiskless,
@@ -79,7 +92,12 @@ import {
   resetPinnedStorageV5ForTests,
   tryCreateV5Backend,
 } from '../storageV5/index.js'
-import { getTaskOutputPath } from '../task/diskOutput.js'
+import {
+  initializeFileChangedWatcher,
+  onCwdChangedForHooks,
+  updateWatchPaths,
+} from '../hooks/fileChangedWatcher.js'
+import { cleanupTaskOutput, getTaskOutputPath } from '../task/diskOutput.js'
 import { ensureClaudeTempDir } from '../tempDir.js'
 import {
   ensureToolResultsDir,
@@ -1059,5 +1077,219 @@ describe('2.1.331 Pluggable In-Memory StorageV5 Backend & Multi-Tenant Isolation
       expect(closedRenew.ok).toBe(false)
       if (!closedRenew.ok) expect(closedRenew.error.code).toBe('Closed')
     }
+  })
+})
+
+describe('2.1.331 Post-Review Hardening (R1-P0-4, R1-P1-4, R1-P1-9, R1-P1-10, R1-P2-2, R1-P2-3)', () => {
+  test('R1-P0-4 & R1-P1-10: diskless config guards, enableConfigs, readStoredRemoteHomeSettingsMode, saveCurrentProjectConfig & serialized writes', async () => {
+    const mem = createMemoryStorageV5Backend({ configHome: '/mem-cfg-r1' })
+    const writeOrder: number[] = []
+    const origWrite = mem.write.bind(mem)
+    let callIdx = 0
+    mem.write = async (key, value, opts) => {
+      const idx = ++callIdx
+      // First write takes longer than second to prove FIFO serialization!
+      await tick(idx === 1 ? 30 : 2)
+      writeOrder.push(idx)
+      return origWrite(key, value, opts)
+    }
+
+    await runWithNewHostSession(
+      { id: 'r1-config-diskless', diskless: true },
+      async () => {
+        pinInjectedStorageV5(mem)
+
+        // enableConfigs does not touch disk in diskless mode
+        expect(() => enableConfigs(mem)).not.toThrow()
+
+        // saveGlobalConfig short-circuits when updater returns same reference
+        const noopResult = saveGlobalConfig(cur => cur)
+        expect(noopResult).toBe(true)
+        expect(callIdx).toBe(0)
+
+        // Rapid concurrent saves serialize in strict FIFO order
+        expect(
+          saveGlobalConfig(cur => ({
+            ...cur,
+            numStartups: 10,
+            remoteHomeSettingsMode: 'forward',
+          })),
+        ).toBe(true)
+        expect(
+          saveGlobalConfig(cur => ({
+            ...cur,
+            numStartups: 20,
+            remoteHomeSettingsMode: 'forward',
+          })),
+        ).toBe(true)
+
+        // readGlobalConfigFromDisk returns in-memory diskless config
+        expect(readGlobalConfigFromDisk()?.numStartups).toBe(20)
+
+        // readStoredRemoteHomeSettingsMode reads from pinned StorageV5 without requiring isHoverRestOn()
+        const storedMode = await readStoredRemoteHomeSettingsMode()
+        expect(storedMode).toEqual({ mode: 'forward' })
+        expect(writeOrder).toEqual([1, 2])
+        expect(mem.snapshot()['/mem-cfg-r1/.claude.json']).toContain(
+          '"numStartups": 20',
+        )
+
+        // saveCurrentProjectConfig delegates to saveGlobalConfig in diskless mode
+        const savedProj = saveCurrentProjectConfig(cur => ({
+          ...cur,
+          hasTrustDialogAccepted: true,
+        }))
+        expect(savedProj).toBe(true)
+        expect(getCurrentProjectConfig().hasTrustDialogAccepted).toBe(true)
+
+        // Wait for queued project write to flush
+        await readStoredRemoteHomeSettingsMode()
+        expect(mem.snapshot()['/mem-cfg-r1/.claude.json']).toContain(
+          '"hasTrustDialogAccepted": true',
+        )
+      },
+    )
+
+    // Without pinned StorageV5, readStoredRemoteHomeSettingsMode falls back cleanly without disk read
+    await runWithNewHostSession(
+      { id: 'r1-config-diskless-nostorage', diskless: true },
+      async () => {
+        saveGlobalConfig(cur => ({
+          ...cur,
+          remoteHomeSettingsMode: 'keep_local',
+        }))
+        const fallbackMode = await readStoredRemoteHomeSettingsMode()
+        expect(fallbackMode).toEqual({ mode: 'keep_local' })
+      },
+    )
+  })
+
+  test('R1-P1-9: diskless guards in cleanupTaskOutput, runWithCrossProcessAuthRefreshLock, discoverSkillDirsForPaths', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'diskless-r1-p19-'))
+    tempDirs.push(dir)
+    const nestedSkill = join(dir, 'sub', '.claude', 'skills', 's1')
+    mkdirSync(nestedSkill, { recursive: true })
+    writeFileSync(join(nestedSkill, 'SKILL.md'), '---\nname: s1\n---\n', 'utf8')
+    const sampleFile = join(dir, 'sub', 'file.ts')
+    writeFileSync(sampleFile, 'export const a = 1\n', 'utf8')
+
+    await runWithNewHostSession(
+      { id: 'r1-p19-diskless', diskless: true },
+      async () => {
+        // cleanupTaskOutput does not throw or unlink on disk
+        await expect(
+          cleanupTaskOutput('task-diskless-1'),
+        ).resolves.toBeUndefined()
+
+        // runWithCrossProcessAuthRefreshLock runs callback directly without creating lock/done files
+        let ran = false
+        const ok = await runWithCrossProcessAuthRefreshLock(
+          'aws',
+          async () => {
+            ran = true
+            return true
+          },
+          { lockDir: dir },
+        )
+        expect(ok).toBe(true)
+        expect(ran).toBe(true)
+        expect(existsSync(join(dir, '.aws-auth-refresh.lock'))).toBe(false)
+        expect(existsSync(join(dir, '.aws-auth-refresh.done'))).toBe(false)
+
+        // discoverSkillDirsForPaths returns [] in diskless mode
+        const discovered = await discoverSkillDirsForPaths([sampleFile], dir)
+        expect(discovered).toEqual([])
+      },
+    )
+  })
+
+  test('R1-P2-2 & R1-P2-3: runWithNewHostSession diskless default cwd & fileChangedWatcher diskless no-ops', async () => {
+    await runWithNewHostSession(
+      { id: 'r1-p22-diskless-cwd', diskless: true },
+      async session => {
+        expect(session.project.cwd).toBe('/workspace')
+        expect(session.project.originalCwd).toBe('/workspace')
+        expect(session.project.projectRoot).toBe('/workspace')
+
+        // fileChangedWatcher functions no-op safely in diskless mode
+        expect(() => initializeFileChangedWatcher('/workspace')).not.toThrow()
+        expect(() => updateWatchPaths(['/workspace/.env'])).not.toThrow()
+        await expect(
+          onCwdChangedForHooks('/workspace', '/workspace/sub'),
+        ).resolves.toBeUndefined()
+      },
+    )
+  })
+
+  test('R1-P1-4: tool-server daemon mode suppresses managedHooksOnly tier so SDK hooks never double-fire', async () => {
+    const { setToolServerDaemonMode } = await import(
+      '../../services/mcp/sessionTunnel.js'
+    )
+    const { executePreToolHooks } = await import('../hooks.js')
+    let invocations = 0
+
+    await runWithNewHostSession({ id: 'r1-p14-hooks-daemon' }, async () => {
+      setToolServerDaemonMode(true)
+      try {
+        registerHookCallbacks({
+          PreToolUse: [
+            {
+              matcher: 'Bash',
+              hooks: [
+                {
+                  type: 'callback',
+                  callback: async () => {
+                    invocations += 1
+                    return { continue: true }
+                  },
+                },
+              ],
+            },
+          ],
+        })
+
+        const mockCtx = {
+          options: { tools: [] },
+          getAppState: () => ({}),
+          setAppState: () => {},
+        } as unknown as ToolUseContext
+
+        // managedHooksOnly pass MUST return no hooks (0 invocations)
+        for await (const _ev of executePreToolHooks(
+          'Bash',
+          'tu-1',
+          { command: 'echo 1' },
+          mockCtx,
+          'default',
+          new AbortController().signal,
+          undefined,
+          undefined,
+          undefined,
+          { managedHooksOnly: true },
+        )) {
+          // drain
+        }
+        expect(invocations).toBe(0)
+
+        // non-managed pass runs SDK callback exactly once
+        for await (const _ev of executePreToolHooks(
+          'Bash',
+          'tu-2',
+          { command: 'echo 2' },
+          mockCtx,
+          'default',
+          new AbortController().signal,
+          undefined,
+          undefined,
+          undefined,
+          { managedHooksExcluded: true },
+        )) {
+          // drain
+        }
+        expect(invocations).toBe(1)
+      } finally {
+        setToolServerDaemonMode(false)
+      }
+    })
   })
 })

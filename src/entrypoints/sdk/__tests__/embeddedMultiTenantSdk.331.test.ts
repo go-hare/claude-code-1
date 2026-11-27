@@ -279,14 +279,15 @@ describe('Public Multi-Tenant Embedded SDK & Live Cross-Process E2E (2.1.331)', 
           expect(readResult.data.file.content).toContain('alpha-marker')
         }
 
-        // 3. Edit file via HTTP worker and verify claudecode/editResult propagation
+        // 3. Edit file via HTTP worker and verify real remote edit result
         const editResult = await sessionA.executeTool(FileEditTool, {
           file_path: workerTargetFile,
           old_string: 'beta-value',
           new_string: 'gamma-edited-331',
         })
+        expect(editResult.data.filePath).toBe(workerTargetFile)
+        expect(editResult.data.oldString).toBe('beta-value')
         expect(editResult.data.newString).toBe('gamma-edited-331')
-        expect(editResult.subagentFrameResult).toBeDefined()
         expect(readFileSync(workerTargetFile, 'utf8')).toContain(
           'gamma-edited-331',
         )
@@ -881,5 +882,112 @@ describe('Public Multi-Tenant Embedded SDK & Live Cross-Process E2E (2.1.331)', 
 
     await expect(fork2.run(() => 'nope')).rejects.toThrow(/disposed/i)
     await expect(nestedFork.run(() => 'nope')).rejects.toThrow(/disposed/i)
+  })
+
+  test('R1-P1-3 & R1-P2-4: plain { name, call } tools enforce diskless guard, remote routing, TOCTOU, direct remote hydration, and ownsStorageV5 close', async () => {
+    const hostAuto = createEmbeddedHost({
+      tenantId: 'r1-p13-auto-mem',
+      diskless: true,
+    })
+    hostsToDispose.push(hostAuto)
+    const session = hostAuto.createSession({ sessionId: 'r1-p13-sess' })
+
+    let localCalled = 0
+    const plainBashTool = {
+      name: 'Bash',
+      call: async () => {
+        localCalled += 1
+        return { data: { stdout: 'local-ran' } }
+      },
+    }
+
+    // 1. Plain { name: 'Bash', call } without remote runner fails closed in diskless mode
+    await expect(
+      session.executeTool(plainBashTool, { command: 'echo hi' }),
+    ).rejects.toThrow(NeverRunsInThisProcessError)
+    expect(localCalled).toBe(0)
+
+    // 2. When a remote runner is registered, plain { name, call } routes remotely AND applies
+    //    afterRead.ok, fieldsFromThisSide, and fromAnotherProcess in the direct remote branch
+    let afterReadOkCount = 0
+    let fromAnotherProcessSaw: unknown
+    const runner = async () => ({
+      output: { stdout: 'remote-ok' },
+      afterRead: {
+        ok: () => {
+          afterReadOkCount += 1
+        },
+      },
+      fieldsFromThisSide: { hostTag: 'merged-side' },
+    })
+    session.registerRemoteNativeTool('Bash', runner)
+
+    const plainWithHydrate = {
+      name: 'Bash',
+      call: async () => {
+        localCalled += 1
+        return { data: { stdout: 'local-ran' } }
+      },
+      fromAnotherProcess: (data: unknown) => {
+        fromAnotherProcessSaw = data
+        return {
+          data: {
+            ...(data as Record<string, unknown>),
+            hydrated: true,
+          },
+        }
+      },
+    }
+
+    const res = await session.executeTool(plainWithHydrate, {
+      command: 'echo hi',
+    })
+    expect(localCalled).toBe(0)
+    expect(afterReadOkCount).toBe(1)
+    expect(fromAnotherProcessSaw).toEqual({
+      stdout: 'remote-ok',
+      hostTag: 'merged-side',
+    })
+    expect(res.data as Record<string, unknown>).toEqual({
+      stdout: 'remote-ok',
+      hostTag: 'merged-side',
+      hydrated: true,
+    })
+
+    // 3. TOCTOU permissionCheckedFor guard is enforced on plain { name, call } tools too
+    await expect(
+      session.executeTool(
+        plainBashTool,
+        { command: 'echo hi' },
+        { permissionCheckedFor: null },
+      ),
+    ).rejects.toThrow(NativeToolElsewhereError)
+
+    // 4. dispose() closes auto-created memory StorageV5, but NEVER closes caller-supplied StorageV5
+    const autoStorage = hostAuto.storageV5!
+    await hostAuto.dispose()
+    const writeAfterDispose = await autoStorage.write(
+      { namespace: 'plan', name: 'after' },
+      'x',
+    )
+    expect(writeAfterDispose.ok).toBe(false)
+    if (!writeAfterDispose.ok) {
+      expect(writeAfterDispose.error.code).toBe('Closed')
+    }
+
+    const callerStorage = createMemoryStorageV5Backend({
+      configHome: '/mem-caller-owned',
+    })
+    const hostExternal = createEmbeddedHost({
+      tenantId: 'r1-p24-external-storage',
+      diskless: true,
+      storageV5: callerStorage,
+    })
+    await hostExternal.dispose()
+    const writeCallerAfter = await callerStorage.write(
+      { namespace: 'plan', name: 'still-open' },
+      'ok',
+    )
+    expect(writeCallerAfter.ok).toBe(true)
   })
 })

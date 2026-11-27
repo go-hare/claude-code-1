@@ -1076,6 +1076,9 @@ async function openTaskOutputForAppendWithState(
   depth: number,
   state: HostDiskOutputState,
 ): Promise<FileHandle> {
+  if (isDisklessActive()) {
+    throw new Error('Task output is not written to disk in a diskless session')
+  }
   const canonical = isTaskOutputFilePathForState(filePath, state)
     ? canonicalizeTaskOutputPath(filePath, state)
     : filePath
@@ -1844,6 +1847,10 @@ export async function cleanupTaskOutput(taskId: string): Promise<void> {
   if (output) {
     output.cancel()
     state.diskOutputs.delete(taskId)
+  }
+
+  if (isDisklessActive()) {
+    return
   }
 
   const outputPath = canonicalizeTaskOutputPath(

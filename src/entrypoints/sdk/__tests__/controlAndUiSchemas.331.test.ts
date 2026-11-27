@@ -3,12 +3,15 @@ import {
   dispatchPrintControlExtra,
   getTurnHandoffManager,
   getUpgradedRelayMarker,
+  parseRemoteToolsAnnounce,
+  parseSetChromeBrowserHintsControlRequest,
   type PrintControlExtraDeps,
   registerDesktopUiControlHandler,
   registerPrintControlExtensionHandler,
   resetTurnHandoffManager,
   resetUpgradedRelayMarker,
 } from 'src/cli/printControlExtras.js'
+import { setSharedBackendMode } from 'src/utils/sessionContextAls.js'
 import { createSessionHost } from 'src/utils/sessionHost.js'
 import { createRootSession, runWithSession } from 'src/utils/sessionRoot.js'
 import {
@@ -19,10 +22,12 @@ import {
   SDKControlRequestInnerSchema,
   SDKControlRequestSchema,
   SDKExtendedControlRequestSchema,
+  StdoutMessageSchema,
 } from '../controlSchemas.js'
 import {
   SDK_EXTENDED_SYSTEM_SUBTYPES,
   SDKExtendedSystemEventSchema,
+  SDKMessageSchema,
 } from '../coreSchemas.js'
 
 function createMockSession(id: string) {
@@ -113,18 +118,24 @@ describe('Official 2.1.331 extended control_request schemas', () => {
     {
       subtype: 'remote_tools_announce',
       instance_id: 'inst-1',
-      host_name: 'workstation',
-      tools: ['Read', { name: 'Bash', protocol_versions: [1] }],
-      protocol_versions: [1, 2],
+      host: { name: 'workstation', epoch: 'epoch-1', home_dir: '/home/dev' },
+      tools: [
+        { name: 'Read', protocol_versions: [1] },
+        { name: 'Bash', protocol_versions: [1, 2] },
+      ],
+      passthrough: [{ name: 'mcp__docs__search' }],
+      plumbing: ['read_file'],
     },
     { subtype: 'get_status', include_mcp: true, include_tasks: true },
     { subtype: 'list_permission_rules', scope: 'session' },
     { subtype: 'get_sandbox_dialog', dialog_kind: 'overview' },
     { subtype: 'get_chrome_browsers' },
-    { subtype: 'select_chrome_browser', browser_id: 'chrome-main' },
+    { subtype: 'select_chrome_browser', device_id: 'chrome-main' },
     {
       subtype: 'set_chrome_browser_hints',
-      hints: { preferredDeviceId: 'dev-1', hostPlatform: 'darwin' },
+      localDeviceIds: ['dev-1'],
+      preferredDeviceId: 'dev-1',
+      hostPlatform: 'darwin',
     },
     { subtype: 'get_chrome_dialog' },
     { subtype: 'list_cloud_sessions', limit: 25, cursor: 'cur-1' },
@@ -160,7 +171,12 @@ describe('Official 2.1.331 extended control_request schemas', () => {
       format: 'markdown',
       path: '/tmp/out.md',
     },
-    { subtype: 'read_file', path: 'src/index.ts', offset: 0, limit: 100 },
+    {
+      subtype: 'read_file',
+      path: 'src/index.ts',
+      max_bytes: 4096,
+      encoding: 'utf-8',
+    },
     { subtype: 'list_directory', path: 'src' },
     {
       subtype: 'mcp_read_resource',
@@ -213,7 +229,7 @@ describe('Official 2.1.331 extended control_request schemas', () => {
       { subtype: 'remote_control_work_secret', secret: '' },
       { subtype: 'remote_tools_announce', instance_id: 'i1', tools: [] },
       { subtype: 'select_chrome_browser' },
-      { subtype: 'set_chrome_browser_hints', hints: 'bad' },
+      { subtype: 'set_chrome_browser_hints', localDeviceIds: 'bad' },
       { subtype: 'list_cloud_sessions', limit: 0 },
       { subtype: 'get_cloud_session', session_id: '' },
       { subtype: 'get_cloud_session_transcript' },
@@ -221,7 +237,8 @@ describe('Official 2.1.331 extended control_request schemas', () => {
       { subtype: 'start_shell_task', command: '' },
       { subtype: 'submit_survey_feedback', survey_id: 's1', answers: null },
       { subtype: 'plugin_install', plugin: '' },
-      { subtype: 'read_file', path: 'a.ts', offset: -5 },
+      { subtype: 'read_file', path: 'a.ts', max_bytes: 0 },
+      { subtype: 'read_file', path: 'a.ts', encoding: 'latin1' },
       { subtype: 'list_directory' },
       { subtype: 'mcp_read_resource', server: 's' },
       { subtype: 'set_prompt_suggestions_paused', paused: 'true' },
@@ -540,6 +557,12 @@ describe('Official 2.1.331 SDKExtendedSystemEventSchema', () => {
       const parsed = SDKExtendedSystemEventSchema().parse(event)
       expect(parsed.type).toBe('system')
       expect(String(parsed.subtype)).toBe(event.subtype)
+
+      // R1-P1-2: SDKMessageSchema and StdoutMessageSchema accept every extended system event
+      const parsedSdk = SDKMessageSchema().parse(event)
+      expect(parsedSdk.type).toBe('system')
+      const parsedStdout = StdoutMessageSchema().parse(event)
+      expect(parsedStdout.type).toBe('system')
     }
   })
 
@@ -569,14 +592,14 @@ describe('Official 2.1.331 SDKExtendedSystemEventSchema', () => {
 })
 
 describe('dispatchPrintControlExtra 2.1.331 handlers & multi-tenant isolation', () => {
-  test('worker_shutting_down marks TurnHandoffManager shutdown and returns epoch', () => {
+  test('worker_shutting_down marks TurnHandoffManager shutdown when admitted and returns epoch', () => {
     const session = createMockSession('sess-shutdown-1')
     runWithSession(session, () => {
       resetTurnHandoffManager(session)
       const manager = getTurnHandoffManager(session)
       expect(manager.multiTenantShutdownAborted).toBe(false)
 
-      const h = createHarness()
+      const h = createHarness({ turnHandoffAdmission: { admitted: true } })
       const handled = dispatchPrintControlExtra(
         'worker_shutting_down',
         { reason: 'drain', grace_ms: 3000, worker_epoch: 7 },
@@ -1013,5 +1036,91 @@ describe('dispatchPrintControlExtra 2.1.331 handlers & multi-tenant isolation', 
     } finally {
       unsubExt()
     }
+  })
+
+  test('R1-P1-1: controlSchemas wire contracts match printControlExtras parsers verbatim', () => {
+    const announcePayload = {
+      subtype: 'remote_tools_announce' as const,
+      instance_id: 'inst-wire-1',
+      host: { name: 'workstation-1', epoch: 'ep-1', home_dir: '/home/u' },
+      tools: [{ name: 'Read', protocol_versions: [1] }],
+      passthrough: [{ name: 'mcp__srv__tool' }],
+      plumbing: ['read_file'],
+    }
+    const parsedAnnounceSchema =
+      SDKExtendedControlRequestSchema().parse(announcePayload)
+    const parsedAnnounceRuntime = parseRemoteToolsAnnounce(
+      parsedAnnounceSchema as Record<string, unknown>,
+    )
+    expect(parsedAnnounceRuntime.ok).toBe(true)
+
+    const hintsPayload = {
+      subtype: 'set_chrome_browser_hints' as const,
+      localDeviceIds: ['dev-1', 'dev-2'],
+      preferredDeviceId: 'dev-1',
+      hostPlatform: 'darwin' as const,
+    }
+    const parsedHintsSchema =
+      SDKExtendedControlRequestSchema().parse(hintsPayload)
+    const parsedHintsRuntime = parseSetChromeBrowserHintsControlRequest(
+      parsedHintsSchema as Record<string, unknown>,
+    )
+    expect(parsedHintsRuntime.ok).toBe(true)
+  })
+
+  test('R1-P1-11: turn_handoff rejects refused trust and worker_shutting_down requires admission or sharedBackend', () => {
+    const session = createMockSession('sess-handoff-hardening')
+    runWithSession(session, () => {
+      resetTurnHandoffManager(session)
+      const manager = getTurnHandoffManager(session)
+
+      // 1. turn_handoff rejected on refused trust even if turnHandoffAdmission is admitted
+      const hRefused = createHarness({
+        controlConnectionTrustLevel: 'refused',
+        turnHandoffAdmission: { admitted: true },
+      })
+      expect(
+        dispatchPrintControlExtra(
+          'turn_handoff',
+          { action: 'export', session_id: 'sess-handoff-hardening' },
+          hRefused.deps,
+        ),
+      ).toBe(true)
+      expect(hRefused.successes).toHaveLength(0)
+      expect(hRefused.errors).toEqual([
+        'turn_handoff is not available on this connection',
+      ])
+
+      // 2. worker_shutting_down rejected without admission or sharedBackend -> zero mutation
+      setSharedBackendMode(false)
+      const hUnadmitted = createHarness()
+      expect(
+        dispatchPrintControlExtra(
+          'worker_shutting_down',
+          { reason: 'drain', worker_epoch: 5 },
+          hUnadmitted.deps,
+        ),
+      ).toBe(true)
+      expect(hUnadmitted.successes).toHaveLength(0)
+      expect(hUnadmitted.errors[0]).toContain('turn_handoff_disabled:')
+      expect(manager.multiTenantShutdownAborted).toBe(false)
+
+      // 3. worker_shutting_down succeeds when sharedBackend is active
+      setSharedBackendMode(true)
+      try {
+        const hShared = createHarness()
+        expect(
+          dispatchPrintControlExtra(
+            'worker_shutting_down',
+            { reason: 'scale_in', worker_epoch: 8 },
+            hShared.deps,
+          ),
+        ).toBe(true)
+        expect(hShared.errors).toHaveLength(0)
+        expect(manager.multiTenantShutdownAborted).toBe(true)
+      } finally {
+        setSharedBackendMode(false)
+      }
+    })
   })
 })
