@@ -93,6 +93,7 @@ const ListenConfigSchema = z.object({
 const AuthConfigSchema = z.object({
   bearer_tokens: z.array(z.string().min(1)).optional(),
   require_auth: z.boolean().default(false),
+  allow_unauthenticated: z.boolean().default(false),
   upstream_api_key: z.string().optional(),
   upstream_api_key_env: z.string().optional(),
 })
@@ -469,6 +470,85 @@ function resolveUpstreamApiKey(config: GatewayConfig): string | undefined {
   return undefined
 }
 
+const UNSAFE_HOST_HEADER_RE = /[\s@/?#\\]/
+
+function isLoopbackHost(rawHost: string): boolean {
+  let host = rawHost.trim().toLowerCase()
+  if (host.startsWith('[') && host.endsWith(']')) {
+    host = host.slice(1, -1)
+  }
+  if (host === 'localhost') {
+    return true
+  }
+  const ip = parseCanonicalIp(host)
+  if (!ip) {
+    return false
+  }
+  if (ip.family === 4) {
+    return ip.value >> 24n === 127n
+  }
+  return ip.value === 1n
+}
+
+function isValidPortString(portPart: string): boolean {
+  if (!/^\d{1,5}$/.test(portPart)) {
+    return false
+  }
+  const portNum = Number(portPart)
+  return Number.isInteger(portNum) && portNum >= 0 && portNum <= 65535
+}
+
+function extractHostHeaderHostname(
+  hostHeader: string | undefined,
+): string | undefined {
+  if (typeof hostHeader !== 'string' || hostHeader.length === 0) {
+    return undefined
+  }
+  if (UNSAFE_HOST_HEADER_RE.test(hostHeader)) {
+    return undefined
+  }
+  const lower = hostHeader.toLowerCase()
+  if (lower.startsWith('[')) {
+    const closeIdx = lower.indexOf(']')
+    if (closeIdx < 0) return undefined
+    const bracketHost = lower.slice(1, closeIdx)
+    const rest = lower.slice(closeIdx + 1)
+    if (rest !== '') {
+      if (!rest.startsWith(':') || !isValidPortString(rest.slice(1))) {
+        return undefined
+      }
+    }
+    return bracketHost
+  }
+  if (lower === '::1') {
+    return '::1'
+  }
+  const colonIdx = lower.indexOf(':')
+  if (colonIdx < 0) {
+    return lower
+  }
+  const hostname = lower.slice(0, colonIdx)
+  const portPart = lower.slice(colonIdx + 1)
+  if (!isValidPortString(portPart)) {
+    return undefined
+  }
+  return hostname
+}
+
+function isAllowedUnauthenticatedHost(
+  hostHeader: string | undefined,
+  allowedExtraHostnames: ReadonlySet<string>,
+): boolean {
+  const hostname = extractHostHeaderHostname(hostHeader)
+  if (hostname === undefined || hostname.length === 0) {
+    return false
+  }
+  if (isLoopbackHost(hostname)) {
+    return true
+  }
+  return allowedExtraHostnames.has(hostname)
+}
+
 function readRequestBody(
   req: IncomingMessage,
   maxBytes = MAX_REQUEST_BODY_BYTES,
@@ -490,6 +570,8 @@ function readRequestBody(
       req.off('data', onData)
       req.off('end', onEnd)
       req.off('error', onError)
+      req.off('aborted', onAborted)
+      req.off('close', onClose)
     }
 
     const onData = (chunk: Buffer | string) => {
@@ -511,19 +593,41 @@ function readRequestBody(
       if (finished) return
       finished = true
       cleanup()
-      resolve(Buffer.concat(chunks))
+      const body = Buffer.concat(chunks)
+      chunks.length = 0
+      resolve(body)
     }
 
     const onError = (err: Error) => {
       if (finished) return
       finished = true
+      chunks.length = 0
       cleanup()
       reject(err)
+    }
+
+    const onAborted = () => {
+      if (finished) return
+      finished = true
+      chunks.length = 0
+      cleanup()
+      reject(new Error('Request aborted before body completed'))
+    }
+
+    const onClose = () => {
+      if (!finished && !req.complete) {
+        finished = true
+        chunks.length = 0
+        cleanup()
+        reject(new Error('Request closed before body completed'))
+      }
     }
 
     req.on('data', onData)
     req.on('end', onEnd)
     req.on('error', onError)
+    req.on('aborted', onAborted)
+    req.on('close', onClose)
   })
 }
 
@@ -573,7 +677,10 @@ function buildSafeForwardHeaders(
         const existing = Array.isArray(rawValue)
           ? rawValue.join(', ')
           : rawValue
-        out.set('x-forwarded-for', `${existing}, ${peerIp}`)
+        out.set(
+          'x-forwarded-for',
+          peerIp.length > 0 ? `${existing}, ${peerIp}` : existing,
+        )
         continue
       }
     }
@@ -601,13 +708,18 @@ function sendJson(
   body: Record<string, unknown>,
   extraHeaders?: Record<string, string>,
 ): void {
-  const payload = JSON.stringify(body)
-  res.writeHead(statusCode, {
-    'content-type': 'application/json; charset=utf-8',
-    'content-length': Buffer.byteLength(payload, 'utf8'),
-    ...(extraHeaders ?? {}),
-  })
-  res.end(payload)
+  if (res.writableEnded || res.destroyed) return
+  try {
+    const payload = JSON.stringify(body)
+    res.writeHead(statusCode, {
+      'content-type': 'application/json; charset=utf-8',
+      'content-length': Buffer.byteLength(payload, 'utf8'),
+      ...(extraHeaders ?? {}),
+    })
+    res.end(payload)
+  } catch {
+    // Ignore write errors on already-closed sockets
+  }
 }
 
 function hasUnsafeRequestPath(rawUrl: string): boolean {
@@ -657,59 +769,89 @@ function createUpstreamSignal(
   clientAborted: () => boolean
   cleanup: () => void
 } {
-  const clientAbort = new AbortController()
+  const controller = new AbortController()
+  let didClientAbort = false
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+
   const onClose = () => {
     if (!res.writableEnded) {
-      clientAbort.abort(new Error('Client disconnected'))
+      didClientAbort = true
+      controller.abort(new Error('Client disconnected'))
     }
   }
+
   const socket = res.socket
-  res.once('close', onClose)
-  socket?.once('close', onClose)
-
-  const timeoutSignal = AbortSignal.timeout(timeoutMs)
-  let signal: AbortSignal
-  let onTimeoutAbort: (() => void) | undefined
-  let onClientAbort: (() => void) | undefined
-
-  if (typeof AbortSignal.any === 'function') {
-    signal = AbortSignal.any([clientAbort.signal, timeoutSignal])
+  if (res.destroyed || socket?.destroyed) {
+    onClose()
   } else {
-    const combined = new AbortController()
-    onTimeoutAbort = () => combined.abort(timeoutSignal.reason)
-    onClientAbort = () => combined.abort(clientAbort.signal.reason)
-    timeoutSignal.addEventListener('abort', onTimeoutAbort, { once: true })
-    clientAbort.signal.addEventListener('abort', onClientAbort, { once: true })
-    signal = combined.signal
+    res.once('close', onClose)
+    socket?.once('close', onClose)
+    if (timeoutMs > 0 && Number.isFinite(timeoutMs)) {
+      timeoutId = setTimeout(() => {
+        timeoutId = undefined
+        controller.abort(
+          new Error(`Upstream request timed out after ${timeoutMs}ms`),
+        )
+      }, timeoutMs)
+      timeoutId.unref?.()
+    }
   }
 
   return {
-    signal,
-    clientAborted: () => clientAbort.signal.aborted,
+    signal: controller.signal,
+    clientAborted: () => didClientAbort,
     cleanup: () => {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId)
+        timeoutId = undefined
+      }
       res.off('close', onClose)
       socket?.off('close', onClose)
-      if (onTimeoutAbort) {
-        timeoutSignal.removeEventListener('abort', onTimeoutAbort)
-      }
-      if (onClientAbort) {
-        clientAbort.signal.removeEventListener('abort', onClientAbort)
-      }
     },
   }
+}
+
+function waitForDrainOrClose(res: ServerResponse): Promise<void> {
+  if (res.writableEnded || res.destroyed) {
+    return Promise.resolve()
+  }
+  return new Promise<void>(resolve => {
+    const done = () => {
+      res.off('drain', done)
+      res.off('close', done)
+      res.off('error', done)
+      resolve()
+    }
+    res.once('drain', done)
+    res.once('close', done)
+    res.once('error', done)
+  })
 }
 
 async function writeFetchResponse(
   res: ServerResponse,
   upstreamRes: Response,
 ): Promise<void> {
-  const headers: Record<string, string> = {}
+  const headers: Record<string, string | string[]> = {}
   upstreamRes.headers.forEach((value, key) => {
     const lower = key.toLowerCase()
-    if (!RESPONSE_STRIP_HEADERS.has(lower)) {
-      headers[lower] = value
+    if (lower === 'set-cookie' || RESPONSE_STRIP_HEADERS.has(lower)) {
+      return
     }
+    headers[lower] = value
   })
+  const setCookies =
+    typeof upstreamRes.headers.getSetCookie === 'function'
+      ? upstreamRes.headers.getSetCookie()
+      : []
+  if (setCookies.length > 0) {
+    headers['set-cookie'] = setCookies
+  } else {
+    const singleCookie = upstreamRes.headers.get('set-cookie')
+    if (singleCookie !== null) {
+      headers['set-cookie'] = singleCookie
+    }
+  }
 
   res.writeHead(upstreamRes.status, headers)
 
@@ -733,13 +875,22 @@ async function writeFetchResponse(
         !res.writableEnded &&
         !res.destroyed
       ) {
-        res.write(Buffer.from(value.buffer, value.byteOffset, value.byteLength))
+        const ok = res.write(
+          Buffer.from(value.buffer, value.byteOffset, value.byteLength),
+        )
+        if (!ok) {
+          await waitForDrainOrClose(res)
+        }
       }
     }
   } finally {
     reader.releaseLock()
-    if (!res.writableEnded) {
-      res.end()
+    if (!res.writableEnded && !res.destroyed) {
+      try {
+        res.end()
+      } catch {
+        // Ignore end errors on closed sockets
+      }
     }
   }
 }
@@ -796,203 +947,322 @@ export async function startGatewayServer(
   let inferenceRequests = 0
   let otlpRequests = 0
 
-  const authRequired =
-    config.auth?.require_auth === true ||
-    (config.auth?.bearer_tokens !== undefined &&
-      config.auth.bearer_tokens.length > 0)
+  if (
+    config.auth?.bearer_tokens !== undefined &&
+    config.auth.bearer_tokens.length === 0
+  ) {
+    throw new Error(
+      'Gateway refuses to start with an empty auth.bearer_tokens list',
+    )
+  }
+
   const allowedTokens = config.auth?.bearer_tokens ?? []
+  const authRequired =
+    config.auth?.require_auth === true || allowedTokens.length > 0
+  if (config.auth?.require_auth === true && allowedTokens.length === 0) {
+    throw new Error(
+      'Gateway auth.require_auth is true but no auth.bearer_tokens are configured',
+    )
+  }
+
+  const allowUnauthenticated = config.auth?.allow_unauthenticated === true
+  const startupUpstreamApiKey = resolveUpstreamApiKey(config)
+  const loopbackBind = isLoopbackHost(config.listen.host)
+  if (!authRequired && !allowUnauthenticated) {
+    if (startupUpstreamApiKey !== undefined) {
+      throw new Error(
+        'Gateway refuses to start without auth.bearer_tokens when an upstream API key is configured (set auth.bearer_tokens or auth.allow_unauthenticated: true)',
+      )
+    }
+    if (!loopbackBind) {
+      throw new Error(
+        `Gateway refuses to bind non-loopback host "${config.listen.host}" without auth.bearer_tokens (set auth.bearer_tokens or auth.allow_unauthenticated: true)`,
+      )
+    }
+  }
+
+  const allowedUnauthHostnames = new Set<string>()
+  const normalizedListenHost = config.listen.host
+    .trim()
+    .toLowerCase()
+    .replace(/^\[(.*)\]$/, '$1')
+  if (
+    normalizedListenHost.length > 0 &&
+    normalizedListenHost !== '0.0.0.0' &&
+    normalizedListenHost !== '::'
+  ) {
+    allowedUnauthHostnames.add(normalizedListenHost)
+  }
+  if (config.listen.public_url) {
+    try {
+      const publicHost = new URL(config.listen.public_url).hostname
+        .toLowerCase()
+        .replace(/^\[(.*)\]$/, '$1')
+      if (publicHost.length > 0) {
+        allowedUnauthHostnames.add(publicHost)
+      }
+    } catch {
+      // Already validated by schema
+    }
+  }
+
   const trustedProxies = config.listen.trusted_proxies ?? []
 
-  const server: Server = createServer(async (req, res) => {
-    requests += 1
-    try {
-      const method = (req.method ?? 'GET').toUpperCase()
-      const rawUrl = req.url ?? '/'
-      if (hasUnsafeRequestPath(rawUrl)) {
-        sendJson(res, 400, {
-          error: {
-            type: 'invalid_request_error',
-            message: 'Invalid request path',
-          },
-        })
-        return
-      }
-      const parsedUrl = new URL(rawUrl, 'http://localhost')
-      const pathname = parsedUrl.pathname
-      if (pathname.split('/').includes('..')) {
-        sendJson(res, 400, {
-          error: {
-            type: 'invalid_request_error',
-            message: 'Invalid request path',
-          },
-        })
-        return
-      }
+  const server: Server = createServer((req, res) => {
+    void (async () => {
+      requests += 1
+      try {
+        // In unauthenticated mode, enforce Origin + Host checks to block
+        // browser CSRF and DNS rebinding attacks.
+        if (!authRequired) {
+          if (req.headers.origin !== undefined) {
+            sendJson(res, 403, {
+              error: {
+                type: 'forbidden',
+                message:
+                  'Forbidden: Origin header is not allowed on unauthenticated gateway',
+              },
+            })
+            return
+          }
+          const rawHost = Array.isArray(req.headers.host)
+            ? req.headers.host[0]
+            : req.headers.host
+          if (!isAllowedUnauthenticatedHost(rawHost, allowedUnauthHostnames)) {
+            sendJson(res, 403, {
+              error: {
+                type: 'forbidden',
+                message:
+                  'Forbidden: Host header is not allowed on unauthenticated gateway',
+              },
+            })
+            return
+          }
+        }
 
-      // Health & readiness probes are always exempted from authentication.
-      if (
-        method === 'GET' &&
-        (pathname === '/healthz' || pathname === '/readyz')
-      ) {
-        sendJson(res, 200, {
-          ok: true,
-          status: 'ready',
-          uptime_ms: Date.now() - startedAt,
-        })
-        return
-      }
+        const method = (req.method ?? 'GET').toUpperCase()
+        const rawUrl = req.url ?? '/'
+        if (hasUnsafeRequestPath(rawUrl)) {
+          sendJson(res, 400, {
+            error: {
+              type: 'invalid_request_error',
+              message: 'Invalid request path',
+            },
+          })
+          return
+        }
+        const parsedUrl = new URL(rawUrl, 'http://localhost')
+        const pathname = parsedUrl.pathname
+        if (pathname.split('/').includes('..')) {
+          sendJson(res, 400, {
+            error: {
+              type: 'invalid_request_error',
+              message: 'Invalid request path',
+            },
+          })
+          return
+        }
 
-      // Auth middleware for all non-health routes.
-      if (authRequired) {
-        const candidate = extractClientToken(req)
+        // Health & readiness probes are always exempted from authentication.
         if (
-          !candidate ||
-          allowedTokens.length === 0 ||
-          !constantTimeTokenMatch(candidate, allowedTokens)
+          method === 'GET' &&
+          (pathname === '/healthz' || pathname === '/readyz')
         ) {
-          sendJson(res, 401, {
-            error: {
-              type: 'authentication_error',
-              message: 'Invalid or missing gateway bearer token',
-            },
+          sendJson(res, 200, {
+            ok: true,
+            status: 'ready',
+            uptime_ms: Date.now() - startedAt,
           })
           return
         }
-      }
 
-      // Static model catalog when configured.
-      if (method === 'GET' && pathname === '/v1/models' && config.models) {
-        sendJson(res, 200, { data: config.models })
-        return
-      }
-
-      // OTLP telemetry relay (/v1/logs, /v1/metrics, /v1/traces).
-      if (method === 'POST' && OTLP_PATHS.has(pathname)) {
-        otlpRequests += 1
-        const forwardTo = config.telemetry?.forward_to
-        const body = await readRequestBody(req, maxRequestBodyBytes)
-        if (!forwardTo) {
-          res.writeHead(204)
-          res.end()
-          return
-        }
-
-        const targetUrl = joinUrlPath(forwardTo, pathname, parsedUrl.search)
-        const forwardHeaders = buildSafeForwardHeaders(req, {
-          trustedProxies,
-          stripAuthHeaders: true,
-          extraHeaders: config.telemetry?.headers,
-        })
-        const timeoutMs = config.telemetry?.timeout_ms ?? 15_000
-        const upstreamSignal = createUpstreamSignal(res, timeoutMs)
-        try {
-          const upstreamRes = await fetchImpl(targetUrl, {
-            method: 'POST',
-            headers: forwardHeaders,
-            body: body.byteLength > 0 ? new Uint8Array(body) : undefined,
-            signal: upstreamSignal.signal,
-          })
-          await writeFetchResponse(res, upstreamRes)
-        } catch (err) {
-          if (!res.headersSent && !upstreamSignal.clientAborted()) {
-            sendJson(res, 502, {
+        // Auth middleware for all non-health routes.
+        if (authRequired) {
+          const candidate = extractClientToken(req)
+          if (
+            !candidate ||
+            allowedTokens.length === 0 ||
+            !constantTimeTokenMatch(candidate, allowedTokens)
+          ) {
+            sendJson(res, 401, {
               error: {
-                type: 'bad_gateway',
-                message: `OTLP collector relay failed: ${err instanceof Error ? err.message : String(err)}`,
+                type: 'authentication_error',
+                message: 'Invalid or missing gateway bearer token',
               },
             })
-          } else if (!res.writableEnded) {
-            res.end()
+            return
           }
-        } finally {
-          upstreamSignal.cleanup()
         }
-        return
-      }
 
-      // Anthropic inference proxy (/v1/messages & /v1/*).
-      if (pathname.startsWith('/v1/')) {
-        inferenceRequests += 1
-        const upstream = config.upstreams?.anthropic
-        if (!upstream?.url) {
-          sendJson(res, 503, {
-            error: {
-              type: 'service_unavailable',
-              message: 'No Anthropic inference upstream configured',
-            },
-          })
+        // Static model catalog when configured.
+        if (method === 'GET' && pathname === '/v1/models' && config.models) {
+          sendJson(res, 200, { data: config.models })
           return
         }
 
-        const upstreamApiKey = resolveUpstreamApiKey(config)
-        const stripAuthHeaders = authRequired || upstreamApiKey !== undefined
-        const forwardHeaders = buildSafeForwardHeaders(req, {
-          trustedProxies,
-          stripAuthHeaders,
-          ...(upstreamApiKey !== undefined
-            ? { extraHeaders: { 'x-api-key': upstreamApiKey } }
-            : {}),
-        })
+        // OTLP telemetry relay (/v1/logs, /v1/metrics, /v1/traces).
+        if (method === 'POST' && OTLP_PATHS.has(pathname)) {
+          otlpRequests += 1
+          const forwardTo = config.telemetry?.forward_to
+          const body = await readRequestBody(req, maxRequestBodyBytes)
+          if (!forwardTo) {
+            if (!res.writableEnded && !res.destroyed) {
+              res.writeHead(204)
+              res.end()
+            }
+            return
+          }
 
-        const hasBody = method !== 'GET' && method !== 'HEAD'
-        const body = hasBody
-          ? await readRequestBody(req, maxRequestBodyBytes)
-          : undefined
-        const targetUrl = joinUrlPath(upstream.url, pathname, parsedUrl.search)
-        const upstreamSignal = createUpstreamSignal(res, upstream.timeout_ms)
+          const targetUrl = joinUrlPath(forwardTo, pathname, parsedUrl.search)
+          const forwardHeaders = buildSafeForwardHeaders(req, {
+            trustedProxies,
+            stripAuthHeaders: true,
+            extraHeaders: config.telemetry?.headers,
+          })
+          const timeoutMs = config.telemetry?.timeout_ms ?? 15_000
+          const upstreamSignal = createUpstreamSignal(res, timeoutMs)
+          try {
+            const upstreamRes = await fetchImpl(targetUrl, {
+              method: 'POST',
+              headers: forwardHeaders,
+              body:
+                body.byteLength > 0
+                  ? new Uint8Array(
+                      body.buffer as ArrayBuffer,
+                      body.byteOffset,
+                      body.byteLength,
+                    )
+                  : undefined,
+              redirect: 'manual',
+              signal: upstreamSignal.signal,
+            })
+            await writeFetchResponse(res, upstreamRes)
+          } catch (err) {
+            if (!res.headersSent && !upstreamSignal.clientAborted()) {
+              sendJson(res, 502, {
+                error: {
+                  type: 'bad_gateway',
+                  message: `OTLP collector relay failed: ${err instanceof Error ? err.message : String(err)}`,
+                },
+              })
+            } else if (!res.writableEnded && !res.destroyed) {
+              try {
+                res.end()
+              } catch {
+                // ignore closed socket
+              }
+            }
+          } finally {
+            upstreamSignal.cleanup()
+          }
+          return
+        }
 
-        try {
-          const upstreamRes = await fetchImpl(targetUrl, {
-            method,
-            headers: forwardHeaders,
-            ...(body && body.byteLength > 0
-              ? { body: new Uint8Array(body) }
+        // Anthropic inference proxy (/v1/messages & /v1/*).
+        if (pathname.startsWith('/v1/')) {
+          inferenceRequests += 1
+          const upstream = config.upstreams?.anthropic
+          if (!upstream?.url) {
+            sendJson(res, 503, {
+              error: {
+                type: 'service_unavailable',
+                message: 'No Anthropic inference upstream configured',
+              },
+            })
+            return
+          }
+
+          const upstreamApiKey = resolveUpstreamApiKey(config)
+          const stripAuthHeaders = authRequired || upstreamApiKey !== undefined
+          const forwardHeaders = buildSafeForwardHeaders(req, {
+            trustedProxies,
+            stripAuthHeaders,
+            ...(upstreamApiKey !== undefined
+              ? { extraHeaders: { 'x-api-key': upstreamApiKey } }
               : {}),
-            signal: upstreamSignal.signal,
           })
-          await writeFetchResponse(res, upstreamRes)
-        } catch (err) {
-          if (!res.headersSent && !upstreamSignal.clientAborted()) {
-            sendJson(res, 502, {
-              error: {
-                type: 'bad_gateway',
-                message: `Anthropic upstream proxy failed: ${err instanceof Error ? err.message : String(err)}`,
-              },
+
+          const hasBody = method !== 'GET' && method !== 'HEAD'
+          const body = hasBody
+            ? await readRequestBody(req, maxRequestBodyBytes)
+            : undefined
+          const targetUrl = joinUrlPath(
+            upstream.url,
+            pathname,
+            parsedUrl.search,
+          )
+          const upstreamSignal = createUpstreamSignal(res, upstream.timeout_ms)
+
+          try {
+            const upstreamRes = await fetchImpl(targetUrl, {
+              method,
+              headers: forwardHeaders,
+              ...(body && body.byteLength > 0
+                ? {
+                    body: new Uint8Array(
+                      body.buffer as ArrayBuffer,
+                      body.byteOffset,
+                      body.byteLength,
+                    ),
+                  }
+                : {}),
+              redirect: 'manual',
+              signal: upstreamSignal.signal,
             })
-          } else if (!res.writableEnded) {
+            await writeFetchResponse(res, upstreamRes)
+          } catch (err) {
+            if (!res.headersSent && !upstreamSignal.clientAborted()) {
+              sendJson(res, 502, {
+                error: {
+                  type: 'bad_gateway',
+                  message: `Anthropic upstream proxy failed: ${err instanceof Error ? err.message : String(err)}`,
+                },
+              })
+            } else if (!res.writableEnded && !res.destroyed) {
+              try {
+                res.end()
+              } catch {
+                // ignore closed socket
+              }
+            }
+          } finally {
+            upstreamSignal.cleanup()
+          }
+          return
+        }
+
+        sendJson(res, 404, {
+          error: {
+            type: 'not_found',
+            message: `Route not found: ${method} ${pathname}`,
+          },
+        })
+      } catch (err) {
+        try {
+          if (!res.headersSent && !res.destroyed) {
+            const message = err instanceof Error ? err.message : String(err)
+            const isTooLarge = err instanceof PayloadTooLargeError
+            sendJson(
+              res,
+              isTooLarge ? 413 : 500,
+              {
+                error: {
+                  type: isTooLarge ? 'request_too_large' : 'internal_error',
+                  message,
+                },
+              },
+              isTooLarge ? { connection: 'close' } : undefined,
+            )
+          } else if (!res.writableEnded && !res.destroyed) {
             res.end()
           }
-        } finally {
-          upstreamSignal.cleanup()
+        } catch {
+          // Never throw unhandledRejection from error handler writes
         }
-        return
       }
-
-      sendJson(res, 404, {
-        error: {
-          type: 'not_found',
-          message: `Route not found: ${method} ${pathname}`,
-        },
-      })
-    } catch (err) {
-      if (!res.headersSent) {
-        const message = err instanceof Error ? err.message : String(err)
-        const isTooLarge = err instanceof PayloadTooLargeError
-        sendJson(
-          res,
-          isTooLarge ? 413 : 500,
-          {
-            error: {
-              type: isTooLarge ? 'request_too_large' : 'internal_error',
-              message,
-            },
-          },
-          isTooLarge ? { connection: 'close' } : undefined,
-        )
-      } else if (!res.writableEnded) {
-        res.end()
-      }
-    }
+    })().catch(() => {
+      // Defensive sink to prevent unhandledRejection on aborted sockets
+    })
   })
 
   await new Promise<void>((resolve, reject) => {
@@ -1014,13 +1284,16 @@ export async function startGatewayServer(
     if (closed) return
     closed = true
     await new Promise<void>((resolve, reject) => {
+      const graceTimer = setTimeout(() => {
+        server.closeAllConnections?.()
+      }, 1_000)
+      graceTimer.unref?.()
       server.close(err => {
+        clearTimeout(graceTimer)
         if (err) reject(err)
         else resolve()
       })
-      if (typeof server.closeAllConnections === 'function') {
-        server.closeAllConnections()
-      }
+      server.closeIdleConnections?.()
     })
   }
 

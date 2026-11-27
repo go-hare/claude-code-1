@@ -11,7 +11,10 @@ import { join } from 'node:path'
 import { FileEditTool } from '@claude-code/builtin-tools/tools/FileEditTool/FileEditTool.js'
 import { FileReadTool } from '@claude-code/builtin-tools/tools/FileReadTool/FileReadTool.js'
 import { FileWriteTool } from '@claude-code/builtin-tools/tools/FileWriteTool/FileWriteTool.js'
+import { resumeAgentBackground } from '@claude-code/builtin-tools/tools/AgentTool/resumeAgent.js'
+import { spawnTeammate } from '@claude-code/builtin-tools/tools/shared/spawnMultiAgent.js'
 import { createEmbeddedHost } from '../../../entrypoints/sdk/embeddedHost.js'
+import { DisklessRefusalError } from '../../../utils/disklessGuards.js'
 import {
   clearRemoteNativeToolRunners,
   createExplicitToolDeps,
@@ -1413,5 +1416,369 @@ describe('remoteToolsTransport (Official 2.1.331 chunks #332 & #2194)', () => {
       decodeSpy.mockRestore()
       client.dispose()
     }
+  })
+
+  test('R2-P0-1 & R2-P2-4: enforces local evaluateHere floor (deny > ask > allow), schema-validates updatedInput, passes redirect: manual, rejects non-loopback worker URL, and fails NOT_RUN after worker exit', async () => {
+    const capturedInits: Array<RequestInit | undefined> = []
+    let remoteResult: Record<string, unknown> = {
+      behavior: 'allow',
+      updatedInput: { file_path: '/ok.txt', content: 'valid' },
+    }
+    const bridge = createHttpRemoteNativeToolBridge({
+      url: 'http://127.0.0.1:9999/mcp',
+      enableRemotePermissionCheck: true,
+      fetchImpl: async (_url, init) => {
+        capturedInits.push(init)
+        return new Response(
+          JSON.stringify({ jsonrpc: '2.0', id: 1, result: remoteResult }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      },
+    })
+
+    const session = makeDisklessSession()
+    const detach = bridge.attach(session)
+    const ctx = resolveToolUseContext(
+      createExplicitToolDeps({ session }),
+      createToolCallContext({ toolUseId: 'toolu_r2_p0_1' }),
+    )
+
+    try {
+      const registeredCheck = getRemoteNativeToolCheck(session, 'Write')
+      expect(registeredCheck).toBeDefined()
+
+      // 1. Remote allow CANNOT bypass local deny
+      const localDenyRes = await registeredCheck!({
+        tool: FileWriteTool,
+        input: { file_path: '/etc/shadow', content: 'x' },
+        context: ctx,
+        toolUseID: 'toolu_r2_p0_1',
+        evaluateHere: async () => ({
+          behavior: 'deny',
+          message: 'Blocked by local managed deny rule',
+          decisionReason: { type: 'other', reason: 'alwaysDenyRules' },
+        }),
+      })
+      expect(localDenyRes).toMatchObject({
+        behavior: 'deny',
+        message: 'Blocked by local managed deny rule',
+      })
+
+      // 2. Remote allow CANNOT bypass local ask
+      const localAskRes = await registeredCheck!({
+        tool: FileWriteTool,
+        input: { file_path: '/prod/app.ts', content: 'x' },
+        context: ctx,
+        toolUseID: 'toolu_r2_p0_1',
+        evaluateHere: async () => ({
+          behavior: 'ask',
+          message: 'Local ask rule requires confirmation',
+          decisionReason: { type: 'other', reason: 'alwaysAskRules' },
+        }),
+      })
+      expect(localAskRes).toMatchObject({
+        behavior: 'ask',
+        message: 'Local ask rule requires confirmation',
+      })
+
+      // 3. Remote updatedInput failing tool.inputSchema is rejected (deny)
+      remoteResult = {
+        behavior: 'allow',
+        updatedInput: { file_path: 12345 }, // missing required string content + wrong file_path type
+      }
+      const badUpdatedInputRes = await registeredCheck!({
+        tool: FileWriteTool,
+        input: { file_path: '/ok.txt', content: 'x' },
+        context: ctx,
+        toolUseID: 'toolu_r2_p0_1',
+        evaluateHere: async () => ({ behavior: 'allow' }),
+      })
+      expect(badUpdatedInputRes).toMatchObject({
+        behavior: 'deny',
+        decisionReason: {
+          type: 'other',
+          reason: 'invalid remote updatedInput',
+        },
+      })
+
+      // 4. Both checkPermissions and callTool pass redirect: 'manual'
+      await bridge.callTool('Read', { file_path: '/a' }).catch(() => undefined)
+      expect(capturedInits.length).toBeGreaterThanOrEqual(4)
+      for (const init of capturedInits) {
+        expect(init?.redirect).toBe('manual')
+      }
+    } finally {
+      detach()
+      await bridge.dispose()
+      clearRemoteNativeToolRunners(session)
+    }
+
+    // 5. spawnRemoteNativeToolWorker rejects non-loopback advertised URL
+    const tmpDir = mkdtempSync(join(tmpdir(), 'remote-native-r2-p2-4-'))
+    const badHostScript = join(tmpDir, 'bad-host-worker.mjs')
+    const crashScript = join(tmpDir, 'crash-worker.mjs')
+    try {
+      writeFileSync(
+        badHostScript,
+        `
+console.log('MCP server auth token: tok-bad')
+console.log('MCP server listening on http://evil.example.com:8080/mcp')
+setInterval(() => {}, 1000)
+`,
+        'utf8',
+      )
+      await expect(
+        spawnRemoteNativeToolWorker({
+          command: process.execPath,
+          args: [badHostScript],
+          startupTimeoutMs: 5_000,
+          shutdownGraceMs: 1_000,
+        }),
+      ).rejects.toThrow(/non-loopback URL/)
+
+      // 6. Post-startup worker crash fails subsequent calls with NOT_RUN
+      writeFileSync(
+        crashScript,
+        `
+console.log('MCP server auth token: tok-crash')
+console.log('MCP server listening on http://127.0.0.1:1/mcp')
+setTimeout(() => process.exit(42), 30)
+`,
+        'utf8',
+      )
+      const spawned = await spawnRemoteNativeToolWorker({
+        command: process.execPath,
+        args: [crashScript],
+        startupTimeoutMs: 5_000,
+        shutdownGraceMs: 1_000,
+      })
+      try {
+        await new Promise(resolve => setTimeout(resolve, 120))
+        await expect(
+          spawned.bridge.callTool('Read', { file_path: '/x' }),
+        ).rejects.toMatchObject({
+          name: NativeToolElsewhereError.name,
+          code: 'NOT_RUN',
+        })
+        const permAfterCrash = await spawned.bridge.checkPermissions('Read', {
+          file_path: '/x',
+        })
+        expect(permAfterCrash).toMatchObject({
+          behavior: 'deny',
+          decisionReason: { type: 'other', reason: 'remote worker exited' },
+        })
+      } finally {
+        await spawned.dispose()
+      }
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
+  })
+
+  test('R2-P1-8 & R2-P2-3: WebSocket ctor throw recovers & reconnects, keepalive closes on token expiry (4001), terminal codes stop reconnect, Blob frames stay ordered, control chars rejected', async () => {
+    // 1. Tightened control-char regex in validateBridgeWebSocketUrl
+    expect(
+      validateBridgeWebSocketUrl('wss://bridge.claudeusercontent.com/\x00'),
+    ).toBeUndefined()
+    expect(
+      validateBridgeWebSocketUrl('wss://bridge.claudeusercontent.com/\x07'),
+    ).toBeUndefined()
+    expect(
+      validateBridgeWebSocketUrl('wss://bridge.claudeusercontent.com/\x1f'),
+    ).toBeUndefined()
+    expect(
+      validateBridgeWebSocketUrl('wss://bridge.claudeusercontent.com/\x7f'),
+    ).toBeUndefined()
+
+    // 2. WebSocket constructor throwing transitions out of 'connecting', calls onError, and schedules reconnect
+    let ctorCalls = 0
+    const errors: Error[] = []
+    class FlakyCtorWs implements BridgeWebSocketLike {
+      readyState = 0
+      #listeners = new Map<string, Set<(event: unknown) => void>>()
+      constructor(_url: string) {
+        ctorCalls += 1
+        if (ctorCalls === 1) {
+          throw new Error('transient ws ctor error')
+        }
+      }
+      addEventListener(type: string, fn: (event: unknown) => void): void {
+        const set = this.#listeners.get(type) ?? new Set()
+        set.add(fn)
+        this.#listeners.set(type, set)
+      }
+      removeEventListener(type: string, fn: (event: unknown) => void): void {
+        this.#listeners.get(type)?.delete(fn)
+      }
+      send(): void {}
+      close(): void {
+        this.readyState = 3
+      }
+    }
+    const flakyClient = new RemoteToolsBridgeClient({
+      url: 'wss://bridge.claudeusercontent.com',
+      initialReconnectDelayMs: 20,
+      maxReconnectDelayMs: 20,
+      keepaliveIntervalMs: 0,
+      WebSocketCtor: FlakyCtorWs,
+      onError: err => errors.push(err),
+    })
+    try {
+      flakyClient.start()
+      expect(flakyClient.state).toBe('reconnecting')
+      expect(errors.map(e => e.message)).toContain('transient ws ctor error')
+      await new Promise(resolve => setTimeout(resolve, 60))
+      expect(ctorCalls).toBe(2)
+    } finally {
+      flakyClient.dispose()
+    }
+
+    // 3. Keepalive closes socket with 4001 on token expiry; terminal close codes (1008, 4001, 4003) stop reconnect
+    const createdSockets: Array<{
+      readyState: number
+      sent: unknown[]
+      closedWith?: { code?: number; reason?: string }
+      close: (code?: number, reason?: string) => void
+      emit: (type: string, event: unknown) => void
+      openNow: () => void
+    }> = []
+    class ControllableWs implements BridgeWebSocketLike {
+      readyState = 0
+      sent: unknown[] = []
+      closedWith?: { code?: number; reason?: string }
+      #listeners = new Map<string, Set<(event: unknown) => void>>()
+      constructor(_url: string) {
+        createdSockets.push(this)
+      }
+      addEventListener(type: string, fn: (event: unknown) => void): void {
+        const set = this.#listeners.get(type) ?? new Set()
+        set.add(fn)
+        this.#listeners.set(type, set)
+      }
+      removeEventListener(type: string, fn: (event: unknown) => void): void {
+        this.#listeners.get(type)?.delete(fn)
+      }
+      send(data: string | Uint8Array | ArrayBuffer): void {
+        this.sent.push(data)
+      }
+      close(code?: number, reason?: string): void {
+        this.readyState = 3
+        this.closedWith = { code, reason }
+        this.emit('close', { code, reason })
+      }
+      emit(type: string, event: unknown): void {
+        for (const fn of [...(this.#listeners.get(type) ?? [])]) {
+          fn(event)
+        }
+      }
+      openNow(): void {
+        this.readyState = 1
+        this.emit('open', {})
+      }
+    }
+
+    const closeInfos: Array<{ code?: number; willReconnect: boolean }> = []
+    let expiredCount = 0
+    const expiringClient = new RemoteToolsBridgeClient({
+      url: 'wss://bridge.claudeusercontent.com',
+      token: 'tok-short',
+      tokenDeadlineMs: Date.now() + 25,
+      keepaliveIntervalMs: 15,
+      pongTimeoutMs: 1_000,
+      WebSocketCtor: ControllableWs,
+      onTokenExpired: () => {
+        expiredCount += 1
+      },
+      onClose: info => {
+        closeInfos.push({ code: info.code, willReconnect: info.willReconnect })
+      },
+    })
+    try {
+      expiringClient.start()
+      const ws = createdSockets[createdSockets.length - 1]!
+      ws.openNow()
+      await new Promise(resolve => setTimeout(resolve, 65))
+      expect(expiredCount).toBeGreaterThanOrEqual(1)
+      expect(ws.closedWith).toEqual({ code: 4001, reason: 'token expired' })
+      expect(closeInfos).toContainEqual({ code: 4001, willReconnect: false })
+      expect(expiringClient.state).toBe('idle')
+    } finally {
+      expiringClient.dispose()
+    }
+
+    for (const terminalCode of [1008, 4001, 4003]) {
+      let willReconnectResult: boolean | undefined
+      const termClient = new RemoteToolsBridgeClient({
+        url: 'wss://bridge.claudeusercontent.com',
+        keepaliveIntervalMs: 0,
+        WebSocketCtor: ControllableWs,
+        onClose: info => {
+          willReconnectResult = info.willReconnect
+        },
+      })
+      try {
+        termClient.start()
+        const ws = createdSockets[createdSockets.length - 1]!
+        ws.openNow()
+        ws.close(terminalCode, 'terminal')
+        expect(willReconnectResult).toBe(false)
+        expect(termClient.state).toBe('idle')
+      } finally {
+        termClient.dispose()
+      }
+    }
+
+    // 4. Slow Blob followed by synchronous string frame preserves exact FIFO order
+    const orderedFrames: unknown[] = []
+    const orderClient = new RemoteToolsBridgeClient({
+      url: 'wss://bridge.claudeusercontent.com',
+      keepaliveIntervalMs: 0,
+      WebSocketCtor: ControllableWs,
+      onFrame: frame => orderedFrames.push(frame),
+    })
+    try {
+      orderClient.start()
+      const ws = createdSockets[createdSockets.length - 1]!
+      ws.openNow()
+      const slowBlob = new Blob([JSON.stringify({ seq: 1 })])
+      const origText = slowBlob.text.bind(slowBlob)
+      slowBlob.text = async () => {
+        await new Promise(resolve => setTimeout(resolve, 30))
+        return await origText()
+      }
+      ws.emit('message', { data: slowBlob })
+      ws.emit('message', { data: JSON.stringify({ seq: 2 }) })
+      await new Promise(resolve => setTimeout(resolve, 60))
+      expect(orderedFrames).toEqual([{ seq: 1 }, { seq: 2 }])
+    } finally {
+      orderClient.dispose()
+    }
+  })
+
+  test('R2-P1-12: resumeAgentBackground and spawnTeammate refuse multi-tenant diskless session even outside ALS', async () => {
+    const disklessSession = makeDisklessSession()
+    const ctx = resolveToolUseContext(
+      createExplicitToolDeps({ session: disklessSession }),
+      createToolCallContext({ toolUseId: 'toolu_diskless_1' }),
+    )
+
+    await expect(
+      resumeAgentBackground({
+        agentId: 'agent_diskless_test',
+        prompt: 'continue',
+        toolUseContext: ctx,
+        canUseTool: async () => ({ behavior: 'allow', updatedInput: {} }),
+      }),
+    ).rejects.toBeInstanceOf(DisklessRefusalError)
+
+    await expect(
+      spawnTeammate(
+        {
+          name: 'worker-diskless',
+          prompt: 'do work',
+        },
+        ctx,
+      ),
+    ).rejects.toBeInstanceOf(DisklessRefusalError)
   })
 })

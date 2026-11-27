@@ -8,6 +8,7 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import type {
+  PermissionDecision,
   PermissionDecisionReason,
   PermissionResult,
 } from '../../types/permissions.js'
@@ -32,9 +33,16 @@ export type RemoteNativeToolBridgeCallOptions = {
   agentId?: string
 }
 
+export type RemotePermissionInputSchema = {
+  safeParse(
+    data: unknown,
+  ): { success: true; data: unknown } | { success: false }
+}
+
 export type RemoteNativeToolBridgeCheckOptions = {
   signal?: AbortSignal
   toolUseId?: string
+  inputSchema?: RemotePermissionInputSchema
 }
 
 export type RemoteNativeToolBridgeHandle = {
@@ -67,6 +75,7 @@ export type HttpRemoteNativeToolBridgeOptions = {
   enableRemotePermissionCheck?: boolean
   headers?: Record<string, string>
   fetchImpl?: RemoteNativeToolFetchImpl
+  getUnavailableReason?: () => string | undefined
 }
 
 export type SpawnRemoteNativeToolWorkerOptions = {
@@ -117,6 +126,31 @@ const AUTH_TOKEN_RE = /MCP server auth token:\s*(\S+)/i
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000
 const DEFAULT_SHUTDOWN_GRACE_MS = 5_000
+const LOOPBACK_WORKER_HOSTS = new Set([
+  '127.0.0.1',
+  'localhost',
+  '::1',
+  '[::1]',
+])
+
+function assertLoopbackWorkerUrl(rawUrl: string): void {
+  let parsed: URL
+  try {
+    parsed = new URL(rawUrl)
+  } catch {
+    throw new Error(
+      `Remote native-tool worker advertised invalid URL: ${rawUrl}`,
+    )
+  }
+  if (
+    (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+    !LOOPBACK_WORKER_HOSTS.has(parsed.hostname.toLowerCase())
+  ) {
+    throw new Error(
+      `Remote native-tool worker advertised non-loopback URL: ${rawUrl}`,
+    )
+  }
+}
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -228,10 +262,33 @@ function parseDecisionReason(
   return undefined
 }
 
+function validateRemoteUpdatedInput(
+  rawUpdatedInput: unknown,
+  inputSchema: RemotePermissionInputSchema | undefined,
+):
+  | { valid: true; value: Record<string, unknown> | undefined }
+  | { valid: false } {
+  if (rawUpdatedInput === undefined) {
+    return { valid: true, value: undefined }
+  }
+  if (!isPlainRecord(rawUpdatedInput)) {
+    return { valid: false }
+  }
+  if (inputSchema === undefined) {
+    return { valid: true, value: rawUpdatedInput }
+  }
+  const parsed = inputSchema.safeParse(rawUpdatedInput)
+  if (!parsed.success || !isPlainRecord(parsed.data)) {
+    return { valid: false }
+  }
+  return { valid: true, value: parsed.data }
+}
+
 function validateRemotePermissionResult(
   toolName: string,
   input: Record<string, unknown>,
   raw: unknown,
+  inputSchema?: RemotePermissionInputSchema,
 ): PermissionResult | typeof REMOTE_CHECK_DOES_NOT_DECIDE {
   if (!isPlainRecord(raw)) {
     return {
@@ -265,9 +322,23 @@ function validateRemotePermissionResult(
     }
   }
   if (behavior === 'allow') {
+    const validatedUpdate = validateRemoteUpdatedInput(
+      raw.updatedInput,
+      inputSchema,
+    )
+    if (!validatedUpdate.valid) {
+      return {
+        behavior: 'deny',
+        message: `${toolName} was not run: remote permission check returned an invalid updatedInput.`,
+        decisionReason: {
+          type: 'other',
+          reason: 'invalid remote updatedInput',
+        },
+      }
+    }
     return {
       behavior: 'allow',
-      updatedInput: isPlainRecord(raw.updatedInput) ? raw.updatedInput : input,
+      updatedInput: validatedUpdate.value ?? input,
       ...(parsedReason !== undefined ? { decisionReason: parsedReason } : {}),
     }
   }
@@ -287,6 +358,20 @@ function validateRemotePermissionResult(
     }
   }
   if (behavior === 'ask') {
+    const validatedUpdate = validateRemoteUpdatedInput(
+      raw.updatedInput,
+      inputSchema,
+    )
+    if (!validatedUpdate.valid) {
+      return {
+        behavior: 'deny',
+        message: `${toolName} was not run: remote permission check returned an invalid updatedInput.`,
+        decisionReason: {
+          type: 'other',
+          reason: 'invalid remote updatedInput',
+        },
+      }
+    }
     const message = sanitizeRemoteWireText(
       typeof raw.message === 'string' && raw.message.trim().length > 0
         ? raw.message
@@ -295,8 +380,8 @@ function validateRemotePermissionResult(
     return {
       behavior: 'ask',
       message,
-      ...(isPlainRecord(raw.updatedInput)
-        ? { updatedInput: raw.updatedInput }
+      ...(validatedUpdate.value !== undefined
+        ? { updatedInput: validatedUpdate.value }
         : {}),
       ...(parsedReason !== undefined ? { decisionReason: parsedReason } : {}),
       ...(typeof raw.blockedPath === 'string'
@@ -413,6 +498,13 @@ export function createHttpRemoteNativeToolBridge(
         'NOT_RUN',
       )
     }
+    const unavailableReason = options.getUnavailableReason?.()
+    if (unavailableReason !== undefined) {
+      throw new NativeToolElsewhereError(
+        sanitizeRemoteWireText(`${toolName} was not run: ${unavailableReason}`),
+        'NOT_RUN',
+      )
+    }
     if (opts?.signal?.aborted) {
       throw new NativeToolElsewhereError(
         `${toolName} was not run: request was aborted before dispatch.`,
@@ -450,6 +542,7 @@ export function createHttpRemoteNativeToolBridge(
         method: 'POST',
         headers: buildHeaders(),
         body: requestBody,
+        redirect: 'manual',
         signal: reqSignal.signal,
       })
     } catch (err) {
@@ -605,6 +698,19 @@ export function createHttpRemoteNativeToolBridge(
         },
       }
     }
+    const unavailableReason = options.getUnavailableReason?.()
+    if (unavailableReason !== undefined) {
+      return {
+        behavior: 'deny',
+        message: sanitizeRemoteWireText(
+          `${toolName} was not run: ${unavailableReason}`,
+        ),
+        decisionReason: {
+          type: 'other',
+          reason: 'remote worker exited',
+        },
+      }
+    }
 
     const id = nextRequestId++
     const requestBody = JSON.stringify({
@@ -625,6 +731,7 @@ export function createHttpRemoteNativeToolBridge(
         method: 'POST',
         headers: buildHeaders(),
         body: requestBody,
+        redirect: 'manual',
         signal: reqSignal.signal,
       })
     } catch (err) {
@@ -747,7 +854,12 @@ export function createHttpRemoteNativeToolBridge(
       }
     }
 
-    return validateRemotePermissionResult(toolName, input, parsedBody.result)
+    return validateRemotePermissionResult(
+      toolName,
+      input,
+      parsedBody.result,
+      opts?.inputSchema,
+    )
   }
 
   function attach(session: RemoteNativeToolSession): () => void {
@@ -767,25 +879,60 @@ export function createHttpRemoteNativeToolBridge(
 
     let remoteCheck: RemoteNativeToolCheck | undefined
     if (enableRemotePermissionCheck) {
+      const inFlightRemoteResults = new Map<string, PermissionResult>()
+
       runner.checkPermissions = async (tool, input, context) => {
+        if (
+          context.toolUseId !== undefined &&
+          inFlightRemoteResults.has(context.toolUseId)
+        ) {
+          return inFlightRemoteResults.get(context.toolUseId)
+        }
         const recordInput = isPlainRecord(input) ? input : {}
         const result = await checkPermissions(tool.name, recordInput, {
           signal: context.abortController?.signal,
           toolUseId: context.toolUseId,
+          inputSchema: tool.inputSchema,
         })
         return result === REMOTE_CHECK_DOES_NOT_DECIDE ? undefined : result
       }
 
-      remoteCheck = async ({ tool, input, context, toolUseID }) => {
+      remoteCheck = async ({
+        tool,
+        input,
+        context,
+        toolUseID,
+        evaluateHere,
+      }) => {
         const result = await checkPermissions(tool.name, input, {
           signal: context.abortController?.signal,
           toolUseId: toolUseID,
+          inputSchema: tool.inputSchema,
         })
         if (
           result === REMOTE_CHECK_DOES_NOT_DECIDE ||
           result.behavior === 'passthrough'
         ) {
           return REMOTE_CHECK_DOES_NOT_DECIDE
+        }
+        if (result.behavior === 'deny') {
+          return result
+        }
+        // Mandatory local host policy floor (deny > ask > allow): a remote
+        // allow/ask must never bypass local alwaysDenyRules, alwaysAskRules,
+        // or enterprise managed policies.
+        inFlightRemoteResults.set(toolUseID, result)
+        let localDecision: PermissionDecision
+        try {
+          localDecision = await evaluateHere()
+        } finally {
+          inFlightRemoteResults.delete(toolUseID)
+        }
+        if (localDecision.behavior === 'deny') {
+          return localDecision
+        }
+        if (localDecision.behavior === 'ask') {
+          return result.behavior === 'ask' ? result : localDecision
         }
         return result
       }
@@ -1044,6 +1191,27 @@ export async function spawnRemoteNativeToolWorker(
     throw err
   })
 
+  try {
+    assertLoopbackWorkerUrl(ready.url)
+  } catch (err) {
+    rl.close()
+    await terminateChildProcess(child, shutdownGraceMs)
+    throw err
+  }
+
+  let postStartupExitReason: string | undefined
+  const onPostStartupExit = (
+    code: number | null,
+    signal: NodeJS.Signals | null,
+  ) => {
+    postStartupExitReason = `remote native-tool worker exited unexpectedly (code=${code}, signal=${signal})`
+  }
+  if (child.exitCode !== null || child.signalCode !== null) {
+    onPostStartupExit(child.exitCode, child.signalCode)
+  } else {
+    child.once('exit', onPostStartupExit)
+  }
+
   const bridge = createHttpRemoteNativeToolBridge({
     url: ready.url,
     authToken: ready.authToken,
@@ -1052,6 +1220,7 @@ export async function spawnRemoteNativeToolWorker(
     enableRemotePermissionCheck: options.enableRemotePermissionCheck,
     headers: options.headers,
     fetchImpl: options.fetchImpl,
+    getUnavailableReason: () => postStartupExitReason,
   })
 
   const attachedDetachers = new Set<() => void>()
@@ -1072,6 +1241,7 @@ export async function spawnRemoteNativeToolWorker(
       return disposePromise
     }
     disposePromise = (async () => {
+      child.off('exit', onPostStartupExit)
       const detachers = [...attachedDetachers]
       attachedDetachers.clear()
       for (const detach of detachers) {

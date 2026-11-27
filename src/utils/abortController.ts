@@ -153,14 +153,45 @@ function removeAbortHandler(
   }
 }
 
+const childAbortDetachers = new WeakMap<AbortController, () => void>()
+
+/**
+ * Detaches a child AbortController created by `createChildAbortController`
+ * from its parent's abort signal on normal (non-aborted) completion, preventing
+ * unbounded listener accumulation on long-lived parent signals.
+ */
+export function detachChildAbortController(child: AbortController): void {
+  const detach = childAbortDetachers.get(child)
+  if (detach !== undefined) {
+    childAbortDetachers.delete(child)
+    detach()
+  }
+}
+
+/**
+ * Creates a child AbortController linked to `parent` together with an
+ * idempotent `detach()` callback that removes the parent abort listener on
+ * normal completion.
+ */
+export function createDetachableChildAbortController(
+  parent: AbortController,
+  maxListeners?: number,
+): { abortController: AbortController; detach: () => void } {
+  const abortController = createChildAbortController(parent, maxListeners)
+  return {
+    abortController,
+    detach: () => detachChildAbortController(abortController),
+  }
+}
+
 /**
  * Creates a child AbortController that aborts when its parent aborts.
  * Aborting the child does NOT affect the parent.
  *
  * Memory-safe: Uses WeakRef so the parent doesn't retain abandoned children.
  * If the child is dropped without being aborted, it can still be GC'd.
- * When the child IS aborted, the parent listener is removed to prevent
- * accumulation of dead handlers.
+ * When the child IS aborted (or `detachChildAbortController(child)` is called),
+ * the parent listener is removed to prevent accumulation of dead handlers.
  *
  * @param parent - The parent AbortController
  * @param maxListeners - Maximum number of listeners (default: 50)
@@ -184,17 +215,24 @@ export function createChildAbortController(
   const weakChild = new WeakRef(child)
   const weakParent = new WeakRef(parent)
   const handler = propagateAbort.bind(weakParent, weakChild)
+  const weakHandler = new WeakRef(handler)
+  const cleanupHandler = removeAbortHandler.bind(weakParent, weakHandler)
 
   parent.signal.addEventListener('abort', handler, { once: true })
 
   // Auto-cleanup: remove parent listener when child is aborted (from any source).
   // Both parent and handler are weakly held — if either has been GC'd or the
   // parent already aborted ({once: true}), the cleanup is a harmless no-op.
-  child.signal.addEventListener(
-    'abort',
-    removeAbortHandler.bind(weakParent, new WeakRef(handler)),
-    { once: true },
-  )
+  child.signal.addEventListener('abort', cleanupHandler, { once: true })
+
+  childAbortDetachers.set(child, () => {
+    const p = weakParent.deref()
+    const h = weakHandler.deref()
+    if (p && h) {
+      p.signal.removeEventListener('abort', h)
+    }
+    weakChild.deref()?.signal.removeEventListener('abort', cleanupHandler)
+  })
 
   return child
 }

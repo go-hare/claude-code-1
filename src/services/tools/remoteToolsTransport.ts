@@ -161,7 +161,8 @@ export function validateBridgeWebSocketUrl(
   opts?: { allowLoopbackWs?: boolean },
 ): string | undefined {
   const trimmed = raw.trim()
-  if (trimmed === '' || /[\s\r\n\t]/.test(trimmed)) {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional ASCII control character rejection
+  if (trimmed === '' || /[\x00-\x1f\x7f\s]/.test(trimmed)) {
     return undefined
   }
   let parsed: URL
@@ -274,8 +275,17 @@ export type RemoteToolsBridgeClientOptions = {
 
 const WS_OPEN = 1
 const WS_CLOSE_NORMAL = 1000
+const WS_CLOSE_POLICY_VIOLATION = 1008
 const WS_CLOSE_PONG_TIMEOUT = 4000
+const WS_CLOSE_TOKEN_EXPIRED = 4001
+const WS_CLOSE_FORBIDDEN = 4003
 const WS_CLOSE_SLOT_CONTENTION = 4009
+
+const TERMINAL_CLOSE_CODES = new Set([
+  WS_CLOSE_POLICY_VIOLATION,
+  WS_CLOSE_TOKEN_EXPIRED,
+  WS_CLOSE_FORBIDDEN,
+])
 
 const DEFAULT_KEEPALIVE_INTERVAL_MS = 30_000
 const DEFAULT_PONG_TIMEOUT_MS = 10_000
@@ -540,9 +550,24 @@ export class RemoteToolsBridgeClient {
     }
     this.#state = 'connecting'
 
-    const WsCtor = this.#resolveWebSocketCtor()
-    const ws = new WsCtor(this.url)
+    let ws: BridgeWebSocketLike
+    try {
+      const WsCtor = this.#resolveWebSocketCtor()
+      ws = new WsCtor(this.url)
+    } catch (err) {
+      this.#state = 'reconnecting'
+      this.#options.onError?.(
+        err instanceof Error ? err : new Error(String(err)),
+      )
+      if (!this.#disposed) {
+        this.#scheduleReconnect()
+      }
+      return
+    }
     this.#ws = ws
+
+    let pendingBlobCount = 0
+    let frameOrderChain: Promise<void> = Promise.resolve()
 
     const onOpen = () => {
       if (this.#disposed || this.#ws !== ws) return
@@ -577,18 +602,22 @@ export class RemoteToolsBridgeClient {
           )
           return
         }
-        void data
-          .text()
-          .then(text => {
+        pendingBlobCount += 1
+        const textPromise = data.text()
+        frameOrderChain = frameOrderChain.then(async () => {
+          try {
+            const text = await textPromise
             if (this.#disposed || this.#ws !== ws) return
             this.#handleDecodedText(text)
-          })
-          .catch(err => {
+          } catch (err) {
             if (this.#disposed || this.#ws !== ws) return
             this.#options.onError?.(
               err instanceof Error ? err : new Error(String(err)),
             )
-          })
+          } finally {
+            pendingBlobCount -= 1
+          }
+        })
         return
       }
       const decoded = decodeMessageData(data, this.maxFrameBytes)
@@ -603,7 +632,15 @@ export class RemoteToolsBridgeClient {
       if (decoded.text === undefined) {
         return
       }
-      this.#handleDecodedText(decoded.text)
+      const text = decoded.text
+      if (pendingBlobCount > 0) {
+        frameOrderChain = frameOrderChain.then(() => {
+          if (this.#disposed || this.#ws !== ws) return
+          this.#handleDecodedText(text)
+        })
+        return
+      }
+      this.#handleDecodedText(text)
     }
 
     const onError = (event: unknown) => {
@@ -642,7 +679,10 @@ export class RemoteToolsBridgeClient {
         this.#consecutiveSlotContention = 0
       }
 
-      const willReconnect = this.#consecutiveSlotContention < maxContention
+      const isTerminalClose =
+        code !== undefined && TERMINAL_CLOSE_CODES.has(code)
+      const willReconnect =
+        !isTerminalClose && this.#consecutiveSlotContention < maxContention
       this.#state = willReconnect ? 'reconnecting' : 'idle'
       this.#options.onClose?.({ code, reason, willReconnect })
 
@@ -682,7 +722,14 @@ export class RemoteToolsBridgeClient {
       if (this.#disposed || !this.#ws || this.#ws.readyState !== WS_OPEN) {
         return
       }
-      this.#checkTokenDeadline()
+      if (this.#checkTokenDeadline()) {
+        try {
+          this.#ws.close(WS_CLOSE_TOKEN_EXPIRED, 'token expired')
+        } catch {
+          // Ignore close failure
+        }
+        return
+      }
       try {
         this.sendFrame({ type: 'ping', ts: Date.now() })
       } catch {
@@ -712,7 +759,9 @@ export class RemoteToolsBridgeClient {
     const maxMs =
       this.#options.maxReconnectDelayMs ?? DEFAULT_MAX_RECONNECT_DELAY_MS
     const exponent = Math.min(this.#reconnectAttempt, 16)
-    const delayMs = Math.min(maxMs, initialMs * 2 ** exponent)
+    const baseDelayMs = Math.min(maxMs, initialMs * 2 ** exponent)
+    const jitterFactor = 0.5 + Math.random() * 0.5
+    const delayMs = Math.max(0, Math.round(baseDelayMs * jitterFactor))
     this.#reconnectAttempt += 1
     this.#reconnectTimer = setTimeout(() => {
       this.#reconnectTimer = undefined

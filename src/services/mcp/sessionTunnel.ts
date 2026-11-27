@@ -19,6 +19,7 @@ export const TUNNEL_LIVENESS_DEADLINE_MS = 600_000
 export const TUNNEL_HOLD_MAX_FRAMES = 64
 export const TUNNEL_HOLD_MAX_BYTES = 33_554_432
 export const TUNNEL_HOLD_CLOSE_CODE = 1013
+export const TUNNEL_MAX_IN_FLIGHT_REQUESTS = 32
 export const TOOL_SERVER_STARTING_BODY = JSON.stringify({
   type: 'error',
   error: {
@@ -277,9 +278,23 @@ function validateOrigin(raw: string, ctx: z.RefinementCtx): string {
   return z.NEVER
 }
 
+const SAFE_SESSION_ID_RE = /^[A-Za-z0-9._-]+$/
+
+function isValidTunnelSessionId(id: string): boolean {
+  return (
+    id.length > 0 &&
+    id.length <= 256 &&
+    id !== '.' &&
+    id !== '..' &&
+    SAFE_SESSION_ID_RE.test(id)
+  )
+}
+
 const SessionTunnelEnvelopeSchema = z.object({
   v: z.literal(1),
-  session_id: z.string().min(1),
+  session_id: z.string().min(1).refine(isValidTunnelSessionId, {
+    message: 'session_id contains invalid characters or traversal segments',
+  }),
   session_token: z.string().min(1),
   api_base_url: z.string().transform(validateOrigin),
   session_token_expires_at: z
@@ -377,6 +392,7 @@ export type InProcessHttpRequest = {
   path: string
   headers?: Record<string, string>
   body?: string
+  signal?: AbortSignal
 }
 
 export type InProcessHttpResponse = {
@@ -417,6 +433,7 @@ export type StartSessionTunnelOptions = {
   livenessDeadlineMs?: number
   maxFrames?: number
   maxBytes?: number
+  maxInFlightRequests?: number
   bufferDuringHold?: boolean
   onExit?: (code: number, reason: string) => void
   WebSocketImpl?: typeof globalThis.WebSocket
@@ -430,6 +447,11 @@ export type StartSessionTunnelOptions = {
 export function buildSessionTunnelRelayUrl(
   envelope: SessionTunnelEnvelope,
 ): string {
+  if (!isValidTunnelSessionId(envelope.session_id)) {
+    throw new Error(
+      `Invalid session_id "${envelope.session_id}" for session tunnel relay URL`,
+    )
+  }
   const parsed = new URL(envelope.api_base_url)
   parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:'
   parsed.pathname = `/v1/sessions/${encodeURIComponent(envelope.session_id)}/tool_tunnel`
@@ -444,20 +466,56 @@ function isTokenExpired(expiresAt: number | undefined, nowMs: number): boolean {
   return nowMs >= expiresAtMs
 }
 
-async function decodeWsPayload(data: unknown): Promise<string | null> {
+async function decodeWsPayloadCapped(
+  data: unknown,
+  maxBytes: number,
+): Promise<
+  | { oversized: true; byteLength: number }
+  | { oversized: false; text: string; byteLength: number }
+  | null
+> {
   if (typeof data === 'string') {
-    return data
+    const byteLength = Buffer.byteLength(data, 'utf8')
+    if (byteLength > maxBytes) {
+      return { oversized: true, byteLength }
+    }
+    return { oversized: false, text: data, byteLength }
   }
   if (data instanceof ArrayBuffer) {
-    return new TextDecoder().decode(new Uint8Array(data))
+    const byteLength = data.byteLength
+    if (byteLength > maxBytes) {
+      return { oversized: true, byteLength }
+    }
+    return {
+      oversized: false,
+      text: new TextDecoder().decode(new Uint8Array(data)),
+      byteLength,
+    }
   }
   if (ArrayBuffer.isView(data)) {
-    return new TextDecoder().decode(
-      new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
-    )
+    const byteLength = data.byteLength
+    if (byteLength > maxBytes) {
+      return { oversized: true, byteLength }
+    }
+    return {
+      oversized: false,
+      text: new TextDecoder().decode(
+        new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
+      ),
+      byteLength,
+    }
   }
   if (typeof Blob !== 'undefined' && data instanceof Blob) {
-    return await data.text()
+    const byteLength = data.size
+    if (byteLength > maxBytes) {
+      return { oversized: true, byteLength }
+    }
+    const text = await data.text()
+    const actualBytes = Buffer.byteLength(text, 'utf8')
+    if (actualBytes > maxBytes) {
+      return { oversized: true, byteLength: actualBytes }
+    }
+    return { oversized: false, text, byteLength: actualBytes }
   }
   return null
 }
@@ -541,6 +599,7 @@ async function dispatchToServer(
       path: req.path,
       headers,
       body: req.body,
+      signal: req.signal,
     })
   }
 
@@ -549,6 +608,8 @@ async function dispatchToServer(
     method: req.method,
     headers: fetchHeaders,
     body: req.method === 'GET' || req.method === 'HEAD' ? undefined : req.body,
+    redirect: 'manual',
+    signal: req.signal,
   })
   const responseHeaders: Record<string, string> = {}
   response.headers.forEach((value, key) => {
@@ -594,7 +655,12 @@ function createSessionTunnelCore(
     opts.livenessDeadlineMs ?? TUNNEL_LIVENESS_DEADLINE_MS
   const maxFrames = opts.maxFrames ?? TUNNEL_HOLD_MAX_FRAMES
   const maxBytes = opts.maxBytes ?? TUNNEL_HOLD_MAX_BYTES
+  const maxInFlightRequests = Math.max(
+    1,
+    opts.maxInFlightRequests ?? TUNNEL_MAX_IN_FLIGHT_REQUESTS,
+  )
   const bufferDuringHold = opts.bufferDuringHold === true
+  const tunnelAbortController = new AbortController()
 
   let currentState: SessionTunnelState = 'connecting'
   let earlyState: EarlySessionTunnelDialState =
@@ -613,6 +679,8 @@ function createSessionTunnelCore(
   let holdByteCount = 0
   let bufferedByteCount = 0
   let flushingBuffered = false
+  let inFlightDispatches = 0
+  let messageDecodeChain: Promise<void> = Promise.resolve()
   const bufferedFrames: BufferedTunnelFrame[] = []
 
   const isClosed = (): boolean => currentState === 'closed'
@@ -664,6 +732,11 @@ function createSessionTunnelCore(
       return
     }
     currentState = 'closed'
+    if (!tunnelAbortController.signal.aborted) {
+      tunnelAbortController.abort(
+        new Error(exitReason ?? 'session tunnel closed'),
+      )
+    }
     clearLivenessTimer()
     resolveHolds('gone')
 
@@ -763,107 +836,156 @@ function createSessionTunnelCore(
     }
   }
 
+  const respondTooManyInFlight = (frame: Record<string, unknown>): void => {
+    const body = JSON.stringify({
+      error: 'Too many concurrent tunnel requests in flight',
+    })
+    if (frame.type === 'http_request') {
+      sendJson({
+        type: 'http_response',
+        id: frame.id,
+        status: 429,
+        headers: { 'content-type': 'application/json' },
+        body,
+      })
+      return
+    }
+    if (frame.type === 'rpc_request') {
+      sendJson({
+        type: 'rpc_response',
+        id: frame.id,
+        status: 429,
+        body,
+      })
+      return
+    }
+    if (frame.jsonrpc === '2.0' && typeof frame.method === 'string') {
+      sendJson({
+        jsonrpc: '2.0',
+        id:
+          typeof frame.id === 'string' || typeof frame.id === 'number'
+            ? frame.id
+            : null,
+        error: {
+          code: -32029,
+          message: 'Too many concurrent tunnel requests in flight',
+        },
+      })
+    }
+  }
+
   const dispatchRequestFrame = async (
     serverHandle: TunnelServerHandle,
     rawText: string,
     frame: Record<string, unknown>,
   ): Promise<void> => {
     if (currentState === 'closed') return
-
-    // HTTP-over-tunnel request frame
-    if (frame.type === 'http_request') {
-      const id = frame.id
-      const method = typeof frame.method === 'string' ? frame.method : 'POST'
-      const path = typeof frame.path === 'string' ? frame.path : '/mcp'
-      const headers = normalizeStringRecord(frame.headers)
-      const body =
-        typeof frame.body === 'string'
-          ? frame.body
-          : frame.body !== undefined
-            ? JSON.stringify(frame.body)
-            : undefined
-
-      try {
-        const response = await dispatchToServer(serverHandle, {
-          method,
-          path,
-          headers,
-          body,
-        })
-        sendJson({
-          type: 'http_response',
-          id,
-          status: response.status,
-          headers: response.headers,
-          body: response.body,
-        })
-      } catch (error) {
-        sendJson({
-          type: 'http_response',
-          id,
-          status: 500,
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ error: errorMessage(error) }),
-        })
-      }
+    if (inFlightDispatches >= maxInFlightRequests) {
+      respondTooManyInFlight(frame)
       return
     }
+    inFlightDispatches += 1
+    try {
+      // HTTP-over-tunnel request frame
+      if (frame.type === 'http_request') {
+        const id = frame.id
+        const method = typeof frame.method === 'string' ? frame.method : 'POST'
+        const path = typeof frame.path === 'string' ? frame.path : '/mcp'
+        const headers = normalizeStringRecord(frame.headers)
+        const body =
+          typeof frame.body === 'string'
+            ? frame.body
+            : frame.body !== undefined
+              ? JSON.stringify(frame.body)
+              : undefined
 
-    // Wrapped JSON-RPC request frame
-    if (frame.type === 'rpc_request') {
-      const id = frame.id
-      const body =
-        typeof frame.payload === 'string'
-          ? frame.payload
-          : JSON.stringify(frame.payload ?? {})
-      try {
-        const response = await dispatchToServer(serverHandle, {
-          method: 'POST',
-          path: '/mcp',
-          body,
-        })
-        sendJson({
-          type: 'rpc_response',
-          id,
-          status: response.status,
-          body: response.body,
-        })
-      } catch (error) {
-        sendJson({
-          type: 'rpc_response',
-          id,
-          status: 500,
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: null,
-            error: { code: -32603, message: errorMessage(error) },
-          }),
-        })
-      }
-      return
-    }
-
-    // Raw JSON-RPC 2.0 request frame
-    if (frame.jsonrpc === '2.0' && typeof frame.method === 'string') {
-      try {
-        const response = await dispatchToServer(serverHandle, {
-          method: 'POST',
-          path: '/mcp',
-          body: rawText,
-        })
-        if (response.body.trim() !== '' && ws && ws.readyState === WS.OPEN) {
-          ws.send(response.body)
+        try {
+          const response = await dispatchToServer(serverHandle, {
+            method,
+            path,
+            headers,
+            body,
+            signal: tunnelAbortController.signal,
+          })
+          sendJson({
+            type: 'http_response',
+            id,
+            status: response.status,
+            headers: response.headers,
+            body: response.body,
+          })
+        } catch (error) {
+          sendJson({
+            type: 'http_response',
+            id,
+            status: 500,
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ error: errorMessage(error) }),
+          })
         }
-      } catch (error) {
-        sendJson({
-          jsonrpc: '2.0',
-          id:
-            typeof frame.id === 'string' || typeof frame.id === 'number'
-              ? frame.id
-              : null,
-          error: { code: -32603, message: errorMessage(error) },
-        })
+        return
       }
+
+      // Wrapped JSON-RPC request frame
+      if (frame.type === 'rpc_request') {
+        const id = frame.id
+        const body =
+          typeof frame.payload === 'string'
+            ? frame.payload
+            : JSON.stringify(frame.payload ?? {})
+        try {
+          const response = await dispatchToServer(serverHandle, {
+            method: 'POST',
+            path: '/mcp',
+            body,
+            signal: tunnelAbortController.signal,
+          })
+          sendJson({
+            type: 'rpc_response',
+            id,
+            status: response.status,
+            body: response.body,
+          })
+        } catch (error) {
+          sendJson({
+            type: 'rpc_response',
+            id,
+            status: 500,
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id: null,
+              error: { code: -32603, message: errorMessage(error) },
+            }),
+          })
+        }
+        return
+      }
+
+      // Raw JSON-RPC 2.0 request frame
+      if (frame.jsonrpc === '2.0' && typeof frame.method === 'string') {
+        try {
+          const response = await dispatchToServer(serverHandle, {
+            method: 'POST',
+            path: '/mcp',
+            body: rawText,
+            signal: tunnelAbortController.signal,
+          })
+          if (response.body.trim() !== '' && ws && ws.readyState === WS.OPEN) {
+            ws.send(response.body)
+          }
+        } catch (error) {
+          sendJson({
+            jsonrpc: '2.0',
+            id:
+              typeof frame.id === 'string' || typeof frame.id === 'number'
+                ? frame.id
+                : null,
+            error: { code: -32603, message: errorMessage(error) },
+          })
+        }
+      }
+    } finally {
+      inFlightDispatches -= 1
     }
   }
 
@@ -924,95 +1046,118 @@ function createSessionTunnelCore(
       resolveHolds('active')
     }
 
-    const onMessage = (event: MessageEvent) => {
-      void (async () => {
-        if (currentState === 'closed') return
-        bumpLivenessTimer()
+    const processIncomingMessage = async (rawData: unknown): Promise<void> => {
+      if (isClosed()) return
+      bumpLivenessTimer()
 
-        if (isTokenExpired(tokenExpiresAt, Date.now()) && !expectingTokens) {
-          closeInternal(EX_UNAVAILABLE, 'session_token_expired')
-          return
-        }
+      if (isTokenExpired(tokenExpiresAt, Date.now()) && !expectingTokens) {
+        closeInternal(EX_UNAVAILABLE, 'session_token_expired')
+        return
+      }
 
-        const rawText = await decodeWsPayload(event.data)
-        if (isClosed()) return
-        if (rawText === null) return
+      const decoded = await decodeWsPayloadCapped(rawData, maxBytes)
+      if (isClosed()) return
+      if (decoded === null) return
+      if (decoded.oversized) {
+        closeInternal(EX_UNAVAILABLE, 'frame_too_large', 1009)
+        return
+      }
+      const { text: rawText, byteLength } = decoded
 
-        let frame: unknown
-        try {
-          frame = JSON.parse(rawText)
-        } catch {
-          return
-        }
-        if (!isRecord(frame)) return
+      let frame: unknown
+      try {
+        frame = JSON.parse(rawText)
+      } catch {
+        return
+      }
+      if (!isRecord(frame)) return
 
-        // Control frames are always handled immediately (even while holding)
-        if (frame.type === 'ping') {
-          sendJson({
-            type: 'pong',
-            ...(frame.id !== undefined ? { id: frame.id } : {}),
-          })
-          return
-        }
-        if (frame.type === 'token_update' && typeof frame.token === 'string') {
-          currentToken = frame.token
-          tokenExpiresAt =
-            typeof frame.expires_at === 'number' ? frame.expires_at : undefined
-          return
-        }
-        if (frame.type === 'close') {
-          const code = typeof frame.code === 'number' ? frame.code : 0
-          const reason =
-            typeof frame.reason === 'string' ? frame.reason : 'remote_close'
-          closeInternal(code, reason)
-          return
-        }
+      // Control frames are always handled immediately (even while holding)
+      if (frame.type === 'ping') {
+        sendJson({
+          type: 'pong',
+          ...(frame.id !== undefined ? { id: frame.id } : {}),
+        })
+        return
+      }
+      if (frame.type === 'token_update' && typeof frame.token === 'string') {
+        currentToken = frame.token
+        tokenExpiresAt =
+          typeof frame.expires_at === 'number' ? frame.expires_at : undefined
+        return
+      }
+      if (frame.type === 'close') {
+        const rawCode = frame.code
+        const code =
+          rawCode === undefined
+            ? 0
+            : typeof rawCode === 'number' &&
+                Number.isInteger(rawCode) &&
+                rawCode >= 0 &&
+                rawCode <= 255
+              ? rawCode
+              : EX_UNAVAILABLE
+        const reason =
+          typeof frame.reason === 'string' ? frame.reason : 'remote_close'
+        closeInternal(code, reason)
+        return
+      }
 
-        if (!isRequestFrame(frame)) return
+      if (!isRequestFrame(frame)) return
 
-        if (attachedServer !== null) {
-          if (flushingBuffered) {
-            const byteLength = Buffer.byteLength(rawText, 'utf8')
-            if (
-              bufferedFrames.length + 1 > maxFrames ||
-              bufferedByteCount + byteLength > maxBytes
-            ) {
-              closeInternal(
-                EX_UNAVAILABLE,
-                'hold_buffer_overflow',
-                TUNNEL_HOLD_CLOSE_CODE,
-              )
-              return
-            }
-            bufferedByteCount += byteLength
-            bufferedFrames.push({ rawText, frame, byteLength })
+      if (attachedServer !== null) {
+        if (flushingBuffered) {
+          if (
+            bufferedFrames.length + 1 > maxFrames ||
+            bufferedByteCount + byteLength > maxBytes
+          ) {
+            closeInternal(
+              EX_UNAVAILABLE,
+              'hold_buffer_overflow',
+              TUNNEL_HOLD_CLOSE_CODE,
+            )
             return
           }
-          await dispatchRequestFrame(attachedServer, rawText, frame)
-          return
-        }
-
-        // Still in early-dial hold state before adopt(serverHandle)
-        const byteLength = Buffer.byteLength(rawText, 'utf8')
-        holdFrameCount += 1
-        holdByteCount += byteLength
-        if (holdFrameCount > maxFrames || holdByteCount > maxBytes) {
-          closeInternal(
-            EX_UNAVAILABLE,
-            'hold_buffer_overflow',
-            TUNNEL_HOLD_CLOSE_CODE,
-          )
-          return
-        }
-
-        if (bufferDuringHold) {
           bufferedByteCount += byteLength
           bufferedFrames.push({ rawText, frame, byteLength })
           return
         }
+        // Dispatch concurrently (bounded by maxInFlightRequests) so control
+        // frames stay responsive while preserving decode order on the queue.
+        void dispatchRequestFrame(attachedServer, rawText, frame)
+        return
+      }
 
+      // Still in early-dial hold state before adopt(serverHandle)
+      if (!bufferDuringHold) {
         respondToolServerStarting(frame)
-      })()
+        return
+      }
+
+      holdFrameCount += 1
+      holdByteCount += byteLength
+      if (holdFrameCount > maxFrames || holdByteCount > maxBytes) {
+        closeInternal(
+          EX_UNAVAILABLE,
+          'hold_buffer_overflow',
+          TUNNEL_HOLD_CLOSE_CODE,
+        )
+        return
+      }
+      bufferedByteCount += byteLength
+      bufferedFrames.push({ rawText, frame, byteLength })
+    }
+
+    const onMessage = (event: MessageEvent) => {
+      const rawData = event.data
+      messageDecodeChain = messageDecodeChain
+        .then(() => processIncomingMessage(rawData))
+        .catch(err => {
+          logForDebugging(
+            `sessionTunnel: error handling message: ${errorMessage(err)}`,
+            { level: 'warn' },
+          )
+        })
     }
 
     const onError = () => {
@@ -1070,6 +1215,10 @@ function createSessionTunnelCore(
           if (settled) return
           settled = true
           clearTimeout(timer)
+          const idx = holdResolvers.indexOf(finish)
+          if (idx >= 0) {
+            holdResolvers.splice(idx, 1)
+          }
           resolve(outcome)
         }
         const timer = setTimeout(() => {
@@ -1112,6 +1261,11 @@ function createSessionTunnelCore(
         } finally {
           flushingBuffered = false
         }
+      }
+
+      if (isClosed()) {
+        earlyState = 'gone'
+        return undefined
       }
 
       return tunnelHandle
@@ -1231,6 +1385,9 @@ export async function readSessionTunnelLineFromStdin(
       target.removeListener('data', onData)
       target.removeListener('end', onEnd)
       target.removeListener('error', onError)
+      if (typeof target.pause === 'function') {
+        target.pause()
+      }
     }
 
     const finish = (err?: Error) => {

@@ -41,7 +41,12 @@ import {
   TUNNEL_HOLD_MAX_BYTES,
   TUNNEL_HOLD_MAX_FRAMES,
 } from '../sessionTunnel.js'
-import { issuerKey, type XaaIdpSettings } from '../xaaIdpLogin.js'
+import {
+  discoverOidc,
+  issuerKey,
+  saveIdpIdTokenFromJwt,
+  type XaaIdpSettings,
+} from '../xaaIdpLogin.js'
 
 const REPO_ROOT = resolve(import.meta.dir, '../../../..')
 
@@ -471,6 +476,138 @@ describe('2.1.331 claude mcp xaa CLI (chunk #2465)', () => {
     if (!nanExpiryRes.ok) {
       expect(nanExpiryRes.error).toContain("Couldn't save id_token:")
     }
+  })
+
+  test('R2-P1-11 & R2-P2-5: supports MCP_XAA_IDP_ID_TOKEN & --id-token-stdin, warns on --id-token, validates JWT structure/exp/iss, rejects blank clientId, clears stale secret, and allows loopback discoverOidc', async () => {
+    // 1. Blank / whitespace --client-id rejected
+    const h = createInMemoryXaaHarness({ MCP_XAA_IDP_CLIENT_SECRET: 'sec-1' })
+    expect(
+      runMcpXaaSetup({ issuer: 'https://idp.example', clientId: '   ' }, h.deps)
+        .ok,
+    ).toBe(false)
+
+    // 2. Re-running setup on same issuer+clientId WITHOUT --client-secret clears stale keychain secret
+    expect(
+      runMcpXaaSetup(
+        {
+          issuer: 'https://idp.example',
+          clientId: 'cid-1',
+          clientSecret: true,
+        },
+        h.deps,
+      ).ok,
+    ).toBe(true)
+    expect(h.secrets.get(issuerKey('https://idp.example'))).toBe('sec-1')
+
+    expect(
+      runMcpXaaSetup(
+        {
+          issuer: 'https://idp.example',
+          clientId: 'cid-1',
+          clientSecret: false,
+        },
+        h.deps,
+      ).ok,
+    ).toBe(true)
+    expect(h.secrets.has(issuerKey('https://idp.example'))).toBe(false)
+
+    // 3. MCP_XAA_IDP_ID_TOKEN env var works cleanly without stderr warning
+    const validJwt = makeFakeJwt(Math.floor(Date.now() / 1000) + 3600)
+    const stderrLines: string[] = []
+    const envRes = await runMcpXaaLogin(
+      {},
+      {
+        ...h.deps,
+        env: { MCP_XAA_IDP_ID_TOKEN: validJwt },
+        writeStderr: text => stderrLines.push(text),
+      },
+    )
+    expect(envRes.ok).toBe(true)
+    expect(stderrLines).toHaveLength(0)
+
+    // 4. --id-token-stdin works via readIdTokenFromStdin without stderr warning
+    const stdinRes = await runMcpXaaLogin(
+      { idTokenStdin: true },
+      {
+        ...h.deps,
+        readIdTokenFromStdin: async () => validJwt,
+        writeStderr: text => stderrLines.push(text),
+      },
+    )
+    expect(stdinRes.ok).toBe(true)
+    expect(stderrLines).toHaveLength(0)
+
+    // 5. Legacy --id-token emits security warning to stderr
+    const legacyRes = await runMcpXaaLogin(
+      { idToken: validJwt },
+      {
+        ...h.deps,
+        writeStderr: text => stderrLines.push(text),
+      },
+    )
+    expect(legacyRes.ok).toBe(true)
+    expect(stderrLines.join('')).toContain('MCP_XAA_IDP_ID_TOKEN')
+
+    // 6. saveIdpIdTokenFromJwt rejects malformed JWT, expired exp, and mismatched iss
+    const makeJwtWithClaims = (
+      claims: Record<string, unknown>,
+      sig = 'sig',
+    ) => {
+      const hdr = Buffer.from(JSON.stringify({ alg: 'RS256' })).toString(
+        'base64url',
+      )
+      const body = Buffer.from(JSON.stringify(claims)).toString('base64url')
+      return `${hdr}.${body}.${sig}`
+    }
+    expect(() =>
+      saveIdpIdTokenFromJwt('https://idp.example', 'not-a-jwt'),
+    ).toThrow(/3-segment/)
+    expect(() =>
+      saveIdpIdTokenFromJwt('https://idp.example', 'aaa.bbb.'),
+    ).toThrow(/3-segment/)
+    expect(() =>
+      saveIdpIdTokenFromJwt(
+        'https://idp.example',
+        makeJwtWithClaims({
+          iss: 'https://idp.example',
+          exp: Math.floor(Date.now() / 1000) - 60,
+        }),
+      ),
+    ).toThrow(/expired/)
+    expect(() =>
+      saveIdpIdTokenFromJwt(
+        'https://idp.example',
+        makeJwtWithClaims({
+          iss: 'https://evil-idp.example',
+          exp: Math.floor(Date.now() / 1000) + 3600,
+        }),
+      ),
+    ).toThrow(/does not match/)
+
+    // 7. discoverOidc allows loopback http:// token_endpoint when issuer is loopback http://
+    const oidcSrv = createHttpServer((req, res) => {
+      if (req.url === '/.well-known/openid-configuration') {
+        const port = (oidcSrv.address() as { port: number }).port
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(
+          JSON.stringify({
+            issuer: `http://127.0.0.1:${port}`,
+            authorization_endpoint: `http://127.0.0.1:${port}/authorize`,
+            token_endpoint: `http://127.0.0.1:${port}/token`,
+          }),
+        )
+        return
+      }
+      res.writeHead(404)
+      res.end()
+    })
+    await new Promise<void>(resolveListen =>
+      oidcSrv.listen(0, '127.0.0.1', () => resolveListen()),
+    )
+    openNodeServers.push(oidcSrv)
+    const oidcPort = (oidcSrv.address() as { port: number }).port
+    const discovered = await discoverOidc(`http://127.0.0.1:${oidcPort}`)
+    expect(discovered.token_endpoint).toBe(`http://127.0.0.1:${oidcPort}/token`)
   })
 })
 

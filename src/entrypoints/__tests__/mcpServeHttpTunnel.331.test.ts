@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test'
+import { getEventListeners } from 'node:events'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import {
   createServer as createHttpServer,
@@ -20,6 +21,7 @@ import {
   carrySubagentFrameResult,
   EDIT_RESULT_META_KEY,
   EDIT_RESULT_META_VERSION,
+  evaluateSubagentFrameResultHolds,
   getSubagentFrameResult,
   hasSubagentFrameResult,
   isEditResultMetaRequested,
@@ -37,13 +39,18 @@ import {
   readSessionTunnelLineFromStdin,
   SESSION_TUNNEL_PORT,
   setToolServerDaemonMode,
+  startEarlySessionTunnelDial,
   startSessionTunnel,
   ToolServerPortTakenError,
   TUNNEL_HOLD_DEADLINE_MS,
   TUNNEL_LIVENESS_DEADLINE_MS,
   validateSessionTunnelLaunch,
 } from '../../services/mcp/sessionTunnel.js'
-import { buildTool, type Tool } from '../../Tool.js'
+import {
+  buildTool,
+  getEmptyToolPermissionContext,
+  type Tool,
+} from '../../Tool.js'
 import * as setupMod from '../../setup.js'
 import * as debugMod from '../../utils/debug.js'
 import { getMatchingHooks, hasHookForEvent } from '../../utils/hooks.js'
@@ -1924,5 +1931,494 @@ describe('2.1.331 security hardening regressions (P0-1, P1-3, P1-9, P1-10, P2-1,
     expect(socketInstance!.listeners.get('message')?.size).toBe(0)
     expect(socketInstance!.listeners.get('error')?.size).toBe(0)
     expect(socketInstance!.listeners.get('close')?.size).toBe(0)
+  })
+
+  test('R2-P0-1, R2-P1-3, R2-P1-9: checkPermissions defers when unloaded, enforces deny rules, leaks 0 abort listeners, bounds subagentFrameResultHolds, and never falls back to raw data', async () => {
+    const dir = makeTempDir('mcp-r2-disp-')
+    const sampleFile = join(dir, 'sample.txt')
+    writeFileSync(sampleFile, 'secret file contents\n', 'utf8')
+
+    // 1. No policy state loaded -> claudecode/checkPermissions returns { doesNotDecide: true }
+    const unloadedDispatcher = createMcpServeDispatcher({
+      cwd: dir,
+      getToolsOverride: () => [FileReadTool],
+      loadAgentDefinitions: async () => ({ activeAgents: [], allAgents: [] }),
+      getToolPermissionContext: () => undefined,
+    })
+    try {
+      const res = await unloadedDispatcher.checkPermissions({
+        name: 'Read',
+        arguments: { file_path: sampleFile },
+      })
+      expect(res).toEqual({ doesNotDecide: true })
+    } finally {
+      unloadedDispatcher.dispose()
+    }
+
+    // 2. Loaded deny rule -> claudecode/checkPermissions returns deny, and 100 calls leak 0 abort listeners
+    const denyDispatcher = createMcpServeDispatcher({
+      cwd: dir,
+      getToolsOverride: () => [FileReadTool],
+      loadAgentDefinitions: async () => ({ activeAgents: [], allAgents: [] }),
+      getToolPermissionContext: () => ({
+        ...getEmptyToolPermissionContext(),
+        alwaysDenyRules: { policySettings: ['Read'] },
+      }),
+    })
+    try {
+      const denied = await denyDispatcher.checkPermissions({
+        name: 'Read',
+        arguments: { file_path: sampleFile },
+      })
+      expect(denied).toMatchObject({ behavior: 'deny' })
+
+      for (let i = 0; i < 60; i++) {
+        await denyDispatcher.checkPermissions({
+          name: 'Read',
+          arguments: { file_path: sampleFile },
+        })
+        await denyDispatcher.callTool({
+          name: 'Read',
+          arguments: { file_path: sampleFile },
+        })
+      }
+      expect(
+        getEventListeners(denyDispatcher.abortController.signal, 'abort')
+          .length,
+      ).toBe(0)
+
+      // Pre-aborted signal wired into checkPermissions
+      const aborted = new AbortController()
+      aborted.abort()
+      await expect(
+        denyDispatcher.checkPermissions(
+          { name: 'Read', arguments: { file_path: sampleFile } },
+          { signal: aborted.signal },
+        ),
+      ).rejects.toThrow()
+      expect(
+        getEventListeners(denyDispatcher.abortController.signal, 'abort')
+          .length,
+      ).toBe(0)
+    } finally {
+      denyDispatcher.dispose()
+    }
+
+    // 3. R2-P1-9: rendered Edit without subagentFrameResult does NOT dump raw finalResult.data into _meta
+    const editWithoutFrameTool = buildTool({
+      name: 'Edit',
+      maxResultSizeChars: 10_000,
+      inputSchema: z.object({ file_path: z.string() }),
+      outputSchema: z.object({ ok: z.boolean(), fullFile: z.string() }),
+      async description() {
+        return 'Edit without frame'
+      },
+      async prompt() {
+        return 'Edit without frame'
+      },
+      renderToolUseMessage() {
+        return null
+      },
+      mapToolResultToToolResultBlockParam(_data, toolUseID) {
+        return {
+          type: 'tool_result',
+          tool_use_id: toolUseID,
+          content: 'Edited cleanly',
+        }
+      },
+      async call() {
+        return { data: { ok: true, fullFile: 'TOP_SECRET_RAW_FILE_BODY' } }
+      },
+    }) as unknown as Tool
+
+    const renderedDisp = createMcpServeDispatcher({
+      cwd: dir,
+      resultFormat: 'rendered',
+      getToolsOverride: () => [editWithoutFrameTool],
+      loadAgentDefinitions: async () => ({ activeAgents: [], allAgents: [] }),
+    })
+    try {
+      const res = await renderedDisp.callTool({
+        name: 'Edit',
+        arguments: { file_path: '/tmp/a.ts' },
+        _meta: { 'claudecode/editResult': '1' },
+      })
+      expect(res._meta).toBeUndefined()
+    } finally {
+      renderedDisp.dispose()
+    }
+
+    // 4. R2-P1-9: evaluateSubagentFrameResultHolds & attachSubagentFrameResultMeta bound hanging predicates with timeout & abort
+    const timedOut = await evaluateSubagentFrameResultHolds(
+      () => new Promise<boolean>(() => {}),
+      { timeoutMs: 25 },
+    )
+    expect(timedOut).toBe(false)
+
+    const ac = new AbortController()
+    setTimeout(() => ac.abort(), 15)
+    const baseCallResult: {
+      content: Array<{ type: 'text'; text: string }>
+      isError?: boolean
+      _meta?: Record<string, unknown>
+    } = { content: [{ type: 'text', text: 'ok' }] }
+    const abortedHolds = await attachSubagentFrameResultMeta(
+      baseCallResult,
+      {
+        subagentFrameResult: { secret: 1 },
+        subagentFrameResultHolds: () => new Promise<boolean>(() => {}),
+      },
+      { signal: ac.signal, timeoutMs: 5_000 },
+    )
+    expect(abortedHolds._meta).toBeUndefined()
+  })
+
+  test('R2-P1-1, R2-P1-2, R2-P1-7: HTTP server caps batch size at 64, DELETE unknown session returns 404, aborted body cleans up, and close() drains keep-alive sockets promptly', async () => {
+    const dir = makeTempDir('mcp-r2-http-')
+    const server = await startMCPServerHttp(dir, {
+      port: 0,
+      announceOnStdout: false,
+      getToolsOverride: () => [FileReadTool],
+      loadAgentDefinitions: async () => ({ activeAgents: [], allAgents: [] }),
+    })
+    openHandles.push(server)
+
+    const authHeaders = {
+      authorization: `Bearer ${server.authToken}`,
+      'content-type': 'application/json',
+    }
+
+    // 1. Batch of 65 items rejected with HTTP 400 + JSON-RPC -32600
+    const oversizeBatch = Array.from({ length: 65 }, (_, i) => ({
+      jsonrpc: '2.0',
+      id: i + 1,
+      method: 'ping',
+    }))
+    const batchRes = await fetch(server.url, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify(oversizeBatch),
+    })
+    expect(batchRes.status).toBe(400)
+    const batchBody = (await batchRes.json()) as { error: { code: number } }
+    expect(batchBody.error.code).toBe(-32600)
+
+    // 2. DELETE unknown session returns 404; DELETE active session returns 204, then second DELETE returns 404
+    const delUnknown = await fetch(server.url, {
+      method: 'DELETE',
+      headers: {
+        authorization: `Bearer ${server.authToken}`,
+        'mcp-session-id': 'nonexistent-session-id',
+      },
+    })
+    expect(delUnknown.status).toBe(404)
+
+    const initRes = await fetch(server.url, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' }),
+    })
+    const activeSid = initRes.headers.get('mcp-session-id')!
+    expect(activeSid).toBeTruthy()
+
+    const delActive = await fetch(server.url, {
+      method: 'DELETE',
+      headers: {
+        authorization: `Bearer ${server.authToken}`,
+        'mcp-session-id': activeSid,
+      },
+    })
+    expect(delActive.status).toBe(204)
+
+    const delAgain = await fetch(server.url, {
+      method: 'DELETE',
+      headers: {
+        authorization: `Bearer ${server.authToken}`,
+        'mcp-session-id': activeSid,
+      },
+    })
+    expect(delAgain.status).toBe(404)
+
+    // 3. Mid-body TCP abort rejects body read cleanly without hanging server
+    await new Promise<void>(resolve => {
+      const sock = createConnection(
+        { host: '127.0.0.1', port: server.boundPort },
+        () => {
+          sock.write(
+            [
+              'POST /mcp HTTP/1.1',
+              `Host: 127.0.0.1:${server.boundPort}`,
+              `Authorization: Bearer ${server.authToken}`,
+              'Content-Type: application/json',
+              'Content-Length: 1000',
+              '',
+              '{"partial":',
+            ].join('\r\n'),
+          )
+          setTimeout(() => {
+            sock.destroy()
+            resolve()
+          }, 20)
+        },
+      )
+      sock.on('error', () => {})
+    })
+    const afterAbort = await fetch(new URL('/health', server.url))
+    expect(afterAbort.status).toBe(200)
+
+    // 4. Open idle keep-alive socket does NOT hang server.close()
+    const keepAliveSock = createConnection(
+      { host: '127.0.0.1', port: server.boundPort },
+      () => {
+        keepAliveSock.write(
+          `GET /health HTTP/1.1\r\nHost: 127.0.0.1:${server.boundPort}\r\nConnection: keep-alive\r\n\r\n`,
+        )
+      },
+    )
+    keepAliveSock.on('error', () => {})
+    await new Promise(resolve => setTimeout(resolve, 40))
+
+    const closeStart = Date.now()
+    await server.close()
+    const closeElapsed = Date.now() - closeStart
+    keepAliveSock.destroy()
+    expect(closeElapsed).toBeLessThan(800)
+  })
+
+  test('R2-P1-6 & R2-P2-2: sessionTunnel hardens session_id, hold counters, maxBytes pre-parse, frame.code, in-flight cap, abort signal, stdin pause, and daemon mode reset', async () => {
+    // 1. session_id rejects '.', '..', and invalid characters
+    for (const badId of [
+      '.',
+      '..',
+      '../evil',
+      'a/b',
+      'id with spaces',
+      'a?b=1',
+    ]) {
+      expect(
+        parseSessionTunnelEnvelope(
+          JSON.stringify({
+            v: 1,
+            session_id: badId,
+            session_token: 'tok',
+            api_base_url: 'https://api.anthropic.com',
+          }),
+        ),
+      ).toBeUndefined()
+      expect(() =>
+        buildSessionTunnelRelayUrl({
+          v: 1,
+          session_id: badId,
+          session_token: 'tok',
+          api_base_url: 'https://api.anthropic.com',
+        }),
+      ).toThrow(/Invalid session_id/)
+    }
+
+    // 2. readSessionTunnelLineFromStdin pauses stdin stream after reading line
+    let pauseCalled = false
+    const stream = Readable.from(['{"v":1}\nrest-of-stream\n'])
+    const origPause = stream.pause.bind(stream)
+    stream.pause = () => {
+      pauseCalled = true
+      return origPause()
+    }
+    const line = await readSessionTunnelLineFromStdin(stream, { isTTY: false })
+    expect(line).toBe('{"v":1}')
+    expect(pauseCalled).toBe(true)
+
+    // 3. Mock WebSocket harness for tunnel invariants
+    class FakeWs {
+      static readonly CONNECTING = 0
+      static readonly OPEN = 1
+      static readonly CLOSING = 2
+      static readonly CLOSED = 3
+      readyState = FakeWs.CONNECTING
+      sent: Array<Record<string, unknown>> = []
+      closedWith?: { code?: number; reason?: string }
+      #listeners = new Map<string, Set<(e: unknown) => void>>()
+      constructor(_url: string) {
+        lastWs = this
+      }
+      addEventListener(t: string, fn: (e: unknown) => void): void {
+        const s = this.#listeners.get(t) ?? new Set()
+        s.add(fn)
+        this.#listeners.set(t, s)
+      }
+      removeEventListener(t: string, fn: (e: unknown) => void): void {
+        this.#listeners.get(t)?.delete(fn)
+      }
+      send(data: string): void {
+        this.sent.push(JSON.parse(data) as Record<string, unknown>)
+      }
+      close(code?: number, reason?: string): void {
+        this.readyState = FakeWs.CLOSED
+        this.closedWith = { code, reason }
+      }
+      emit(t: string, e: unknown): void {
+        for (const fn of [...(this.#listeners.get(t) ?? [])]) fn(e)
+      }
+      openNow(): void {
+        this.readyState = FakeWs.OPEN
+        this.emit('open', {})
+      }
+    }
+    let lastWs: FakeWs | undefined
+    const env = parseSessionTunnelEnvelope(
+      JSON.stringify({
+        v: 1,
+        session_id: 'sess_r2_hardened',
+        session_token: 'tok_r2',
+        api_base_url: 'http://127.0.0.1:8080',
+      }),
+    )!
+
+    // 3a. bufferDuringHold: false does NOT trip hold_buffer_overflow even when > maxFrames arrive
+    const early = startEarlySessionTunnelDial(env, {
+      maxFrames: 2,
+      bufferDuringHold: false,
+      holdDeadlineMs: 5_000,
+      WebSocketImpl: FakeWs as unknown as typeof globalThis.WebSocket,
+    })
+    try {
+      lastWs!.openNow()
+      for (let i = 0; i < 5; i++) {
+        lastWs!.emit('message', {
+          data: JSON.stringify({
+            type: 'http_request',
+            id: `r-${i}`,
+            method: 'GET',
+            path: '/health',
+          }),
+        })
+      }
+      await new Promise(resolve => setTimeout(resolve, 30))
+      expect(early.state).toBe('holding')
+      const replies503 = lastWs!.sent.filter(
+        m => m.type === 'http_response' && m.status === 503,
+      )
+      expect(replies503).toHaveLength(5)
+    } finally {
+      early.stop()
+    }
+
+    // 3b. Post-adopt maxBytes enforced BEFORE JSON.parse, invalid close code sanitized, concurrency capped, and tunnel signal aborted on stop
+    const exits: Array<{ code: number; reason: string }> = []
+    let capturedAnswerSignal: AbortSignal | undefined
+    let releaseFirstRequest!: () => void
+    const firstRequestGate = new Promise<void>(r => {
+      releaseFirstRequest = r
+    })
+    const tunnel = startSessionTunnel(
+      {
+        url: 'http://127.0.0.1:28471/mcp',
+        authToken: 'tok',
+        answer: async req => {
+          capturedAnswerSignal = req.signal
+          await firstRequestGate
+          return { status: 200, headers: {}, body: '{"ok":true}' }
+        },
+      },
+      env,
+      {
+        maxBytes: 256,
+        maxInFlightRequests: 1,
+        WebSocketImpl: FakeWs as unknown as typeof globalThis.WebSocket,
+        onExit: (code, reason) => exits.push({ code, reason }),
+      },
+    )
+    try {
+      lastWs!.openNow()
+      // Send 2 concurrent requests with maxInFlightRequests: 1 -> 2nd gets 429
+      lastWs!.emit('message', {
+        data: JSON.stringify({
+          type: 'http_request',
+          id: 'inflight-1',
+          method: 'POST',
+          path: '/mcp',
+          body: '{}',
+        }),
+      })
+      lastWs!.emit('message', {
+        data: JSON.stringify({
+          type: 'http_request',
+          id: 'inflight-2',
+          method: 'POST',
+          path: '/mcp',
+          body: '{}',
+        }),
+      })
+      await new Promise(resolve => setTimeout(resolve, 30))
+      expect(
+        lastWs!.sent.some(
+          m =>
+            m.type === 'http_response' &&
+            m.id === 'inflight-2' &&
+            m.status === 429,
+        ),
+      ).toBe(true)
+      expect(capturedAnswerSignal?.aborted).toBe(false)
+
+      // Oversize frame post-adopt triggers 1009 frame_too_large before JSON.parse
+      const parseSpy = spyOn(JSON, 'parse')
+      try {
+        lastWs!.emit('message', { data: 'x'.repeat(512) })
+        await new Promise(resolve => setTimeout(resolve, 30))
+        expect(parseSpy).not.toHaveBeenCalled()
+      } finally {
+        parseSpy.mockRestore()
+      }
+      expect(tunnel.state).toBe('closed')
+      expect(capturedAnswerSignal?.aborted).toBe(true)
+      expect(exits).toContainEqual({
+        code: EX_UNAVAILABLE,
+        reason: 'frame_too_large',
+      })
+    } finally {
+      releaseFirstRequest()
+      tunnel.stop()
+    }
+
+    // 3c. Invalid remote close frame.code (-5 / 999) falls back to EX_UNAVAILABLE
+    const closeExits: Array<{ code: number; reason: string }> = []
+    const tunnelCode = startSessionTunnel(
+      {
+        url: 'http://127.0.0.1:28471/mcp',
+        authToken: 'tok',
+        answer: async () => ({ status: 200, headers: {}, body: '{}' }),
+      },
+      env,
+      {
+        WebSocketImpl: FakeWs as unknown as typeof globalThis.WebSocket,
+        onExit: (code, reason) => closeExits.push({ code, reason }),
+      },
+    )
+    try {
+      lastWs!.openNow()
+      lastWs!.emit('message', {
+        data: JSON.stringify({ type: 'close', code: 9999, reason: 'bad-code' }),
+      })
+      await new Promise(resolve => setTimeout(resolve, 30))
+      expect(closeExits).toEqual([{ code: EX_UNAVAILABLE, reason: 'bad-code' }])
+    } finally {
+      tunnelCode.stop()
+    }
+
+    // 4. mcpServeHandler resets setToolServerDaemonMode(false) on generic setup() failure too
+    const setupFailSpy = spyOn(setupMod, 'setup').mockRejectedValue(
+      new Error('setup boom'),
+    )
+    const exitSpy = spyOn(process, 'exit').mockImplementation(
+      (() => undefined) as unknown as typeof process.exit,
+    )
+    const errSpy = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await mcpServeHandler({ transport: 'http', port: '0' })
+      expect(isToolServerDaemonMode()).toBe(false)
+    } finally {
+      setupFailSpy.mockRestore()
+      exitSpy.mockRestore()
+      errSpy.mockRestore()
+    }
   })
 })

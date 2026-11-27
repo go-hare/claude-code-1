@@ -21,6 +21,7 @@ import {
   findToolByName,
   getEmptyToolPermissionContext,
   type Tool,
+  type ToolPermissionContext,
   type ToolResult,
   type Tools,
   type ToolUseContext,
@@ -29,7 +30,7 @@ import { getTools } from '../tools.js'
 import {
   createAbortController,
   createAbortErrorReason,
-  createChildAbortController,
+  createDetachableChildAbortController,
 } from '../utils/abortController.js'
 import { logForDebugging } from '../utils/debug.js'
 import { errorMessage } from '../utils/errors.js'
@@ -42,9 +43,14 @@ import { ToolStateSlots } from '../utils/toolState.js'
 import { logError } from '../utils/log.js'
 import { createAssistantMessage } from '../utils/messages.js'
 import { getMainLoopModel } from '../utils/model/model.js'
-import { hasPermissionsToUseTool } from '../utils/permissions/permissions.js'
+import {
+  applyPermissionRulesToPermissionContext,
+  hasPermissionsToUseTool,
+} from '../utils/permissions/permissions.js'
+import { loadAllPermissionRulesFromDisk } from '../utils/permissions/permissionsLoader.js'
 import { settingsChangeDetector } from '../utils/settings/changeDetector.js'
 import { onRemoteSettingsLoadStatusChanged } from '../utils/settings/remoteSettingsState.js'
+import { getInitialSettings } from '../utils/settings/settings.js'
 import { setCwd } from '../utils/Shell.js'
 import { jsonStringify } from '../utils/slowOperations.js'
 import { credentialsStoreFor } from '../utils/storageV5/credentialsStore.js'
@@ -193,6 +199,7 @@ async function finalizeMcpCallToolResult(
   resultFormat: McpServeResultFormat,
   toolUseId: string,
   requestMeta: unknown,
+  signal?: AbortSignal,
 ): Promise<CallToolResult> {
   const baseResult =
     resultFormat === 'rendered'
@@ -206,15 +213,19 @@ async function finalizeMcpCallToolResult(
     return baseResult
   }
 
-  const editResultPayload = finalResult.subagentFrameResult ?? finalResult.data
+  const editResultPayload = finalResult.subagentFrameResult
   if (editResultPayload === undefined) {
     return baseResult
   }
 
-  return await attachSubagentFrameResultMeta(baseResult, {
-    subagentFrameResult: editResultPayload,
-    subagentFrameResultHolds: finalResult.subagentFrameResultHolds,
-  })
+  return await attachSubagentFrameResultMeta(
+    baseResult,
+    {
+      subagentFrameResult: editResultPayload,
+      subagentFrameResultHolds: finalResult.subagentFrameResultHolds,
+    },
+    { signal },
+  )
 }
 
 /**
@@ -293,7 +304,8 @@ export function createLinkedMcpCallAbortController(
   serverAbortController: AbortController,
   requestSignal?: AbortSignal,
 ): { abortController: AbortController; detach: () => void } {
-  const abortController = createChildAbortController(serverAbortController)
+  const { abortController, detach: detachParent } =
+    createDetachableChildAbortController(serverAbortController)
   const onRemoteCancel = () => {
     abortController.abort(createAbortErrorReason('remote-cancel'))
   }
@@ -307,6 +319,7 @@ export function createLinkedMcpCallAbortController(
   return {
     abortController,
     detach: () => {
+      detachParent()
       requestSignal?.removeEventListener('abort', onRemoteCancel)
     },
   }
@@ -355,6 +368,7 @@ export type CreateMcpServeDispatcherOptions = {
   progressHeartbeatIntervalMs?: number
   getToolsOverride?: () => Tools
   loadAgentDefinitions?: (cwd: string) => Promise<AgentDefinitionsResult>
+  getToolPermissionContext?: () => ToolPermissionContext | undefined
 }
 
 export type McpServeToolDispatcher = {
@@ -376,11 +390,16 @@ export type McpServeToolDispatcher = {
       ) => Promise<void>
     },
   ) => Promise<CallToolResult>
-  checkPermissions: (params: {
-    name?: string
-    arguments?: Record<string, unknown>
-    toolUseId?: string
-  }) => Promise<Record<string, unknown>>
+  checkPermissions: (
+    params: {
+      name?: string
+      arguments?: Record<string, unknown>
+      toolUseId?: string
+    },
+    options?: {
+      signal?: AbortSignal
+    },
+  ) => Promise<Record<string, unknown>>
   handleJsonRpc: (
     request: JsonRpcRequest,
     options?: {
@@ -500,7 +519,11 @@ export function createMcpServeDispatcher(
   const buildToolUseContext = (
     tools: Tools,
     abortController: AbortController,
-    extra?: { toolUseId?: string; forRemoteExecution?: boolean },
+    extra?: {
+      toolUseId?: string
+      forRemoteExecution?: boolean
+      toolPermissionContext?: ToolPermissionContext
+    },
   ): ToolUseContext => ({
     abortController,
     options: {
@@ -516,7 +539,16 @@ export function createMcpServeDispatcher(
       verbose,
       agentDefinitions,
     },
-    getAppState: () => getDefaultAppState(),
+    getAppState: () => {
+      const base = getDefaultAppState()
+      if (extra?.toolPermissionContext === undefined) {
+        return base
+      }
+      return {
+        ...base,
+        toolPermissionContext: extra.toolPermissionContext,
+      }
+    },
     setAppState: () => {},
     // densable y8r no-ops for MCP-exported tool path (no session UI)
     setToolPermissionContext: () => {},
@@ -655,6 +687,7 @@ export function createMcpServeDispatcher(
         resultFormat,
         toolUseId,
         params._meta,
+        abortController.signal,
       )
     } catch (error) {
       logError(error)
@@ -678,22 +711,53 @@ export function createMcpServeDispatcher(
     }
   }
 
-  const checkPermissions: McpServeToolDispatcher['checkPermissions'] =
-    async params => {
-      await agentDefinitionsReady
-      const name = params.name ?? ''
-      const tools = resolveServedTools()
-      const tool = findToolByName(tools, name)
-      if (!tool) {
-        throw new JsonRpcInvalidParamsError(`Tool ${name} not found`)
+  const resolveEffectivePermissionContext = ():
+    | { loaded: true; context: ToolPermissionContext }
+    | { loaded: false } => {
+    if (opts.getToolPermissionContext) {
+      const provided = opts.getToolPermissionContext()
+      if (provided === undefined) {
+        return { loaded: false }
       }
-      const toolUseId = params.toolUseId ?? randomUUID()
-      const childAbort = createChildAbortController(serverAbortController)
-      const toolUseContext = buildToolUseContext(tools, childAbort, {
-        toolUseId,
-        forRemoteExecution: true,
-      })
+      return { loaded: true, context: provided }
+    }
+    try {
+      const rules = loadAllPermissionRulesFromDisk()
+      const settings = getInitialSettings()
+      const defaultMode = settings?.permissions?.defaultMode
+      if (rules.length === 0 && defaultMode === undefined) {
+        return { loaded: false }
+      }
+      const baseContext: ToolPermissionContext = {
+        ...getEmptyToolPermissionContext(),
+        ...(defaultMode !== undefined ? { mode: defaultMode } : {}),
+      }
+      return {
+        loaded: true,
+        context: applyPermissionRulesToPermissionContext(baseContext, rules),
+      }
+    } catch {
+      return { loaded: false }
+    }
+  }
 
+  const checkPermissions: McpServeToolDispatcher['checkPermissions'] = async (
+    params,
+    callOpts,
+  ) => {
+    await agentDefinitionsReady
+    const name = params.name ?? ''
+    const tools = resolveServedTools()
+    const tool = findToolByName(tools, name)
+    if (!tool) {
+      throw new JsonRpcInvalidParamsError(`Tool ${name} not found`)
+    }
+    const toolUseId = params.toolUseId ?? randomUUID()
+    const { abortController, detach } = createLinkedMcpCallAbortController(
+      serverAbortController,
+      callOpts?.signal,
+    )
+    try {
       if (!tool.isEnabled()) {
         return {
           behavior: 'deny',
@@ -716,6 +780,17 @@ export function createMcpServeDispatcher(
         }
       }
 
+      const effectivePerms = resolveEffectivePermissionContext()
+      if (!effectivePerms.loaded) {
+        return { doesNotDecide: true }
+      }
+
+      const toolUseContext = buildToolUseContext(tools, abortController, {
+        toolUseId,
+        forRemoteExecution: true,
+        toolPermissionContext: effectivePerms.context,
+      })
+
       const decision = await hasPermissionsToUseTool(
         tool,
         parsedInput.data,
@@ -724,7 +799,10 @@ export function createMcpServeDispatcher(
         toolUseId,
       )
       return decision as unknown as Record<string, unknown>
+    } finally {
+      detach()
     }
+  }
 
   const handleJsonRpc: McpServeToolDispatcher['handleJsonRpc'] = async (
     request,
@@ -826,19 +904,22 @@ export function createMcpServeDispatcher(
             )
           }
           const params = request.params ?? {}
-          const result = await checkPermissions({
-            name: typeof params.name === 'string' ? params.name : undefined,
-            arguments:
-              typeof params.arguments === 'object' &&
-              params.arguments !== null &&
-              !Array.isArray(params.arguments)
-                ? (params.arguments as Record<string, unknown>)
-                : undefined,
-            toolUseId:
-              typeof params.toolUseId === 'string'
-                ? params.toolUseId
-                : undefined,
-          })
+          const result = await checkPermissions(
+            {
+              name: typeof params.name === 'string' ? params.name : undefined,
+              arguments:
+                typeof params.arguments === 'object' &&
+                params.arguments !== null &&
+                !Array.isArray(params.arguments)
+                  ? (params.arguments as Record<string, unknown>)
+                  : undefined,
+              toolUseId:
+                typeof params.toolUseId === 'string'
+                  ? params.toolUseId
+                  : undefined,
+            },
+            { signal: callOpts?.signal },
+          )
           return {
             jsonrpc: '2.0',
             id,

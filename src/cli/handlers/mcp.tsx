@@ -330,21 +330,27 @@ export async function mcpServeHandler({
       let activeServerHandle:
         | Awaited<ReturnType<typeof import('../../entrypoints/mcpHttpServer.js').startMCPServerHttp>>
         | undefined;
-      const onTunnelExit = (code: number, reason: string) => {
-        if (reason === 'hold_deadline_exceeded' && activeServerHandle === undefined) {
-          return;
-        }
+      let earlyDialAdopted = false;
+      const onTunnelExit = (code: number, _reason: string) => {
         const closePromise = activeServerHandle ? activeServerHandle.close() : Promise.resolve();
         void closePromise.finally(() => {
           process.exit(code);
         });
+      };
+      const onEarlyDialExit = (code: number, reason: string) => {
+        if (!earlyDialAdopted) {
+          // Ignore any early-dial exit prior to successful adopt() so the
+          // post-bind startSessionTunnel fallback always runs cleanly.
+          return;
+        }
+        onTunnelExit(code, reason);
       };
 
       // Official 2.1.331 chunk #1647: start dialing the session tunnel immediately
       // after validating the stdin envelope, overlapping with setup() + HTTP bind.
       const earlyDial =
         sessionTunnel && tunnelEnvelope
-          ? startEarlySessionTunnelDial(tunnelEnvelope, { onExit: onTunnelExit })
+          ? startEarlySessionTunnelDial(tunnelEnvelope, { onExit: onEarlyDialExit })
           : undefined;
 
       let serverHandle: Awaited<ReturnType<typeof import('../../entrypoints/mcpHttpServer.js').startMCPServerHttp>>;
@@ -366,10 +372,13 @@ export async function mcpServeHandler({
           },
         });
         activeServerHandle = serverHandle;
+        if (serverHandle.tunnelHandle !== undefined) {
+          earlyDialAdopted = true;
+        }
       } catch (err) {
         earlyDial?.stop();
+        setToolServerDaemonMode(false);
         if (err instanceof ToolServerPortTakenError) {
-          setToolServerDaemonMode(false);
           return exitWithCode(EX_UNAVAILABLE, formatCliError(err.message, 'Error: '));
         }
         throw err;

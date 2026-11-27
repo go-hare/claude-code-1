@@ -14,6 +14,10 @@ import {
   DisklessRefusalError,
   isDisklessActive,
 } from 'src/utils/disklessGuards.js'
+import {
+  isDisklessForSession,
+  type RemoteNativeToolSession,
+} from 'src/utils/toolCreateRuntime.js'
 import type { EffortValue } from 'src/utils/effort.js'
 import { errorMessage } from 'src/utils/errors.js'
 import { getTeammateExecutor } from 'src/utils/swarm/backends/registry.js'
@@ -343,7 +347,10 @@ async function handleSpawn(
   input: SpawnInput,
   context: ToolUseContext,
 ): Promise<{ data: SpawnOutput }> {
-  if (isDisklessActive()) {
+  if (
+    isDisklessActive() ||
+    isDisklessForSession(context.session as RemoteNativeToolSession | undefined)
+  ) {
     throw new DisklessRefusalError(
       'teammate spawn refused in a session with no disk',
     )

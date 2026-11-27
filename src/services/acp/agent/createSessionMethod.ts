@@ -66,10 +66,28 @@ function readSettingsPermissionMode(
   return perms?.defaultMode
 }
 
+type AcpSharedBackendLeaseEntry = {
+  release: () => void
+  token: object
+}
+
 const inFlightCreateSessionCount = new WeakMap<AcpAgent, number>()
 const acpSessionEnvRollback = new WeakMap<AcpSession, () => void>()
 const activeSoleSessionRollback = new WeakMap<AcpAgent, () => void>()
-const acpAgentSharedBackendLeases = new Map<AcpAgent, () => void>()
+const acpAgentSharedBackendLeases = new WeakMap<
+  AcpAgent,
+  AcpSharedBackendLeaseEntry
+>()
+const acpAgentSharedBackendLeaseRegistry =
+  typeof FinalizationRegistry !== 'undefined'
+    ? new FinalizationRegistry<() => void>(release => {
+        try {
+          release()
+        } catch {
+          // Best-effort cleanup when an abandoned AcpAgent is GC'd
+        }
+      })
+    : undefined
 
 /**
  * Synchronize process-wide `isSharedBackend()` (`o7()`) with concurrent
@@ -82,13 +100,17 @@ export function syncAcpSharedBackendMode(agent: AcpAgent): void {
     agent.sessions.size + (inFlightCreateSessionCount.get(agent) ?? 0)
   if (totalSessions >= 2) {
     if (!acpAgentSharedBackendLeases.has(agent)) {
-      acpAgentSharedBackendLeases.set(agent, acquireSharedBackendMode())
+      const release = acquireSharedBackendMode()
+      const token = {}
+      acpAgentSharedBackendLeases.set(agent, { release, token })
+      acpAgentSharedBackendLeaseRegistry?.register(agent, release, token)
     }
   } else {
-    const release = acpAgentSharedBackendLeases.get(agent)
-    if (release !== undefined) {
+    const entry = acpAgentSharedBackendLeases.get(agent)
+    if (entry !== undefined) {
       acpAgentSharedBackendLeases.delete(agent)
-      release()
+      acpAgentSharedBackendLeaseRegistry?.unregister(entry.token)
+      entry.release()
     }
   }
 }

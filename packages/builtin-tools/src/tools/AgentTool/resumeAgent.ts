@@ -36,6 +36,10 @@ import {
   DisklessRefusalError,
   isDisklessActive,
 } from 'src/utils/disklessGuards.js'
+import {
+  isDisklessForSession,
+  type RemoteNativeToolSession,
+} from 'src/utils/toolCreateRuntime.js'
 import { extractTextContent } from 'src/utils/messages.js'
 import { truncateCodeUnitsSafe } from 'src/utils/stringUtils.js'
 import {
@@ -421,7 +425,12 @@ export async function resumeAgentBackground({
   /** Official 2.1.327 (#510): session permission mode used instead of a sibling's mode layer. */
   sessionPermissionMode?: InternalPermissionMode
 }): Promise<ResumeAgentResult> {
-  if (isDisklessActive()) {
+  if (
+    isDisklessActive() ||
+    isDisklessForSession(
+      toolUseContext.session as RemoteNativeToolSession | undefined,
+    )
+  ) {
     throw new DisklessRefusalError(
       'teammate resume refused in a session with no disk',
     )

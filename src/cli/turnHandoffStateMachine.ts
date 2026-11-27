@@ -31,6 +31,9 @@ export const TURN_HANDOFF_MAX_ITEMS = 200
 /** Maximum serialized UTF-8 byte budget for a turn_handoff snapshot (4 MiB). */
 export const TURN_HANDOFF_MAX_PAYLOAD_BYTES = 4 * 1024 * 1024
 
+/** Upper bound on `worker_epoch` so `worker_epoch + 1` always stays a safe integer. */
+export const TURN_HANDOFF_MAX_WORKER_EPOCH = Number.MAX_SAFE_INTEGER - 1
+
 export type TurnHandoffAdmission =
   | {
       admitted: true
@@ -150,10 +153,14 @@ export function buildTurnHandoffCapability(
   }
 }
 
+const WINDOWS_RESERVED_DEVICE_RE =
+  /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i
+
 /**
  * Security guard for relative handoff paths: rejects empty strings, ASCII
- * control characters, leading/trailing whitespace, POSIX/Windows absolute
- * paths, drive prefixes, empty segments, and `.` / `..` segments.
+ * control characters, leading/trailing whitespace, colons (drive prefixes /
+ * NTFS ADS), Windows reserved device names, POSIX/Windows absolute paths,
+ * empty segments, and `.` / `..` segments.
  */
 export function isSafeRelativePath(value: string): boolean {
   if (value.length === 0 || value !== value.trim()) {
@@ -163,19 +170,21 @@ export function isSafeRelativePath(value: string): boolean {
   if (/[\x00-\x1f\x7f]/.test(value)) {
     return false
   }
-  if (value.startsWith('/') || value.startsWith('\\')) {
+  if (value.includes(':')) {
     return false
   }
-  if (/^[A-Za-z]:/.test(value)) {
+  const normalized = value.replace(/\\/g, '/')
+  if (normalized.startsWith('/')) {
     return false
   }
-  const segments = value.split(/[\\/]/)
+  const segments = normalized.split('/')
   for (const segment of segments) {
     if (
       segment.length === 0 ||
       segment === '.' ||
       segment === '..' ||
-      segment !== segment.trim()
+      segment !== segment.trim() ||
+      WINDOWS_RESERVED_DEVICE_RE.test(segment)
     ) {
       return false
     }
@@ -188,8 +197,9 @@ export const safeRelativePathSchema = z
   .min(1)
   .refine(isSafeRelativePath, {
     message:
-      'Path must be a safe relative path without NUL bytes, absolute root, or .. traversal',
+      'Path must be a safe relative path without NUL bytes, colons, reserved device names, absolute root, or .. traversal',
   })
+  .transform(value => value.replace(/\\/g, '/'))
 
 export const TurnHandoffStagedFileSchema = z.object({
   path: safeRelativePathSchema,
@@ -223,7 +233,7 @@ function serializedUtf8ByteLength(value: unknown): number | null {
 
 export const TurnHandoffSnapshotSchema = z.object({
   v: z.literal(TURN_HANDOFF_VERSION),
-  worker_epoch: z.number().int().positive(),
+  worker_epoch: z.number().int().positive().max(TURN_HANDOFF_MAX_WORKER_EPOCH),
   session_id: z.string().min(1),
   shared_message_id: z.string().min(1).optional(),
   rewind_request_id: z.string().min(1).optional(),
@@ -301,6 +311,23 @@ function sha256Hex(content: string): string {
   return createHash('sha256').update(content, 'utf8').digest('hex')
 }
 
+function setCappedMapEntry<K, V>(
+  map: Map<K, V>,
+  key: K,
+  value: V,
+  maxItems: number = TURN_HANDOFF_MAX_ITEMS,
+): void {
+  if (map.has(key)) {
+    map.delete(key)
+  }
+  map.set(key, value)
+  while (map.size > maxItems) {
+    const oldest = map.keys().next().value
+    if (oldest === undefined) break
+    map.delete(oldest)
+  }
+}
+
 export class TurnHandoffManager {
   #workerEpoch = 0
   #stagedFiles = new Map<string, TurnHandoffStagedFile>()
@@ -356,7 +383,7 @@ export class TurnHandoffManager {
       sha256: sha256Hex(content),
       mtime_ms: Date.now(),
     }
-    this.#stagedFiles.set(validatedPath, entry)
+    setCappedMapEntry(this.#stagedFiles, validatedPath, entry)
     return entry
   }
 
@@ -371,7 +398,7 @@ export class TurnHandoffManager {
       content,
       mode,
     }
-    this.#carriedWrites.set(validatedPath, entry)
+    setCappedMapEntry(this.#carriedWrites, validatedPath, entry)
     return entry
   }
 
@@ -381,7 +408,7 @@ export class TurnHandoffManager {
       name: validatedName,
       content,
     }
-    this.#homeFiles.set(validatedName, entry)
+    setCappedMapEntry(this.#homeFiles, validatedName, entry)
     return entry
   }
 
@@ -403,20 +430,23 @@ export class TurnHandoffManager {
       throw new Error('exportHandoffSnapshot requires a non-empty sessionId')
     }
 
+    if (this.#workerEpoch >= TURN_HANDOFF_MAX_WORKER_EPOCH) {
+      throw new Error(
+        `Turn handoff worker_epoch exceeded safe bound (${TURN_HANDOFF_MAX_WORKER_EPOCH})`,
+      )
+    }
+
     const nextEpoch = this.#workerEpoch + 1
     const sharedMessageId = opts.sharedMessageId ?? this.#lastSharedMessageId
     const rewindRequestId = opts.rewindRequestId ?? this.#lastRewindRequestId
     const stagedFiles = [...this.#stagedFiles.values()].slice(
-      0,
-      TURN_HANDOFF_MAX_ITEMS,
+      -TURN_HANDOFF_MAX_ITEMS,
     )
     const carriedWrites = [...this.#carriedWrites.values()].slice(
-      0,
-      TURN_HANDOFF_MAX_ITEMS,
+      -TURN_HANDOFF_MAX_ITEMS,
     )
     const homeFiles = [...this.#homeFiles.values()].slice(
-      0,
-      TURN_HANDOFF_MAX_ITEMS,
+      -TURN_HANDOFF_MAX_ITEMS,
     )
     const sourceMessages = opts.messages ?? this.#hydratedMessages
     const messages =
@@ -516,6 +546,27 @@ export class TurnHandoffManager {
       }
     }
 
+    // Verify all declared staged file SHA-256 digests before mutating state
+    const verifiedStagedFiles: TurnHandoffStagedFile[] = []
+    for (const file of snapshot.staged_files ?? []) {
+      const computedSha = sha256Hex(file.content)
+      if (
+        file.sha256 !== undefined &&
+        file.sha256.toLowerCase() !== computedSha
+      ) {
+        return {
+          ok: false,
+          error: `Staged file "${file.path}" sha256 mismatch`,
+        }
+      }
+      verifiedStagedFiles.push({
+        path: file.path,
+        content: file.content,
+        sha256: computedSha,
+        ...(file.mtime_ms !== undefined ? { mtime_ms: file.mtime_ms } : {}),
+      })
+    }
+
     this.#workerEpoch = snapshot.worker_epoch
     this.#lastSessionId = snapshot.session_id
     this.#lastSharedMessageId = snapshot.shared_message_id
@@ -524,18 +575,13 @@ export class TurnHandoffManager {
       snapshot.multi_tenant_worker_shutdown === true
 
     this.#stagedFiles.clear()
-    for (const file of snapshot.staged_files ?? []) {
-      this.#stagedFiles.set(file.path, {
-        path: file.path,
-        content: file.content,
-        sha256: file.sha256 ?? sha256Hex(file.content),
-        ...(file.mtime_ms !== undefined ? { mtime_ms: file.mtime_ms } : {}),
-      })
+    for (const file of verifiedStagedFiles) {
+      setCappedMapEntry(this.#stagedFiles, file.path, file)
     }
 
     this.#carriedWrites.clear()
     for (const write of snapshot.carried_writes ?? []) {
-      this.#carriedWrites.set(write.path, {
+      setCappedMapEntry(this.#carriedWrites, write.path, {
         path: write.path,
         content: write.content,
         mode: write.mode,
@@ -544,7 +590,7 @@ export class TurnHandoffManager {
 
     this.#homeFiles.clear()
     for (const homeFile of snapshot.home_files ?? []) {
-      this.#homeFiles.set(homeFile.name, {
+      setCappedMapEntry(this.#homeFiles, homeFile.name, {
         name: homeFile.name,
         content: homeFile.content,
       })

@@ -34,11 +34,69 @@ export function isEditResultMetaRequested(
   )
 }
 
+export const SUBAGENT_FRAME_RESULT_HOLDS_TIMEOUT_MS = 5_000
+
+/**
+ * Evaluates a `subagentFrameResultHolds` freshness predicate with an abort
+ * signal and bounded timeout (default 5s). Abort, timeout, or thrown error
+ * are treated conservatively as `false`.
+ */
+export async function evaluateSubagentFrameResultHolds(
+  holdsFn: () => boolean | Promise<boolean>,
+  options?: {
+    signal?: AbortSignal
+    timeoutMs?: number
+  },
+): Promise<boolean> {
+  const signal = options?.signal
+  if (signal?.aborted) {
+    return false
+  }
+  const timeoutMs = options?.timeoutMs ?? SUBAGENT_FRAME_RESULT_HOLDS_TIMEOUT_MS
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let onAbort: (() => void) | undefined
+  try {
+    const holdsPromise = Promise.resolve().then(() => holdsFn())
+    void holdsPromise.catch(() => {})
+    const guardPromise = new Promise<boolean>(resolve => {
+      if (signal) {
+        onAbort = () => resolve(false)
+        signal.addEventListener('abort', onAbort, { once: true })
+      }
+      if (timeoutMs > 0 && Number.isFinite(timeoutMs)) {
+        timer = setTimeout(() => {
+          timer = undefined
+          resolve(false)
+        }, timeoutMs)
+        if (
+          typeof timer === 'object' &&
+          timer !== null &&
+          'unref' in timer &&
+          typeof timer.unref === 'function'
+        ) {
+          timer.unref()
+        }
+      }
+    })
+    return Boolean(await Promise.race([holdsPromise, guardPromise]))
+  } catch (error) {
+    logError(error)
+    return false
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer)
+    }
+    if (signal && onAbort) {
+      signal.removeEventListener('abort', onAbort)
+    }
+  }
+}
+
 /**
  * Official `BKs`: attaches `toolResult.subagentFrameResult` to an MCP
  * `CallToolResult`'s `_meta['claudecode/editResult']`, skipping attachment if
  * the tool errored, if no frame result is present, or if
- * `subagentFrameResultHolds()` resolves to `false` or throws.
+ * `subagentFrameResultHolds()` resolves to `false`, times out, aborts, or throws.
  */
 export async function attachSubagentFrameResultMeta<
   T extends { isError?: boolean; _meta?: Record<string, unknown> },
@@ -47,6 +105,10 @@ export async function attachSubagentFrameResultMeta<
   toolResult: {
     subagentFrameResult?: unknown
     subagentFrameResultHolds?: () => boolean | Promise<boolean>
+  },
+  options?: {
+    signal?: AbortSignal
+    timeoutMs?: number
   },
 ): Promise<T> {
   if (
@@ -57,13 +119,11 @@ export async function attachSubagentFrameResultMeta<
   }
 
   if (toolResult.subagentFrameResultHolds !== undefined) {
-    try {
-      const holds = await toolResult.subagentFrameResultHolds()
-      if (!holds) {
-        return callToolResult
-      }
-    } catch (error) {
-      logError(error)
+    const holds = await evaluateSubagentFrameResultHolds(
+      toolResult.subagentFrameResultHolds,
+      options,
+    )
+    if (!holds) {
       return callToolResult
     }
   }

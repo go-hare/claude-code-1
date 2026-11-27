@@ -141,21 +141,83 @@ function saveIdpIdToken(
   })
 }
 
+const BASE64URL_SEGMENT_RE = /^[A-Za-z0-9_-]+$/
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+
+function isLoopbackHttpUrl(u: URL): boolean {
+  return u.protocol === 'http:' && LOOPBACK_HOSTS.has(u.hostname.toLowerCase())
+}
+
+function isPlainJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 /**
  * Save an externally-obtained id_token into the XAA cache — the exact slot
  * getCachedIdpIdToken/acquireIdpIdToken read from. Used by conformance testing
  * where the mock IdP hands us a pre-signed token but doesn't serve /authorize.
  *
- * Parses the JWT's exp claim for cache TTL (same as acquireIdpIdToken).
- * Returns the expiresAt it computed so the caller can report it.
+ * Validates 3-segment base64url JWT structure, parses header & payload JSON,
+ * rejects already-expired `exp <= now`, and verifies `iss` matches `idpIssuer`
+ * when present. Returns the computed `expiresAt` (ms).
  */
 export function saveIdpIdTokenFromJwt(
   idpIssuer: string,
   idToken: string,
 ): number {
-  const expFromJwt = jwtExp(idToken)
-  const expiresAt = expFromJwt ? expFromJwt * 1000 : Date.now() + 3600 * 1000
-  saveIdpIdToken(idpIssuer, idToken, expiresAt)
+  const trimmed = idToken.trim()
+  const parts = trimmed.split('.')
+  if (
+    parts.length !== 3 ||
+    !parts.every(part => part.length > 0 && BASE64URL_SEGMENT_RE.test(part))
+  ) {
+    throw new Error(
+      'XAA IdP: invalid id_token: expected a 3-segment base64url JWT',
+    )
+  }
+
+  let header: unknown
+  let payload: unknown
+  try {
+    header = jsonParse(Buffer.from(parts[0]!, 'base64url').toString('utf-8'))
+    payload = jsonParse(Buffer.from(parts[1]!, 'base64url').toString('utf-8'))
+  } catch {
+    throw new Error(
+      'XAA IdP: invalid id_token: header or payload is not valid JSON',
+    )
+  }
+
+  if (!isPlainJsonObject(header) || !isPlainJsonObject(payload)) {
+    throw new Error(
+      'XAA IdP: invalid id_token: header and payload must be JSON objects',
+    )
+  }
+
+  if (payload.iss !== undefined) {
+    if (
+      typeof payload.iss !== 'string' ||
+      issuerKey(payload.iss) !== issuerKey(idpIssuer)
+    ) {
+      throw new Error(
+        `XAA IdP: id_token issuer "${String(payload.iss)}" does not match configured issuer "${idpIssuer}"`,
+      )
+    }
+  }
+
+  let expiresAt: number
+  if (payload.exp !== undefined) {
+    if (typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)) {
+      throw new Error('XAA IdP: invalid id_token: exp claim must be a number')
+    }
+    expiresAt = payload.exp * 1000
+    if (expiresAt <= Date.now()) {
+      throw new Error('XAA IdP: id_token is already expired')
+    }
+  } else {
+    expiresAt = Date.now() + 3600 * 1000
+  }
+
+  saveIdpIdToken(idpIssuer, trimmed, expiresAt)
   return expiresAt
 }
 
@@ -257,7 +319,11 @@ export async function discoverOidc(
     )
   }
   const parsed = parseOpenIdProviderDiscoveryMetadata(body)
-  if (new URL(parsed.token_endpoint).protocol !== 'https:') {
+  const issuerUrl = new URL(base)
+  const tokenEndpointUrl = new URL(parsed.token_endpoint)
+  const allowLoopbackTokenEndpoint =
+    isLoopbackHttpUrl(issuerUrl) && isLoopbackHttpUrl(tokenEndpointUrl)
+  if (tokenEndpointUrl.protocol !== 'https:' && !allowLoopbackTokenEndpoint) {
     throw new Error(
       `XAA IdP: refusing non-HTTPS token endpoint: ${parsed.token_endpoint}`,
     )

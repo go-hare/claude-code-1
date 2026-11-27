@@ -1,6 +1,7 @@
 import { feature } from 'bun:bundle'
 import {
   carrySubagentFrameResult,
+  evaluateSubagentFrameResultHolds,
   withSubagentFrameResult,
 } from '../mcp/editResultMeta.js'
 import { validateBrowserToolInput } from '../../utils/claudeInChrome/chromeCallPermission.js'
@@ -6105,20 +6106,21 @@ async function checkPermissionsAndCallTool(
       )
 
       // Official 2.1.331 chunk #775 (`mle`/`yxe`/`YQt`): honor `subagentFrameResultHolds?.()`
-      // freshness predicate and carry `SUBAGENT_FRAME_RESULT_SYMBOL` onto the result block
-      // and message metadata.
-      let resolvedSubagentFrameResult = result.subagentFrameResult
+      // freshness predicate (bounded by abort signal + 5s timeout) and carry
+      // `SUBAGENT_FRAME_RESULT_SYMBOL` onto non-error result blocks and message metadata.
+      let resolvedSubagentFrameResult =
+        baseToolResultBlock.is_error === true
+          ? undefined
+          : result.subagentFrameResult
       if (
         resolvedSubagentFrameResult !== undefined &&
         result.subagentFrameResultHolds !== undefined
       ) {
-        try {
-          const holds = await result.subagentFrameResultHolds()
-          if (!holds) {
-            resolvedSubagentFrameResult = undefined
-          }
-        } catch (err) {
-          logError(err)
+        const holds = await evaluateSubagentFrameResultHolds(
+          result.subagentFrameResultHolds,
+          { signal: toolUseContext.abortController?.signal },
+        )
+        if (!holds) {
           resolvedSubagentFrameResult = undefined
         }
       }

@@ -11,7 +11,7 @@ import {
   type ServerResponse,
 } from 'node:http'
 import type { AgentDefinitionsResult } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
-import type { Tools } from '../Tool.js'
+import type { ToolPermissionContext, Tools } from '../Tool.js'
 import {
   type EarlySessionTunnelDialHandle,
   type InProcessHttpRequest,
@@ -34,6 +34,7 @@ import {
  */
 
 export const MCP_HTTP_MAX_BODY_BYTES = 32 * 1024 * 1024
+export const MCP_HTTP_MAX_BATCH_SIZE = 64
 
 export type StartMCPServerHttpOptions = {
   port?: number
@@ -49,6 +50,7 @@ export type StartMCPServerHttpOptions = {
   onBound?: (handle: McpHttpServerHandle) => void
   getToolsOverride?: () => Tools
   loadAgentDefinitions?: (cwd: string) => Promise<AgentDefinitionsResult>
+  getToolPermissionContext?: () => ToolPermissionContext | undefined
 }
 
 export type McpHttpServerHandle = {
@@ -231,33 +233,71 @@ async function readNodeRequestBodyCapped(
     let total = 0
     let finished = false
 
-    req.on('data', (chunk: Buffer | string) => {
+    const cleanup = () => {
+      req.off('data', onData)
+      req.off('end', onEnd)
+      req.off('error', onError)
+      req.off('aborted', onAborted)
+      req.off('close', onClose)
+    }
+
+    const onData = (chunk: Buffer | string) => {
       if (finished) return
       const buf = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk
       total += buf.byteLength
       if (total > maxBytes) {
         finished = true
+        chunks.length = 0
+        cleanup()
         req.pause()
         resolve({ tooLarge: true })
         return
       }
       chunks.push(buf)
-    })
+    }
 
-    req.on('end', () => {
+    const onEnd = () => {
       if (finished) return
       finished = true
+      cleanup()
+      const body = Buffer.concat(chunks).toString('utf8')
+      chunks.length = 0
       resolve({
         tooLarge: false,
-        body: Buffer.concat(chunks).toString('utf8'),
+        body,
       })
-    })
+    }
 
-    req.on('error', err => {
+    const onError = (err: Error) => {
       if (finished) return
       finished = true
+      chunks.length = 0
+      cleanup()
       reject(err)
-    })
+    }
+
+    const onAborted = () => {
+      if (finished) return
+      finished = true
+      chunks.length = 0
+      cleanup()
+      reject(new Error('Request aborted before body completed'))
+    }
+
+    const onClose = () => {
+      if (!finished && !req.complete) {
+        finished = true
+        chunks.length = 0
+        cleanup()
+        reject(new Error('Request closed before body completed'))
+      }
+    }
+
+    req.on('data', onData)
+    req.on('end', onEnd)
+    req.on('error', onError)
+    req.on('aborted', onAborted)
+    req.on('close', onClose)
   })
 }
 
@@ -315,6 +355,7 @@ export async function startMCPServerHttp(
       progressHeartbeatIntervalMs: options.progressHeartbeatIntervalMs,
       getToolsOverride: options.getToolsOverride,
       loadAgentDefinitions: options.loadAgentDefinitions,
+      getToolPermissionContext: options.getToolPermissionContext,
     })
   } catch (err) {
     server.close()
@@ -370,7 +411,9 @@ export async function startMCPServerHttp(
 
     if (upperMethod === 'DELETE') {
       if (clientSessionId !== undefined) {
-        sessions.delete(clientSessionId)
+        if (!sessions.delete(clientSessionId)) {
+          return jsonResponse(404, { error: 'Session not found' })
+        }
         touchLruSet(terminatedSessions, clientSessionId)
       }
       return {
@@ -461,7 +504,7 @@ export async function startMCPServerHttp(
     }
 
     if (Array.isArray(parsed)) {
-      if (parsed.length === 0) {
+      if (parsed.length === 0 || parsed.length > MCP_HTTP_MAX_BATCH_SIZE) {
         return jsonResponse(
           400,
           {
@@ -469,7 +512,10 @@ export async function startMCPServerHttp(
             id: null,
             error: {
               code: -32600,
-              message: 'Invalid Request',
+              message:
+                parsed.length === 0
+                  ? 'Invalid Request'
+                  : `Invalid Request: batch size exceeds maximum of ${MCP_HTTP_MAX_BATCH_SIZE}`,
             },
           },
           sessionHeaders,
@@ -504,9 +550,13 @@ export async function startMCPServerHttp(
     res: ServerResponse,
     response: InProcessHttpResponse,
   ): void => {
-    if (res.writableEnded) return
-    res.writeHead(response.status, response.headers)
-    res.end(response.body)
+    if (res.writableEnded || res.destroyed) return
+    try {
+      res.writeHead(response.status, response.headers)
+      res.end(response.body)
+    } catch {
+      // Socket already destroyed or closed
+    }
   }
 
   const rejectPayloadTooLarge = (
@@ -606,6 +656,7 @@ export async function startMCPServerHttp(
       req.path,
       normalizedHeaders,
       req.body ?? '',
+      req.signal,
     )
   }
 
@@ -619,7 +670,15 @@ export async function startMCPServerHttp(
     sessions.clear()
     terminatedSessions.clear()
     await new Promise<void>(resolve => {
-      server.close(() => resolve())
+      const graceTimer = setTimeout(() => {
+        server.closeAllConnections?.()
+      }, 1_000)
+      graceTimer.unref?.()
+      server.close(() => {
+        clearTimeout(graceTimer)
+        resolve()
+      })
+      server.closeIdleConnections?.()
     })
   }
 

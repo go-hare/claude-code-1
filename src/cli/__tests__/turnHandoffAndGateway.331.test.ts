@@ -549,6 +549,94 @@ describe('Official 2.1.331 TurnHandoffManager multi-tenant state machine & secur
       stringifySpy.mockRestore()
     }
   })
+
+  test('R2-P2-1: verifies staged file sha256 on hydrate, normalizes backslashes, rejects colons and Windows reserved device names, caps maps retaining newest, and bounds worker_epoch', () => {
+    // 1. Colon anywhere and Windows reserved device names rejected
+    for (const badPath of [
+      'foo:bar',
+      'file.txt:Zone.Identifier',
+      'CON',
+      'con.txt',
+      'PRN',
+      'a/AUX/b.ts',
+      'NUL.log',
+      'COM1',
+      'com9.txt',
+      'LPT1',
+      'dir/lpt9.dat',
+    ]) {
+      expect(isSafeRelativePath(badPath)).toBe(false)
+    }
+
+    // 2. Backslashes normalized to '/'
+    const mgr = new TurnHandoffManager()
+    const staged = mgr.stageFile('src\\nested\\app.ts', 'export const a = 1\n')
+    expect(staged.path).toBe('src/nested/app.ts')
+    expect(mgr.stagedFiles.has('src/nested/app.ts')).toBe(true)
+
+    // 3. hydrateFromHandoffSnapshot rejects sha256 mismatch atomically without mutating state
+    const badSha = mgr.hydrateFromHandoffSnapshot({
+      v: 1,
+      worker_epoch: 5,
+      session_id: 'sess-sha',
+      staged_files: [
+        {
+          path: 'src/tampered.ts',
+          content: 'real content',
+          sha256: '0'.repeat(64),
+        },
+      ],
+    })
+    expect(badSha.ok).toBe(false)
+    if (!badSha.ok) {
+      expect(badSha.error).toContain('sha256 mismatch')
+    }
+    expect(mgr.workerEpoch).toBe(0)
+    expect(mgr.stagedFiles.has('src/tampered.ts')).toBe(false)
+
+    // 4. Maps cap consistently at TURN_HANDOFF_MAX_ITEMS retaining newest items
+    const capMgr = new TurnHandoffManager()
+    for (let i = 0; i < TURN_HANDOFF_MAX_ITEMS + 15; i++) {
+      capMgr.stageFile(`staged/f-${i}.ts`, `c-${i}`)
+      capMgr.recordCarriedWrite(`carried/w-${i}.ts`, `w-${i}`)
+      capMgr.recordHomeFile(`home/h-${i}.ts`, `h-${i}`)
+    }
+    expect(capMgr.stagedFiles.size).toBe(TURN_HANDOFF_MAX_ITEMS)
+    expect(capMgr.stagedFiles.has('staged/f-0.ts')).toBe(false)
+    expect(
+      capMgr.stagedFiles.has(`staged/f-${TURN_HANDOFF_MAX_ITEMS + 14}.ts`),
+    ).toBe(true)
+    expect(capMgr.carriedWrites.size).toBe(TURN_HANDOFF_MAX_ITEMS)
+    expect(capMgr.carriedWrites.has('carried/w-0.ts')).toBe(false)
+    expect(
+      capMgr.carriedWrites.has(`carried/w-${TURN_HANDOFF_MAX_ITEMS + 14}.ts`),
+    ).toBe(true)
+    expect(capMgr.homeFiles.size).toBe(TURN_HANDOFF_MAX_ITEMS)
+    expect(capMgr.homeFiles.has('home/h-0.ts')).toBe(false)
+    expect(
+      capMgr.homeFiles.has(`home/h-${TURN_HANDOFF_MAX_ITEMS + 14}.ts`),
+    ).toBe(true)
+
+    // 5. worker_epoch bounded to <= Number.MAX_SAFE_INTEGER - 1
+    expect(
+      TurnHandoffSnapshotSchema.safeParse({
+        v: 1,
+        worker_epoch: Number.MAX_SAFE_INTEGER,
+        session_id: 'sess-max',
+      }).success,
+    ).toBe(false)
+
+    const maxMgr = new TurnHandoffManager()
+    const hydrateAtMax = maxMgr.hydrateFromHandoffSnapshot({
+      v: 1,
+      worker_epoch: Number.MAX_SAFE_INTEGER - 1,
+      session_id: 'sess-max',
+    })
+    expect(hydrateAtMax.ok).toBe(true)
+    expect(() =>
+      maxMgr.exportHandoffSnapshot({ sessionId: 'sess-max' }),
+    ).toThrow(/exceeded safe bound/)
+  })
 })
 
 describe('Official 2.1.331 cross-process `claude gateway` HTTP auth & OTLP server E2E', () => {
@@ -1203,5 +1291,242 @@ upstreams:
     clientSock.destroy()
     await new Promise(resolve => setTimeout(resolve, 60))
     expect(upstreamAborted).toBe(true)
+  })
+
+  test('R2-P0-2, R2-P0-3, R2-P1-2, R2-P1-4, R2-P1-5, R2-P2-6: redirect: manual, fail-closed auth startup, loopback Origin/Host 403, multi Set-Cookie, aborted body cleanup, and graceful keep-alive close', async () => {
+    // 1. R2-P0-3: Fail closed on empty bearer_tokens, upstream API key without auth, and non-loopback host without auth
+    await expect(
+      startGatewayServer(
+        parseGatewayConfig(`
+listen:
+  host: 127.0.0.1
+  port: 0
+auth:
+  bearer_tokens: []
+`),
+      ),
+    ).rejects.toThrow(/empty auth\.bearer_tokens/)
+
+    await expect(
+      startGatewayServer(
+        parseGatewayConfig(`
+listen:
+  host: 127.0.0.1
+  port: 0
+upstreams:
+  anthropic:
+    url: http://127.0.0.1:9999
+    api_key: sk-ant-secret-key
+`),
+      ),
+    ).rejects.toThrow(/upstream API key/)
+
+    await expect(
+      startGatewayServer(
+        parseGatewayConfig(`
+listen:
+  host: 0.0.0.0
+  port: 0
+`),
+      ),
+    ).rejects.toThrow(/non-loopback host/)
+
+    // Explicit allow_unauthenticated: true permits upstream API key on loopback
+    const capturedInits: Array<RequestInit | undefined> = []
+    const unauthAllowedGw = await startGatewayServer(
+      parseGatewayConfig(`
+listen:
+  host: 127.0.0.1
+  port: 0
+auth:
+  allow_unauthenticated: true
+upstreams:
+  anthropic:
+    url: http://127.0.0.1:9999
+    api_key: sk-ant-secret-key
+telemetry:
+  forward_to: http://127.0.0.1:4318
+  headers:
+    x-telemetry-key: secret-otlp
+`),
+      {
+        fetchImpl: async (_url, init) => {
+          capturedInits.push(init)
+          const headers = new Headers({
+            'content-type': 'application/json',
+            location: 'https://attacker.example/steal',
+          })
+          headers.append('set-cookie', 'a=1; Path=/')
+          headers.append('set-cookie', 'b=2; HttpOnly')
+          return new Response(JSON.stringify({ redirected: false }), {
+            status: 302,
+            headers,
+          })
+        },
+      },
+    )
+    handlesToClose.push(unauthAllowedGw.close)
+
+    // 2. R2-P0-3: Loopback unauthenticated mode rejects Origin header (403) and non-loopback Host header (403)
+    const originRes = await new Promise<{ status: number }>(
+      (resolve, reject) => {
+        const req = httpRequest(
+          {
+            host: '127.0.0.1',
+            port: unauthAllowedGw.port,
+            method: 'GET',
+            path: '/healthz',
+            headers: {
+              Host: `127.0.0.1:${unauthAllowedGw.port}`,
+              Origin: 'https://evil.example',
+            },
+          },
+          res => {
+            res.resume()
+            res.on('end', () => resolve({ status: res.statusCode ?? 0 }))
+          },
+        )
+        req.on('error', reject)
+        req.end()
+      },
+    )
+    expect(originRes.status).toBe(403)
+
+    const dnsRebindRes = await new Promise<{ status: number }>(
+      (resolve, reject) => {
+        const req = httpRequest(
+          {
+            host: '127.0.0.1',
+            port: unauthAllowedGw.port,
+            method: 'GET',
+            path: '/healthz',
+            headers: {
+              Host: 'evil.rebind.example:8080',
+            },
+          },
+          res => {
+            res.resume()
+            res.on('end', () => resolve({ status: res.statusCode ?? 0 }))
+          },
+        )
+        req.on('error', reject)
+        req.end()
+      },
+    )
+    expect(dnsRebindRes.status).toBe(403)
+
+    // 3. R2-P0-2 & R2-P1-4: Both inference proxy & OTLP relay pass redirect: 'manual' and preserve multi-value Set-Cookie
+    const infRes = await new Promise<{
+      status: number
+      setCookie: string[] | undefined
+    }>((resolve, reject) => {
+      const req = httpRequest(
+        {
+          host: '127.0.0.1',
+          port: unauthAllowedGw.port,
+          method: 'POST',
+          path: '/v1/messages',
+          headers: {
+            Host: `127.0.0.1:${unauthAllowedGw.port}`,
+            'content-type': 'application/json',
+          },
+        },
+        res => {
+          res.resume()
+          res.on('end', () =>
+            resolve({
+              status: res.statusCode ?? 0,
+              setCookie: res.headers['set-cookie'],
+            }),
+          )
+        },
+      )
+      req.on('error', reject)
+      req.end('{}')
+    })
+    expect(infRes.status).toBe(302)
+    expect(infRes.setCookie).toEqual(['a=1; Path=/', 'b=2; HttpOnly'])
+
+    const otlpRes = await fetch(`${unauthAllowedGw.url}/v1/traces`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+      redirect: 'manual',
+    })
+    expect(otlpRes.status).toBe(302)
+    expect(capturedInits).toHaveLength(2)
+    expect(capturedInits[0]?.redirect).toBe('manual')
+    expect(capturedInits[1]?.redirect).toBe('manual')
+
+    // 4. R2-P1-2: Aborted mid-body request cleans up cleanly
+    await new Promise<void>(resolve => {
+      const sock = createConnection(
+        { host: '127.0.0.1', port: unauthAllowedGw.port },
+        () => {
+          sock.write(
+            [
+              'POST /v1/messages HTTP/1.1',
+              `Host: 127.0.0.1:${unauthAllowedGw.port}`,
+              'Content-Type: application/json',
+              'Content-Length: 500',
+              '',
+              '{"truncated":',
+            ].join('\r\n'),
+          )
+          setTimeout(() => {
+            sock.destroy()
+            resolve()
+          }, 20)
+        },
+      )
+      sock.on('error', () => {})
+    })
+    const healthAfterAbort = await fetch(`${unauthAllowedGw.url}/healthz`)
+    expect(healthAfterAbort.status).toBe(200)
+
+    // 5. R2-P1-5: Upstream timeout via AbortController + setTimeout returns 502 cleanly
+    const timeoutGw = await startGatewayServer(
+      parseGatewayConfig(`
+listen:
+  host: 127.0.0.1
+  port: 0
+upstreams:
+  anthropic:
+    url: http://127.0.0.1:9999
+    timeout_ms: 35
+`),
+      {
+        fetchImpl: (_url, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener(
+              'abort',
+              () => reject(new Error('upstream timed out')),
+              { once: true },
+            )
+          }),
+      },
+    )
+    handlesToClose.push(timeoutGw.close)
+    const timedOutRes = await fetch(`${timeoutGw.url}/v1/messages`, {
+      method: 'POST',
+      body: '{}',
+    })
+    expect(timedOutRes.status).toBe(502)
+
+    // 6. R2-P2-6: close() drains idle keep-alive sockets promptly
+    const kaSock = createConnection(
+      { host: '127.0.0.1', port: unauthAllowedGw.port },
+      () => {
+        kaSock.write(
+          `GET /healthz HTTP/1.1\r\nHost: 127.0.0.1:${unauthAllowedGw.port}\r\nConnection: keep-alive\r\n\r\n`,
+        )
+      },
+    )
+    kaSock.on('error', () => {})
+    await new Promise(resolve => setTimeout(resolve, 30))
+    const t0 = Date.now()
+    await unauthAllowedGw.close()
+    kaSock.destroy()
+    expect(Date.now() - t0).toBeLessThan(800)
   })
 })

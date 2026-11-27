@@ -26,6 +26,7 @@ import { updateSettingsForSource } from '../../utils/settings/settings.js'
 import { cliError, cliOk } from '../exit.js'
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+const MAX_ID_TOKEN_STDIN_BYTES = 64 * 1024
 
 export type McpXaaHandlerResult =
   | { ok: true; output: string }
@@ -48,6 +49,8 @@ export type McpXaaDeps = {
   clearIdpClientSecret?: (issuer: string) => void
   acquireIdpIdToken?: (opts: IdpLoginOptions) => Promise<string>
   writeStdout?: (text: string) => void
+  writeStderr?: (text: string) => void
+  readIdTokenFromStdin?: () => Promise<string>
 }
 
 export type McpXaaSetupOptions = {
@@ -60,6 +63,61 @@ export type McpXaaSetupOptions = {
 export type McpXaaLoginOptions = {
   force?: boolean
   idToken?: string
+  idTokenStdin?: boolean
+}
+
+function defaultReadIdTokenFromStdin(): Promise<string> {
+  if (process.stdin.isTTY) {
+    return Promise.reject(
+      new Error('--id-token-stdin requires the JWT to be piped on stdin'),
+    )
+  }
+  return new Promise<string>((resolve, reject) => {
+    const chunks: Buffer[] = []
+    let total = 0
+    let settled = false
+
+    const cleanup = () => {
+      process.stdin.removeListener('data', onData)
+      process.stdin.removeListener('end', onEnd)
+      process.stdin.removeListener('error', onError)
+      if (typeof process.stdin.pause === 'function') {
+        process.stdin.pause()
+      }
+    }
+
+    const finish = (err?: Error) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      if (err) {
+        reject(err)
+        return
+      }
+      const token = Buffer.concat(chunks).toString('utf8').trim()
+      if (token.length === 0) {
+        reject(new Error('No id_token received on stdin'))
+        return
+      }
+      resolve(token)
+    }
+
+    const onData = (chunk: Buffer | string) => {
+      const buf = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk
+      total += buf.byteLength
+      if (total > MAX_ID_TOKEN_STDIN_BYTES) {
+        finish(new Error('id_token on stdin exceeds 64 KiB limit'))
+        return
+      }
+      chunks.push(buf)
+    }
+    const onEnd = () => finish()
+    const onError = (err: Error) => finish(err)
+
+    process.stdin.on('data', onData)
+    process.stdin.on('end', onEnd)
+    process.stdin.on('error', onError)
+  })
 }
 
 function defaultUpdateUserSettings(patch: {
@@ -154,6 +212,14 @@ export function runMcpXaaSetup(
     }
   }
 
+  const trimmedClientId = options.clientId.trim()
+  if (trimmedClientId.length === 0) {
+    return {
+      ok: false,
+      error: 'Error: --client-id must be a non-empty string',
+    }
+  }
+
   const parsedPort = parseCallbackPort(options.callbackPort)
   if (!parsedPort.ok) {
     return parsedPort
@@ -178,7 +244,7 @@ export function runMcpXaaSetup(
   const { error } = writeSettings({
     xaaIdp: {
       issuer: options.issuer,
-      clientId: options.clientId,
+      clientId: trimmedClientId,
       callbackPort,
     },
   })
@@ -192,7 +258,7 @@ export function runMcpXaaSetup(
   if (oldIssuer) {
     if (
       issuerKey(oldIssuer) !== issuerKey(options.issuer) ||
-      oldClientId !== options.clientId
+      oldClientId !== trimmedClientId
     ) {
       clearToken(oldIssuer)
       clearSecret(oldIssuer)
@@ -209,6 +275,8 @@ export function runMcpXaaSetup(
           `Re-run with --client-secret once keychain is available.`,
       }
     }
+  } else {
+    clearSecret(options.issuer)
   }
 
   return {
@@ -221,6 +289,7 @@ export async function runMcpXaaLogin(
   options: McpXaaLoginOptions = {},
   deps: McpXaaDeps = {},
 ): Promise<McpXaaHandlerResult> {
+  const env = deps.env ?? process.env
   const readSettings = deps.getXaaIdpSettings ?? getXaaIdpSettings
   const getCachedToken = deps.getCachedIdpIdToken ?? getCachedIdpIdToken
   const saveTokenFromJwt = deps.saveIdpIdTokenFromJwt ?? saveIdpIdTokenFromJwt
@@ -229,6 +298,10 @@ export async function runMcpXaaLogin(
   const acquireToken = deps.acquireIdpIdToken ?? acquireIdpIdToken
   const writeStdout =
     deps.writeStdout ?? ((text: string) => process.stdout.write(text))
+  const writeStderr =
+    deps.writeStderr ?? ((text: string) => process.stderr.write(text))
+  const readTokenStdin =
+    deps.readIdTokenFromStdin ?? defaultReadIdTokenFromStdin
 
   const idp = readSettings()
   if (!idp) {
@@ -238,9 +311,34 @@ export async function runMcpXaaLogin(
     }
   }
 
-  if (options.idToken) {
+  let injectedToken: string | undefined
+  if (options.idTokenStdin) {
     try {
-      const expiresAt = saveTokenFromJwt(idp.issuer, options.idToken)
+      injectedToken = await readTokenStdin()
+    } catch (err) {
+      return {
+        ok: false,
+        error: `Couldn't read id_token from stdin: ${errorMessage(err)}`,
+      }
+    }
+  } else if (options.idToken !== undefined) {
+    writeStderr(
+      'Warning: passing --id-token on the command line exposes secrets in process listings (ps). Prefer MCP_XAA_IDP_ID_TOKEN or --id-token-stdin.\n',
+    )
+    injectedToken = options.idToken
+  } else if (
+    typeof env.MCP_XAA_IDP_ID_TOKEN === 'string' &&
+    env.MCP_XAA_IDP_ID_TOKEN.trim().length > 0
+  ) {
+    injectedToken = env.MCP_XAA_IDP_ID_TOKEN.trim()
+  }
+
+  if (injectedToken !== undefined) {
+    try {
+      const expiresAt = saveTokenFromJwt(idp.issuer, injectedToken)
+      if (!Number.isFinite(expiresAt)) {
+        throw new Error('Invalid id_token expiry')
+      }
       return {
         ok: true,
         output: `id_token cached for ${idp.issuer} (expires ${new Date(expiresAt).toISOString()})`,
@@ -383,22 +481,27 @@ export function registerMcpXaaCommands(mcpCommand: Command): Command {
     .command('login')
     .description(
       'Cache an IdP id_token so XAA-enabled MCP servers authenticate ' +
-        'silently. Default: run the OIDC browser login. With --id-token: ' +
-        'write a pre-obtained JWT directly (used by conformance/e2e tests ' +
-        'where the mock IdP does not serve /authorize).',
+        'silently. Default: run the OIDC browser login. Or provide a ' +
+        'pre-obtained JWT via MCP_XAA_IDP_ID_TOKEN env var, --id-token-stdin, ' +
+        'or --id-token (deprecated).',
     )
     .option(
       '--force',
       'Ignore any cached id_token and re-login (useful after IdP-side revocation)',
     )
     .option(
+      '--id-token-stdin',
+      'Read a pre-obtained id_token JWT from stdin, skipping the OIDC browser login',
+    )
+    .option(
       '--id-token <jwt>',
-      'Write this pre-obtained id_token directly to cache, skipping the OIDC browser login',
+      'Write this pre-obtained id_token directly to cache (deprecated: prefer MCP_XAA_IDP_ID_TOKEN or --id-token-stdin)',
     )
     .action(async options => {
       const result = await runMcpXaaLogin({
         force: options.force,
         idToken: options.idToken,
+        idTokenStdin: options.idTokenStdin,
       })
       if (!result.ok) {
         return cliError(result.error)
