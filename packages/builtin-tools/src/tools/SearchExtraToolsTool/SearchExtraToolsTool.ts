@@ -14,6 +14,7 @@ import {
   findToolByName,
   type Tool,
   type ToolDef,
+  type ToolDeps,
   type Tools,
 } from 'src/Tool.js'
 import { logForDebugging } from 'src/utils/debug.js'
@@ -93,8 +94,12 @@ const searchExtraToolsHostSlot = new HostSlot<SearchExtraToolsHostState>(
   }),
 )
 
-function getSearchExtraToolsHostState(): SearchExtraToolsHostState {
-  return searchExtraToolsHostSlot.of(getActiveSearchExtraToolsHost())
+function getSearchExtraToolsHostState(
+  hostOverride?: object,
+): SearchExtraToolsHostState {
+  return searchExtraToolsHostSlot.of(
+    hostOverride ?? getActiveSearchExtraToolsHost(),
+  )
 }
 
 /**
@@ -110,6 +115,7 @@ function getDeferredToolsCacheKey(deferredTools: Tools): string {
 type HostMemoizedDescriptionFn = ((
   toolName: string,
   tools: Tools,
+  hostOverride?: object,
 ) => Promise<string>) & {
   cache: Map<string, Promise<string>>
 }
@@ -141,8 +147,12 @@ async function computeToolDescription(
  * Used for keyword search scoring.
  */
 export const getToolDescriptionMemoized: HostMemoizedDescriptionFn = (() => {
-  const fn = ((toolName: string, tools: Tools): Promise<string> => {
-    const cache = getSearchExtraToolsHostState().descriptionCache
+  const fn = ((
+    toolName: string,
+    tools: Tools,
+    hostOverride?: object,
+  ): Promise<string> => {
+    const cache = getSearchExtraToolsHostState(hostOverride).descriptionCache
     const cached = cache.get(toolName)
     if (cached !== undefined) {
       return cached
@@ -164,14 +174,17 @@ export const getToolDescriptionMemoized: HostMemoizedDescriptionFn = (() => {
 /**
  * Invalidate the description cache if deferred tools have changed.
  */
-function maybeInvalidateCache(deferredTools: Tools): void {
-  const state = getSearchExtraToolsHostState()
+function maybeInvalidateCache(
+  deferredTools: Tools,
+  hostOverride?: object,
+): void {
+  const state = getSearchExtraToolsHostState(hostOverride)
   const currentKey = getDeferredToolsCacheKey(deferredTools)
   if (state.cachedDeferredToolNames !== currentKey) {
     logForDebugging(
       `SearchExtraToolsTool: cache invalidated - deferred tools changed`,
     )
-    getToolDescriptionMemoized.cache.clear()
+    state.descriptionCache.clear()
     state.cachedDeferredToolNames = currentKey
   }
 }
@@ -270,6 +283,7 @@ async function searchToolsWithKeywords(
   deferredTools: Tools,
   tools: Tools,
   maxResults: number,
+  hostOverride?: object,
 ): Promise<string[]> {
   const queryLower = query.toLowerCase().trim()
 
@@ -329,7 +343,11 @@ async function searchToolsWithKeywords(
     const matches = await Promise.all(
       deferredTools.map(async tool => {
         const parsed = parseToolName(tool.name)
-        const description = await getToolDescriptionMemoized(tool.name, tools)
+        const description = await getToolDescriptionMemoized(
+          tool.name,
+          tools,
+          hostOverride,
+        )
         const descNormalized = description.toLowerCase()
         const hintNormalized = tool.searchHint?.toLowerCase() ?? ''
         const matchesAll = requiredTerms.every(term => {
@@ -350,7 +368,11 @@ async function searchToolsWithKeywords(
   const scored = await Promise.all(
     candidateTools.map(async tool => {
       const parsed = parseToolName(tool.name)
-      const description = await getToolDescriptionMemoized(tool.name, tools)
+      const description = await getToolDescriptionMemoized(
+        tool.name,
+        tools,
+        hostOverride,
+      )
       const descNormalized = description.toLowerCase()
       const hintNormalized = tool.searchHint?.toLowerCase() ?? ''
 
@@ -457,231 +479,237 @@ export const SearchExtraToolsTool = buildTool({
   get outputSchema(): OutputSchema {
     return outputSchema()
   },
-  async call(input, { options: { tools }, getAppState }) {
-    const { query, max_results = 5 } = input
+  create(deps: ToolDeps) {
+    return {
+      async call(input) {
+        const { query, max_results = 5 } = input
+        const tools = deps.tools
+        const host = deps.session?.host ?? deps.session?.root
 
-    const deferredTools = tools.filter(isDeferredTool)
-    maybeInvalidateCache(deferredTools)
+        const deferredTools = tools.filter(isDeferredTool)
+        maybeInvalidateCache(deferredTools, host)
 
-    // Check for MCP servers still connecting
-    function getPendingServerNames(): string[] | undefined {
-      const appState = getAppState()
-      const pending = appState.mcp.clients.filter(c => c.type === 'pending')
-      return pending.length > 0 ? pending.map(s => s.name) : undefined
-    }
+        // Check for MCP servers still connecting
+        function getPendingServerNames(): string[] | undefined {
+          const appState = deps.getAppState()
+          const clients = appState?.mcp?.clients ?? []
+          const pending = clients.filter(c => c.type === 'pending')
+          return pending.length > 0 ? pending.map(s => s.name) : undefined
+        }
 
-    // Helper to log search outcome
-    function logSearchOutcome(
-      matches: string[],
-      queryType: 'select' | 'keyword',
-    ): void {
-      logEvent('tengu_search_extra_tools_outcome', {
-        query:
-          query as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        queryType:
-          queryType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        matchCount: matches.length,
-        totalDeferredTools: deferredTools.length,
-        maxResults: max_results,
-        hasMatches: matches.length > 0,
-      })
-    }
+        // Helper to log search outcome
+        function logSearchOutcome(
+          matches: string[],
+          queryType: 'select' | 'keyword',
+        ): void {
+          logEvent('tengu_search_extra_tools_outcome', {
+            query:
+              query as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            queryType:
+              queryType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            matchCount: matches.length,
+            totalDeferredTools: deferredTools.length,
+            maxResults: max_results,
+            hasMatches: matches.length > 0,
+          })
+        }
 
-    // Check for select: prefix — direct tool selection.
-    // Supports comma-separated multi-select: `select:A,B,C`.
-    // If a name isn't in the deferred set but IS in the full tool set,
-    // we still return it — the tool is already loaded, so "selecting" it
-    // is a harmless no-op that lets the model proceed without retry churn.
-    const selectMatch = query.match(/^select:(.+)$/i)
-    if (selectMatch) {
-      const requested = selectMatch[1]!
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean)
+        // Check for select: prefix — direct tool selection.
+        // Supports comma-separated multi-select: `select:A,B,C`.
+        // If a name isn't in the deferred set but IS in the full tool set,
+        // we still return it — the tool is already loaded, so "selecting" it
+        // is a harmless no-op that lets the model proceed without retry churn.
+        const selectMatch = query.match(/^select:(.+)$/i)
+        if (selectMatch) {
+          const requested = selectMatch[1]!
+            .split(',')
+            .map(s => s.trim())
+            .filter(Boolean)
 
-      const found: string[] = []
-      const alreadyLoaded: string[] = []
-      const missing: string[] = []
-      const deferredNameSet = new Set(deferredTools.map(t => t.name))
-      for (const toolName of requested) {
-        const deferredMatch = findToolByName(deferredTools, toolName)
-        const fullMatch = deferredMatch ?? findToolByName(tools, toolName)
-        if (fullMatch) {
-          if (!found.includes(fullMatch.name)) {
-            found.push(fullMatch.name)
-            if (!deferredMatch) {
-              alreadyLoaded.push(fullMatch.name)
-            }
-          }
-        } else {
-          // 2.1.323 #2160: also recognize already-loaded tools searched by short name
-          const shortMatches = findAlreadyLoadedToolsByShortName(
-            tools,
-            deferredNameSet,
-            toolName,
-          )
-          if (shortMatches.length > 0) {
-            for (const name of shortMatches) {
-              if (!alreadyLoaded.includes(name)) {
-                alreadyLoaded.push(name)
+          const found: string[] = []
+          const alreadyLoaded: string[] = []
+          const missing: string[] = []
+          const deferredNameSet = new Set(deferredTools.map(t => t.name))
+          for (const toolName of requested) {
+            const deferredMatch = findToolByName(deferredTools, toolName)
+            const fullMatch = deferredMatch ?? findToolByName(tools, toolName)
+            if (fullMatch) {
+              if (!found.includes(fullMatch.name)) {
+                found.push(fullMatch.name)
+                if (!deferredMatch) {
+                  alreadyLoaded.push(fullMatch.name)
+                }
+              }
+            } else {
+              // 2.1.323 #2160: also recognize already-loaded tools searched by short name
+              const shortMatches = findAlreadyLoadedToolsByShortName(
+                tools,
+                deferredNameSet,
+                toolName,
+              )
+              if (shortMatches.length > 0) {
+                for (const name of shortMatches) {
+                  if (!alreadyLoaded.includes(name)) {
+                    alreadyLoaded.push(name)
+                  }
+                }
+              } else {
+                missing.push(toolName)
               }
             }
-          } else {
-            missing.push(toolName)
           }
-        }
-      }
 
-      if (found.length === 0) {
-        if (alreadyLoaded.length > 0) {
-          logForDebugging(
-            `SearchExtraToolsTool: select matched already-loaded tools by short name: ${alreadyLoaded.join(', ')}`,
-          )
-          logSearchOutcome([], 'select')
+          if (found.length === 0) {
+            if (alreadyLoaded.length > 0) {
+              logForDebugging(
+                `SearchExtraToolsTool: select matched already-loaded tools by short name: ${alreadyLoaded.join(', ')}`,
+              )
+              logSearchOutcome([], 'select')
+              return buildSearchResult(
+                [],
+                query,
+                deferredTools.length,
+                undefined,
+                alreadyLoaded,
+              )
+            }
+            logForDebugging(
+              `SearchExtraToolsTool: select failed — none found: ${missing.join(', ')}`,
+            )
+            logSearchOutcome([], 'select')
+            const pendingServers = getPendingServerNames()
+            return buildSearchResult(
+              [],
+              query,
+              deferredTools.length,
+              pendingServers,
+            )
+          }
+
+          if (missing.length > 0) {
+            logForDebugging(
+              `SearchExtraToolsTool: partial select — found: ${found.join(', ')}, missing: ${missing.join(', ')}`,
+            )
+          } else {
+            logForDebugging(
+              `SearchExtraToolsTool: selected ${found.join(', ')}`,
+            )
+          }
+          logSearchOutcome(found, 'select')
           return buildSearchResult(
-            [],
+            found,
             query,
             deferredTools.length,
             undefined,
-            alreadyLoaded,
+            alreadyLoaded.length > 0 ? alreadyLoaded : undefined,
           )
         }
-        logForDebugging(
-          `SearchExtraToolsTool: select failed — none found: ${missing.join(', ')}`,
-        )
-        logSearchOutcome([], 'select')
-        const pendingServers = getPendingServerNames()
-        return buildSearchResult(
-          [],
-          query,
-          deferredTools.length,
-          pendingServers,
-        )
-      }
 
-      if (missing.length > 0) {
-        logForDebugging(
-          `SearchExtraToolsTool: partial select — found: ${found.join(', ')}, missing: ${missing.join(', ')}`,
-        )
-      } else {
-        logForDebugging(`SearchExtraToolsTool: selected ${found.join(', ')}`)
-      }
-      logSearchOutcome(found, 'select')
-      return buildSearchResult(
-        found,
-        query,
-        deferredTools.length,
-        undefined,
-        alreadyLoaded.length > 0 ? alreadyLoaded : undefined,
-      )
-    }
-
-    // Check for discover: prefix — pure discovery search.
-    // Returns tool info (name + description + schema) as text,
-    // does NOT trigger deferred tool loading.
-    const discoverMatch = query.match(/^discover:(.+)$/i)
-    if (discoverMatch) {
-      const discoverQuery = discoverMatch[1]!.trim()
-      const index = await getToolIndex(deferredTools)
-      const tfIdfResults = searchTools(discoverQuery, index, max_results)
-      const textResults = tfIdfResults.map(r => {
-        let line = `**${r.name}** (score: ${r.score.toFixed(2)})\n${r.description}`
-        if (r.inputSchema) {
-          line += `\nSchema: ${JSON.stringify(r.inputSchema)}`
+        // Check for discover: prefix — pure discovery search.
+        // Returns tool info (name + description + schema) as text,
+        // does NOT trigger deferred tool loading.
+        const discoverMatch = query.match(/^discover:(.+)$/i)
+        if (discoverMatch) {
+          const discoverQuery = discoverMatch[1]!.trim()
+          const index = await getToolIndex(deferredTools)
+          const tfIdfResults = searchTools(discoverQuery, index, max_results)
+          logSearchOutcome(
+            tfIdfResults.map(r => r.name),
+            'keyword',
+          )
+          return buildSearchResult(
+            tfIdfResults.map(r => r.name),
+            query,
+            deferredTools.length,
+          )
         }
-        return line
-      })
-      const text =
-        textResults.length > 0
-          ? `Found ${textResults.length} tools:\n${textResults.join('\n\n')}`
-          : 'No matching deferred tools found'
-      logSearchOutcome(
-        tfIdfResults.map(r => r.name),
-        'keyword',
-      )
-      return buildSearchResult(
-        tfIdfResults.map(r => r.name),
-        query,
-        deferredTools.length,
-      )
-    }
 
-    // Keyword search + TF-IDF search in parallel
-    const deferredToolNames = new Set(deferredTools.map(t => t.name))
-    const [keywordMatches, index] = await Promise.all([
-      searchToolsWithKeywords(query, deferredTools, tools, max_results),
-      getToolIndex(deferredTools),
-    ])
-    const tfIdfResults = searchTools(query, index, max_results)
+        // Keyword search + TF-IDF search in parallel
+        const deferredToolNames = new Set(deferredTools.map(t => t.name))
+        const [keywordMatches, index] = await Promise.all([
+          searchToolsWithKeywords(
+            query,
+            deferredTools,
+            tools,
+            max_results,
+            host,
+          ),
+          getToolIndex(deferredTools),
+        ])
+        const tfIdfResults = searchTools(query, index, max_results)
 
-    // Merge results: keyword score * 0.4 + TF-IDF score * 0.6
-    const mergedScores = new Map<string, number>()
-    // Add keyword results (assign scores inversely proportional to rank)
-    keywordMatches.forEach((name, rank) => {
-      const score = (keywordMatches.length - rank) / keywordMatches.length
-      mergedScores.set(
-        name,
-        (mergedScores.get(name) ?? 0) + score * KEYWORD_WEIGHT,
-      )
-    })
-    // Add TF-IDF results
-    tfIdfResults.forEach(result => {
-      mergedScores.set(
-        result.name,
-        (mergedScores.get(result.name) ?? 0) + result.score * TFIDF_WEIGHT,
-      )
-    })
+        // Merge results: keyword score * 0.4 + TF-IDF score * 0.6
+        const mergedScores = new Map<string, number>()
+        // Add keyword results (assign scores inversely proportional to rank)
+        keywordMatches.forEach((name, rank) => {
+          const score = (keywordMatches.length - rank) / keywordMatches.length
+          mergedScores.set(
+            name,
+            (mergedScores.get(name) ?? 0) + score * KEYWORD_WEIGHT,
+          )
+        })
+        // Add TF-IDF results
+        tfIdfResults.forEach(result => {
+          mergedScores.set(
+            result.name,
+            (mergedScores.get(result.name) ?? 0) + result.score * TFIDF_WEIGHT,
+          )
+        })
 
-    // Sort by merged score, take top-N
-    const matches = [...mergedScores.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, max_results)
-      .map(([name]) => name)
+        // Sort by merged score, take top-N
+        const matches = [...mergedScores.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, max_results)
+          .map(([name]) => name)
 
-    // Identify already-loaded (core) tools among matches
-    const alreadyLoaded = matches.filter(name => !deferredToolNames.has(name))
-
-    logForDebugging(
-      `SearchExtraToolsTool: keyword search for "${query}", found ${matches.length} matches`,
-    )
-
-    logSearchOutcome(matches, 'keyword')
-
-    // Include pending server info and already-loaded short-name matches when search finds no deferred matches
-    if (matches.length === 0) {
-      const alreadyAvailableByShortName = findAlreadyLoadedToolsByShortName(
-        tools,
-        deferredToolNames,
-        query,
-      )
-      if (alreadyAvailableByShortName.length > 0) {
-        logForDebugging(
-          `SearchExtraToolsTool: keyword query matched already-loaded tools by short name: ${alreadyAvailableByShortName.join(', ')}`,
+        // Identify already-loaded (core) tools among matches
+        const alreadyLoaded = matches.filter(
+          name => !deferredToolNames.has(name),
         )
+
+        logForDebugging(
+          `SearchExtraToolsTool: keyword search for "${query}", found ${matches.length} matches`,
+        )
+
+        logSearchOutcome(matches, 'keyword')
+
+        // Include pending server info and already-loaded short-name matches when search finds no deferred matches
+        if (matches.length === 0) {
+          const alreadyAvailableByShortName = findAlreadyLoadedToolsByShortName(
+            tools,
+            deferredToolNames,
+            query,
+          )
+          if (alreadyAvailableByShortName.length > 0) {
+            logForDebugging(
+              `SearchExtraToolsTool: keyword query matched already-loaded tools by short name: ${alreadyAvailableByShortName.join(', ')}`,
+            )
+            return buildSearchResult(
+              matches,
+              query,
+              deferredTools.length,
+              undefined,
+              alreadyAvailableByShortName,
+            )
+          }
+          const pendingServers = getPendingServerNames()
+          return buildSearchResult(
+            matches,
+            query,
+            deferredTools.length,
+            pendingServers,
+          )
+        }
+
         return buildSearchResult(
           matches,
           query,
           deferredTools.length,
           undefined,
-          alreadyAvailableByShortName,
+          alreadyLoaded.length > 0 ? alreadyLoaded : undefined,
         )
-      }
-      const pendingServers = getPendingServerNames()
-      return buildSearchResult(
-        matches,
-        query,
-        deferredTools.length,
-        pendingServers,
-      )
+      },
     }
-
-    return buildSearchResult(
-      matches,
-      query,
-      deferredTools.length,
-      undefined,
-      alreadyLoaded.length > 0 ? alreadyLoaded : undefined,
-    )
   },
   renderToolUseMessage(input: Partial<{ query: string; max_results: number }>) {
     if (!input.query) return null

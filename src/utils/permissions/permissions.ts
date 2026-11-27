@@ -43,6 +43,12 @@ import {
 } from './nhoGates.js'
 import { workflowNeedsUsageConsentPrompt } from './workflowUsageConsent.js'
 import { isSessionBypassClass } from './planBypass.js'
+import {
+  getRemoteNativeToolCheck,
+  NeverRunsInThisProcessError,
+  recordRemoteNativeToolLocallyChecked,
+  REMOTE_CHECK_DOES_NOT_DECIDE,
+} from '../toolCreateRuntime.js'
 import type { Tool, ToolPermissionContext, ToolUseContext } from '../../Tool.js'
 import { AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/constants.js'
 import { SEND_MESSAGE_TOOL_NAME } from '@claude-code/builtin-tools/tools/SendMessageTool/constants.js'
@@ -3048,8 +3054,46 @@ const evaluateToolPermission: CanUseToolFn = async (
           input,
           context: evalContext,
           toolUseID,
-          evaluate: () =>
-            hasPermissionsToUseToolInner(tool, input, evalContext),
+          evaluate: () => {
+            const evaluateHere = () =>
+              hasPermissionsToUseToolInner(tool, input, evalContext)
+            const remoteCheck = getRemoteNativeToolCheck(
+              evalContext.session,
+              tool.name,
+            )
+            if (remoteCheck === undefined) {
+              return evaluateHere()
+            }
+            return remoteCheck({
+              tool,
+              input,
+              context: evalContext,
+              toolUseID,
+              evaluateHere,
+            }).then(decision => {
+              if (decision !== REMOTE_CHECK_DOES_NOT_DECIDE) {
+                if (
+                  decision.behavior === 'allow' &&
+                  evalContext.hookAskFloor === true
+                ) {
+                  return {
+                    behavior: 'ask' as const,
+                    message: createPermissionRequestMessage(tool.name),
+                    decisionReason: {
+                      type: 'other' as const,
+                      reason: 'hookAskFloor',
+                    },
+                  }
+                }
+                return decision
+              }
+              recordRemoteNativeToolLocallyChecked(
+                evalContext.session,
+                toolUseID,
+              )
+              return evaluateHere()
+            })
+          },
         })
 
   // Official 2.1.331 `Ijn` + `HVo` + `S_t`: if a person declined an earlier
@@ -4631,14 +4675,82 @@ function resolvePermissionCheckFailureDecision(
       ) => PermissionResult | undefined
     }
   ).permissionCheckFailureDecision
-  const failureDecision = fn?.(input, context)
-  if (
-    failureDecision?.behavior === 'deny' ||
-    failureDecision?.behavior === 'ask'
-  ) {
-    return failureDecision
+  if (typeof fn !== 'function') {
+    return undefined
   }
-  return undefined
+  try {
+    const failureDecision = fn(input, context)
+    if (
+      failureDecision?.behavior === 'deny' ||
+      failureDecision?.behavior === 'ask'
+    ) {
+      return failureDecision
+    }
+    return undefined
+  } catch (err) {
+    logError(err)
+    return {
+      behavior: 'deny',
+      message: `${tool.name} was not run: its permission check could not be completed.`,
+      decisionReason: {
+        type: 'other',
+        reason: 'permission check crashed; tool declares a fail-closed posture',
+      },
+    }
+  }
+}
+
+/**
+ * Official 2.1.331 `Yho` (@321208895): run a registered `RemoteNativeToolCheck`
+ * during PreToolUse hook `allow` / `ask` resolution so a PreToolUse hook can
+ * never bypass a cross-process native tool's remote permission check.
+ */
+export async function checkRemoteNativeToolPermissionOverride(
+  tool: Tool,
+  input: { [key: string]: unknown },
+  context: ToolUseContext,
+  toolUseID: string,
+): Promise<PermissionAskDecision | PermissionDenyDecision | null> {
+  const remoteCheck = getRemoteNativeToolCheck(context.session, tool.name)
+  if (remoteCheck === undefined) {
+    return null
+  }
+  const checkContext =
+    context.toolUseId === toolUseID
+      ? context
+      : { ...context, toolUseId: toolUseID }
+  const decision = await remoteCheck({
+    tool,
+    input,
+    context: checkContext,
+    toolUseID,
+    evaluateHere: () =>
+      Promise.resolve({
+        behavior: 'deny' as const,
+        message: `${tool.name} was not run: its permission check could not be completed.`,
+        decisionReason: {
+          type: 'other' as const,
+          reason: 'permission check failed',
+        },
+      }),
+  })
+  if (decision === REMOTE_CHECK_DOES_NOT_DECIDE) {
+    recordRemoteNativeToolLocallyChecked(context.session, toolUseID)
+    return null
+  }
+  if (decision.behavior === 'deny') {
+    return decision
+  }
+  if (
+    decision.behavior === 'ask' &&
+    ((decision as { personOnly?: boolean }).personOnly === true ||
+      findSafetyCheckDecision(decision.decisionReason, () => true) !==
+        undefined ||
+      hasMatchedAskRule(decision))
+  ) {
+    return decision
+  }
+  return null
 }
 
 export async function checkRuleBasedPermissions(
@@ -4707,6 +4819,16 @@ export async function checkRuleBasedPermissions(
   } catch (e) {
     if (e instanceof AbortError || e instanceof APIUserAbortError) {
       throw e
+    }
+    if (e instanceof NeverRunsInThisProcessError) {
+      return {
+        behavior: 'deny',
+        message: e.message,
+        decisionReason: {
+          type: 'other',
+          reason: 'permission check failed',
+        },
+      }
     }
     logError(e)
     const failureDecision = resolvePermissionCheckFailureDecision(
@@ -4778,8 +4900,11 @@ export async function checkRuleBasedPermissions(
 
   // 1h. Plan-mode write floor (#686): PreToolUse allow must not let a
   // non-read-only write (file, shell, or MCP) execute unprompted in plan mode.
+  // Official 2.1.331: skip local write floor when a remote native-tool check
+  // (`nue`) owns permission adjudication for this tool.
   if (
     options?.planModeWriteFloor === true &&
+    getRemoteNativeToolCheck(context.session, tool.name) === undefined &&
     !tool.requiresUserInteraction?.() &&
     !isBypassedByPrePlanMode(toolPermissionContext) &&
     isPlanModeNonReadOnlyWrite(tool, input, context)
@@ -4917,6 +5042,16 @@ async function hasPermissionsToUseToolInner(
     // Rethrow abort errors so they propagate properly
     if (e instanceof AbortError || e instanceof APIUserAbortError) {
       throw e
+    }
+    if (e instanceof NeverRunsInThisProcessError) {
+      return {
+        behavior: 'deny',
+        message: e.message,
+        decisionReason: {
+          type: 'other',
+          reason: 'permission check failed',
+        },
+      }
     }
     logError(e)
     const failureDecision = resolvePermissionCheckFailureDecision(

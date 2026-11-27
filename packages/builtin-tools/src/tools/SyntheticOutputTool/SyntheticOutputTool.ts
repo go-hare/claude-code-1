@@ -58,21 +58,25 @@ export const SyntheticOutputTool = buildTool({
   get outputSchema(): OutputSchema {
     return outputSchema()
   },
-  async call(input) {
-    // The tool just validates and returns the input as the structured output
+  create() {
     return {
-      data: 'Structured output provided successfully',
-      structured_output: input,
-      // densable 2.1.283 pe/ze `endsTurn:!0` @ 181130570 — smo ends the
-      // query loop so max_turns=1 StructuredOutput does not recurse.
-      endsTurn: true,
-    }
-  },
-  async checkPermissions(input): Promise<PermissionResult> {
-    // Always allow this tool - it's just returning data
-    return {
-      behavior: 'allow',
-      updatedInput: input,
+      async call(input) {
+        // The tool just validates and returns the input as the structured output
+        return {
+          data: 'Structured output provided successfully',
+          structured_output: input,
+          // densable 2.1.283 pe/ze `endsTurn:!0` @ 181130570 — smo ends the
+          // query loop so max_turns=1 StructuredOutput does not recurse.
+          endsTurn: true,
+        }
+      },
+      async checkPermissions(input): Promise<PermissionResult> {
+        // Always allow this tool - it's just returning data
+        return {
+          behavior: 'allow',
+          updatedInput: input,
+        }
+      },
     }
   },
   // Minimal UI implementations - this tool is for non-interactive SDK/CLI use
@@ -141,28 +145,63 @@ function buildSyntheticOutputTool(
     const validateSchema = ajv.compile(jsonSchema)
 
     return {
-      tool: {
-        ...SyntheticOutputTool,
+      tool: buildTool({
+        isMcp: false,
+        isEnabled: SyntheticOutputTool.isEnabled,
+        isConcurrencySafe: SyntheticOutputTool.isConcurrencySafe,
+        isReadOnly: SyntheticOutputTool.isReadOnly,
+        isOpenWorld: SyntheticOutputTool.isOpenWorld,
+        name: SYNTHETIC_OUTPUT_TOOL_NAME,
+        searchHint: SyntheticOutputTool.searchHint,
+        maxResultSizeChars: SyntheticOutputTool.maxResultSizeChars,
+        description: SyntheticOutputTool.description,
+        prompt: SyntheticOutputTool.prompt,
+        get inputSchema(): InputSchema {
+          return inputSchema()
+        },
         inputJSONSchema: jsonSchema as ToolInputJSONSchema,
-        async call(input) {
-          const isValid = validateSchema(input)
-          if (!isValid) {
-            const errors = validateSchema.errors
-              ?.map(e => `${e.instancePath || 'root'}: ${e.message}`)
-              .join(', ')
-            throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
-              `Output does not match required schema: ${errors}`,
-              `StructuredOutput schema mismatch: ${(errors ?? '').slice(0, 150)}`,
-            )
-          }
+        get outputSchema(): OutputSchema {
+          return outputSchema()
+        },
+        renderToolUseMessage: SyntheticOutputTool.renderToolUseMessage,
+        renderToolUseRejectedMessage:
+          SyntheticOutputTool.renderToolUseRejectedMessage,
+        renderToolUseErrorMessage:
+          SyntheticOutputTool.renderToolUseErrorMessage,
+        renderToolUseProgressMessage:
+          SyntheticOutputTool.renderToolUseProgressMessage,
+        renderToolResultMessage: SyntheticOutputTool.renderToolResultMessage,
+        mapToolResultToToolResultBlockParam:
+          SyntheticOutputTool.mapToolResultToToolResultBlockParam,
+        create() {
           return {
-            data: 'Structured output provided successfully',
-            structured_output: input,
-            // densable 2.1.283 pe/ze `endsTurn:!0` @ 181130570
-            endsTurn: true,
+            async checkPermissions(input): Promise<PermissionResult> {
+              return {
+                behavior: 'allow',
+                updatedInput: input,
+              }
+            },
+            async call(input) {
+              const isValid = validateSchema(input)
+              if (!isValid) {
+                const errors = validateSchema.errors
+                  ?.map(e => `${e.instancePath || 'root'}: ${e.message}`)
+                  .join(', ')
+                throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+                  `Output does not match required schema: ${errors}`,
+                  `StructuredOutput schema mismatch: ${(errors ?? '').slice(0, 150)}`,
+                )
+              }
+              return {
+                data: 'Structured output provided successfully',
+                structured_output: input,
+                // densable 2.1.283 pe/ze `endsTurn:!0` @ 181130570
+                endsTurn: true,
+              }
+            },
           }
         },
-      },
+      } satisfies ToolDef<InputSchema, Output>),
     }
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e) }

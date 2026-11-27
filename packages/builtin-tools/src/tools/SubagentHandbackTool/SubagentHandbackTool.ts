@@ -4,8 +4,12 @@
  */
 import { z } from 'zod/v4'
 import { getMainThreadAgentId } from 'src/bootstrap/state.js'
-import type { ToolResultBlockParam, ToolUseContext } from 'src/Tool.js'
-import { buildTool, type ToolDef } from 'src/Tool.js'
+import {
+  buildTool,
+  type ToolDef,
+  type ToolDeps,
+  type ToolResultBlockParam,
+} from 'src/Tool.js'
 import {
   isLocalAgentTask,
   queuePendingMessage,
@@ -62,7 +66,7 @@ type OutputSchema = ReturnType<typeof outputSchema>
 export type Output = z.infer<OutputSchema>
 
 function resolveHandbackFrom(
-  context: ToolUseContext,
+  deps: Pick<ToolDeps, 'tasks'>,
   senderTaskId: string,
 ): { from: string; displayName: string } {
   const als = getAgentContext()
@@ -75,7 +79,7 @@ function resolveHandbackFrom(
     if (name) return { from: name, displayName: name }
   }
   try {
-    const task = context.getAppState().tasks[senderTaskId]
+    const task = deps.tasks()[senderTaskId]
     if (isLocalAgentTask(task) && task.agentType) {
       const name = sanitizeCrossSessionDisplayName(task.agentType)
       if (name) return { from: name, displayName: name }
@@ -175,213 +179,210 @@ export const SubagentHandbackTool = buildTool({
     }
   },
 
-  async validateInput(input) {
-    if (input.message.trim().length === 0) {
-      return {
-        result: false,
-        message: 'message must not be empty',
-        errorCode: 9,
-      }
-    }
-    return { result: true }
-  },
+  create(deps: ToolDeps) {
+    return {
+      async validateInput(input) {
+        if (input.message.trim().length === 0) {
+          return {
+            result: false,
+            message: 'message must not be empty',
+            errorCode: 9,
+          }
+        }
+        return { result: true }
+      },
 
-  async checkPermissions(input) {
-    return { behavior: 'allow' as const, updatedInput: input }
-  },
+      async checkPermissions(input) {
+        return { behavior: 'allow' as const, updatedInput: input }
+      },
 
-  async call(input: Input, context: ToolUseContext) {
-    const als = getAgentContext()
-    const senderTaskId =
-      context.agentId ??
-      (als?.agentType === 'subagent' || als?.agentType === 'teammate'
-        ? als.agentId
-        : undefined)
-    // densable: i=EOo(toolUseId); g=i&&i.kind!=="unavailable"; g&&agentId → pGo early.
-    const i = takeHandbackClassifierResult(context.toolUseId)
-    const g = shouldFlagHandbackFromClassifierResult(i)
-    if (g && senderTaskId !== undefined) {
-      flagHandbackSession(senderTaskId)
-    }
-    const task = senderTaskId
-      ? (() => {
+      async call(input: Input, callCtx) {
+        const als = getAgentContext()
+        const senderTaskId =
+          deps.agentId ??
+          (als?.agentType === 'subagent' || als?.agentType === 'teammate'
+            ? als.agentId
+            : undefined)
+        // densable: i=EOo(toolUseId); g=i&&i.kind!=="unavailable"; g&&agentId → pGo early.
+        const i = takeHandbackClassifierResult(callCtx.toolUseId)
+        const g = shouldFlagHandbackFromClassifierResult(i)
+        if (g && senderTaskId !== undefined) {
+          flagHandbackSession(senderTaskId)
+        }
+        const getTask = (id: string) => {
           try {
-            return context.getAppState().tasks[senderTaskId]
+            return deps.tasks()[id]
           } catch {
             return undefined
           }
-        })()
-      : undefined
-    const contract =
-      isLocalAgentTask(task) && task.handbackContract === true
-        ? { recipient: task.handbackRecipient }
-        : undefined
-    if (!senderTaskId || contract?.recipient === undefined) {
-      return {
-        data: {
-          success: false,
-          message: `Nothing was sent: ${SUBAGENT_HANDBACK_TOOL_NAME} is not active for this agent. Write your report as plain text instead.`,
-        } satisfies Output,
-      }
-    }
-    const recipient = contract.recipient
-    const alreadyDelivered =
-      getHandbackDelivery(senderTaskId, recipient) !== undefined
-    if (alreadyDelivered) {
-      // #1791 (official `tr` -> `Mba`): record refused repeat handback report
-      markHandbackLaterReportRefused(senderTaskId)
-      return {
-        data: {
-          success: false,
-          message: `Nothing was sent: your report was already delivered (${SUBAGENT_HANDBACK_TOOL_NAME} delivers one report). Use SendMessage for anything further, then stop.`,
-        } satisfies Output,
-      }
-    }
+        }
+        const task = senderTaskId ? getTask(senderTaskId) : undefined
+        const contract =
+          isLocalAgentTask(task) && task.handbackContract === true
+            ? { recipient: task.handbackRecipient }
+            : undefined
+        if (!senderTaskId || contract?.recipient === undefined) {
+          return {
+            data: {
+              success: false,
+              message: `Nothing was sent: ${SUBAGENT_HANDBACK_TOOL_NAME} is not active for this agent. Write your report as plain text instead.`,
+            } satisfies Output,
+          }
+        }
+        const recipient = contract.recipient
+        const alreadyDelivered =
+          getHandbackDelivery(senderTaskId, recipient) !== undefined
+        if (alreadyDelivered) {
+          // #1791 (official `tr` -> `Mba`): record refused repeat handback report
+          markHandbackLaterReportRefused(senderTaskId)
+          return {
+            data: {
+              success: false,
+              message: `Nothing was sent: your report was already delivered (${SUBAGENT_HANDBACK_TOOL_NAME} delivers one report). Use SendMessage for anything further, then stop.`,
+            } satisfies Output,
+          }
+        }
 
-    const { from, displayName } = resolveHandbackFrom(context, senderTaskId)
-    // densable C_n join: h=y7n(body); d=D(i); b=d===void 0?h:`${bht(d)}\n${h}`
-    // (flagged → D undefined / no note; unavailable still notes, g false).
-    const framedReport = frameHandbackReport(input.message)
-    const note = i ? formatHandbackClassifierNote(i) : undefined
-    const bodyText =
-      note === undefined
-        ? framedReport
-        : `${indentHandbackReport(note)}\n${framedReport}`
-    const envelope = wrapAgentMessageEnvelope(from, bodyText)
-    const flagged =
-      g || getHandbackSessionContract(senderTaskId)?.flagged === true
-    // #1732 (official `pqr(Be)`): attach parsed handbackNote & handbackReportText
-    // onto peer origin so display surfaces render note and report separately.
-    const bodyParts = extractHandbackOriginParts(
-      escapeAgentMessageBody(bodyText),
-    )
-    // densable T: peer origin has no lineage field. Framing still treats
-    // senderTaskId as the descendant lane.
-    const origin = {
-      kind: 'peer' as const,
-      from,
-      senderTaskId,
-      ...(displayName ? { name: displayName } : {}),
-      body: escapeAgentMessageBody(bodyText),
-      handback: true as const,
-      ...(flagged ? { flagged: true as const } : {}),
-      ...(bodyParts.note !== undefined ? { handbackNote: bodyParts.note } : {}),
-      handbackReportText: bodyParts.report,
-    }
-    const mainId = getMainThreadAgentId()
-    const getTask = (id: string) => {
-      try {
-        return context.getAppState().tasks[id]
-      } catch {
-        return undefined
-      }
-    }
-    const sender = isLocalAgentTask(task) ? task : undefined
-    // densable: backgrounded && !Xcn(recipient) → Ve() main
-    const deliverTo =
-      sender?.isBackgrounded === true &&
-      !isHandbackInboxReadable(recipient, getTask, mainId)
-        ? mainId
-        : recipient
-    const setAppState = context.setAppStateForTasks ?? context.setAppState
-    // densable: c !== contract recipient → stamp handbackRecipient before
-    // the second v_n(r, c) check.
-    if (deliverTo !== recipient) {
-      try {
-        updateTaskState(senderTaskId, setAppState, t => {
-          if (!isLocalAgentTask(t)) return t
-          return { ...t, handbackRecipient: deliverTo }
-        })
-      } catch {
-        // tests may omit setAppState
-      }
-    }
-    if (getHandbackDelivery(senderTaskId, deliverTo) !== undefined) {
-      // #1791 (official `tr` -> `Mba`): record refused repeat handback report
-      markHandbackLaterReportRefused(senderTaskId)
-      return {
-        data: {
-          success: false,
-          message: `Nothing was sent: your report was already delivered (${SUBAGENT_HANDBACK_TOOL_NAME} delivers one report). Use SendMessage for anything further, then stop.`,
-        } satisfies Output,
-      }
-    }
-    if (deliverTo === mainId) {
-      // densable: enqueueReportingAdmission; refuse when main does not admit.
-      if (
-        !enqueueReportingAdmission({
-          mode: 'prompt',
-          value: envelope,
-          priority: 'next',
-          isMeta: true,
-          skipSlashCommands: true,
-          skipAttachments: true,
-          origin: origin as never,
-          agentId: mainId,
-        }).admitted
-      ) {
+        const { from, displayName } = resolveHandbackFrom(deps, senderTaskId)
+        // densable C_n join: h=y7n(body); d=D(i); b=d===void 0?h:`${bht(d)}\n${h}`
+        // (flagged → D undefined / no note; unavailable still notes, g false).
+        const framedReport = frameHandbackReport(input.message)
+        const note = i ? formatHandbackClassifierNote(i) : undefined
+        const bodyText =
+          note === undefined
+            ? framedReport
+            : `${indentHandbackReport(note)}\n${framedReport}`
+        const envelope = wrapAgentMessageEnvelope(from, bodyText)
+        const flagged =
+          g || getHandbackSessionContract(senderTaskId)?.flagged === true
+        // #1732 (official `pqr(Be)`): attach parsed handbackNote & handbackReportText
+        // onto peer origin so display surfaces render note and report separately.
+        const bodyParts = extractHandbackOriginParts(
+          escapeAgentMessageBody(bodyText),
+        )
+        // densable T: peer origin has no lineage field. Framing still treats
+        // senderTaskId as the descendant lane.
+        const origin = {
+          kind: 'peer' as const,
+          from,
+          senderTaskId,
+          ...(displayName ? { name: displayName } : {}),
+          body: escapeAgentMessageBody(bodyText),
+          handback: true as const,
+          ...(flagged ? { flagged: true as const } : {}),
+          ...(bodyParts.note !== undefined
+            ? { handbackNote: bodyParts.note }
+            : {}),
+          handbackReportText: bodyParts.report,
+        }
+        const mainId = getMainThreadAgentId()
+        const sender = isLocalAgentTask(task) ? task : undefined
+        // densable: backgrounded && !Xcn(recipient) → Ve() main
+        const deliverTo =
+          sender?.isBackgrounded === true &&
+          !isHandbackInboxReadable(recipient, getTask, mainId)
+            ? mainId
+            : recipient
+        const setAppState = deps.setAppStateForTasks ?? deps.setAppState
+        // densable: c !== contract recipient → stamp handbackRecipient before
+        // the second v_n(r, c) check.
+        if (deliverTo !== recipient) {
+          try {
+            updateTaskState(senderTaskId, setAppState, t => {
+              if (!isLocalAgentTask(t)) return t
+              return { ...t, handbackRecipient: deliverTo }
+            })
+          } catch {
+            // tests may omit setAppState
+          }
+        }
+        if (getHandbackDelivery(senderTaskId, deliverTo) !== undefined) {
+          // #1791 (official `tr` -> `Mba`): record refused repeat handback report
+          markHandbackLaterReportRefused(senderTaskId)
+          return {
+            data: {
+              success: false,
+              message: `Nothing was sent: your report was already delivered (${SUBAGENT_HANDBACK_TOOL_NAME} delivers one report). Use SendMessage for anything further, then stop.`,
+            } satisfies Output,
+          }
+        }
+        if (deliverTo === mainId) {
+          // densable: enqueueReportingAdmission; refuse when main does not admit.
+          if (
+            !enqueueReportingAdmission({
+              mode: 'prompt',
+              value: envelope,
+              priority: 'next',
+              isMeta: true,
+              skipSlashCommands: true,
+              skipAttachments: true,
+              origin: origin as never,
+              agentId: mainId,
+            }).admitted
+          ) {
+            return {
+              data: {
+                success: false,
+                message:
+                  'Nothing was sent: the main conversation did not accept the message.',
+              } satisfies Output,
+            }
+          }
+        } else {
+          const target = getTask(deliverTo)
+          if (
+            !isHandbackInboxAlive(isLocalAgentTask(target) ? target : undefined)
+          ) {
+            return {
+              data: {
+                success: false,
+                message:
+                  'Nothing was sent: the agent that spawned you is no longer running.',
+              } satisfies Output,
+            }
+          }
+          queuePendingMessage(deliverTo, envelope, setAppState, {
+            isMeta: true,
+            origin: origin as never,
+          })
+        }
+
+        // densable v_n keys the one-report lock on the *contract* recipient,
+        // not the bg-retarget deliverTo (main). Retargeting delivery to main
+        // must not let a second call miss the lock. (Main admit path may also
+        // stamp via enqueueReportingAdmission with agentId=main — overwrite here.)
+        recordHandbackDelivery(senderTaskId, recipient, { flagged })
+        try {
+          // densable handbackReport.text = tet(Ax(message, {prependMarker:false}).sanitized)
+          // — raw sanitized message, NOT the framed C_n envelope body.
+          // warning = tet(d) when classifier note is defined (no Ax on warning).
+          updateTaskState(senderTaskId, setAppState, t => {
+            if (!isLocalAgentTask(t)) return t
+            return {
+              ...t,
+              handbackReport: {
+                text: escapeAgentMessageBody(
+                  sanitizeHarnessText(input.message, { prependMarker: false })
+                    .sanitized,
+                ),
+                ...(note !== undefined
+                  ? { warning: escapeAgentMessageBody(note) }
+                  : {}),
+              },
+            }
+          })
+        } catch {
+          // tests may omit setAppState
+        }
+
         return {
           data: {
-            success: false,
-            message:
-              'Nothing was sent: the main conversation did not accept the message.',
+            success: true,
+            message: 'Report delivered to your caller.',
           } satisfies Output,
+          ...(isHandbackEndsTurnEnabled() ? { endsTurn: true } : {}),
         }
-      }
-    } else {
-      const target = getTask(deliverTo)
-      if (
-        !isHandbackInboxAlive(isLocalAgentTask(target) ? target : undefined)
-      ) {
-        return {
-          data: {
-            success: false,
-            message:
-              'Nothing was sent: the agent that spawned you is no longer running.',
-          } satisfies Output,
-        }
-      }
-      const setAppState = context.setAppStateForTasks ?? context.setAppState
-      queuePendingMessage(deliverTo, envelope, setAppState, {
-        isMeta: true,
-        origin: origin as never,
-      })
-    }
-
-    // densable v_n keys the one-report lock on the *contract* recipient,
-    // not the bg-retarget deliverTo (main). Retargeting delivery to main
-    // must not let a second call miss the lock. (Main admit path may also
-    // stamp via enqueueReportingAdmission with agentId=main — overwrite here.)
-    recordHandbackDelivery(senderTaskId, recipient, { flagged })
-    try {
-      // densable handbackReport.text = tet(Ax(message, {prependMarker:false}).sanitized)
-      // — raw sanitized message, NOT the framed C_n envelope body.
-      // warning = tet(d) when classifier note is defined (no Ax on warning).
-      updateTaskState(senderTaskId, setAppState, t => {
-        if (!isLocalAgentTask(t)) return t
-        return {
-          ...t,
-          handbackReport: {
-            text: escapeAgentMessageBody(
-              sanitizeHarnessText(input.message, { prependMarker: false })
-                .sanitized,
-            ),
-            ...(note !== undefined
-              ? { warning: escapeAgentMessageBody(note) }
-              : {}),
-          },
-        }
-      })
-    } catch {
-      // tests may omit setAppState
-    }
-
-    return {
-      data: {
-        success: true,
-        message: 'Report delivered to your caller.',
-      } satisfies Output,
-      ...(isHandbackEndsTurnEnabled() ? { endsTurn: true } : {}),
+      },
     }
   },
 } satisfies ToolDef<InputSchema, Output>)

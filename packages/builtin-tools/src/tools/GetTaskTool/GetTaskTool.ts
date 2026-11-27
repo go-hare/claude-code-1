@@ -4,9 +4,7 @@
  * that marks fetched and calls `Qn().withdrawShellNotification` (Rvr).
  */
 import { z } from 'zod/v4'
-import { buildTool } from 'src/Tool.js'
-import type { ToolUseContext } from 'src/Tool.js'
-import type { AssistantMessage } from 'src/types/message.js'
+import { buildTool, type ToolCallContext, type ToolDeps } from 'src/Tool.js'
 import { logEvent } from 'src/services/analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 'src/services/analytics/index.js'
 import {
@@ -74,8 +72,8 @@ function isGetTaskRepeatToolResult(toolUseResult: unknown): boolean {
 }
 
 /** densable `F5` — `e.agentId` else `mA()?.agentId`. */
-function callerAgentId(context: ToolUseContext): string | undefined {
-  if (context.agentId) return context.agentId
+function callerAgentId(deps: Pick<ToolDeps, 'agentId'>): string | undefined {
+  if (deps.agentId) return deps.agentId
   return getAgentContext()?.agentId
 }
 
@@ -89,10 +87,10 @@ function agentOwnsTask(
 }
 
 /** densable `e.taskRegistry`. Missing host → Po miss (no analog getAppState). */
-function taskRegistryOf(context: ToolUseContext): {
+function taskRegistryOf(deps: Pick<ToolDeps, 'taskRegistry'>): {
   get(id: string): unknown
 } {
-  return context.taskRegistry ?? { get: () => undefined }
+  return deps.taskRegistry ?? { get: () => undefined }
 }
 
 /**
@@ -140,18 +138,15 @@ function throwNoRemoteStatus(message: string): never {
 async function jboRemoteBackground(
   taskId: string,
   agentId: string | undefined,
-  context: ToolUseContext,
+  deps: Pick<ToolDeps, 'toolState'>,
+  signal: AbortSignal,
 ): Promise<unknown> {
-  const rec = context.toolState
-    ?.get(RemoteBackgroundShells)
-    .find(taskId, agentId)
+  const rec = deps.toolState?.get(RemoteBackgroundShells).find(taskId, agentId)
   if (!rec) return undefined
   const noStatus = `${rec.hostName} did not say what became of background command ${taskId}: it is not attached or did not answer in time, or it no longer reports on the command (it keeps the last 16 that ended, and its record goes with a restart of Claude Code there or with background commands being switched off there).`
   try {
     // densable `e.get(rF).resolve(a)` then `host.transport.call`.
-    const resolved = context.toolState
-      ?.get(RemoteToolHosts)
-      .resolve(rec.hostName)
+    const resolved = deps.toolState?.get(RemoteToolHosts).resolve(rec.hostName)
     const sent =
       resolved?.kind === 'remote'
         ? await resolved.host.transport
@@ -160,7 +155,7 @@ async function jboRemoteBackground(
               {},
               { v: 1, op: 'outcome_of', call_id: rec.callId },
               {
-                signal: context.abortController.signal,
+                signal,
                 deadlineMs: 15_000,
                 toolUseId: rec.callId,
               },
@@ -434,149 +429,157 @@ export const GetTaskTool = buildTool({
   toAutoClassifierInput(input: { taskId?: string }) {
     return input.taskId ?? ''
   },
-  async validateInput({ taskId }: { taskId: string }, context: ToolUseContext) {
-    const agentId = callerAgentId(context)
-    if (lookupBashTaskSnapshot(taskId, agentId)) {
-      return { result: true as const }
-    }
-    if (lookupLiveBashTask(taskId, taskRegistryOf(context), agentId)) {
-      return { result: true as const }
-    }
-    if (context.toolState?.get(RemoteBackgroundShells).find(taskId, agentId)) {
-      return { result: true as const }
-    }
+  create(deps: ToolDeps) {
     return {
-      result: false as const,
-      message: missingTaskMessage(taskId),
-      errorCode: 1,
-    }
-  },
-  async call(
-    { taskId }: { taskId: string },
-    context: ToolUseContext,
-    _canUseTool?: unknown,
-    parentMessage?: AssistantMessage,
-  ) {
-    const agentId = callerAgentId(context)
-    const bag = getBashTaskDeliveryBag()
-    const entry = lookupBashTaskSnapshot(taskId, agentId)
-    const liveTask = lookupLiveBashTask(
-      taskId,
-      taskRegistryOf(context),
-      agentId,
-    )
-    const status = entry
-      ? String(
-          (entry.snapshot as { status?: unknown } | undefined)?.status ?? '',
-        )
-      : liveTask
-        ? liveTask.status === 'pending' ||
-          liveTask.status === 'running' ||
-          liveTask.status === 'paused'
-          ? 'working'
-          : liveTask.status === 'killed'
-            ? 'cancelled'
-            : 'completed'
-        : undefined
-    const parentId = context.innerCall ? undefined : parentMessage?.message.id
-    const statusKey =
-      status === undefined
-        ? undefined
-        : { status, key: entry ? `settled:${status}` : status }
-    const repeats =
-      parentId !== undefined && statusKey !== undefined
-        ? bag.countBashTaskGetInResponse(parentId, taskId, statusKey.key)
-        : 1
-    if (statusKey !== undefined && repeats > REPEAT_CAP) {
-      logEvent('tengu_bash_task_get', {
-        caller:
-          'model' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        status:
-          statusKey.status as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        get_count_for_task: bag.countBashTaskGet(taskId),
-        repeat_in_response: repeats,
-        short_circuited: true,
-      })
-      const err = new Error(
-        repeatMessage(repeats, statusKey.status),
-      ) as Error & { code?: string; detail?: string }
-      err.code = 'gettask_repeat_in_response'
-      err.detail = REPEAT_ERROR
-      throw err
-    }
-    let snapshot: unknown =
-      entry?.snapshot ??
-      (liveTask !== undefined
-        ? await snapshotFromLive(liveTask, agentId)
-        : undefined)
-    if (snapshot === undefined) {
-      snapshot = await jboRemoteBackground(taskId, agentId, context)
-      if (snapshot === undefined) {
-        const missing = new Error(missingTaskMessage(taskId)) as Error & {
-          detail?: string
+      async validateInput({ taskId }: { taskId: string }) {
+        const agentId = callerAgentId(deps)
+        if (lookupBashTaskSnapshot(taskId, agentId)) {
+          return { result: true as const }
         }
-        missing.detail = 'GetTask: no background command with this task ID'
-        throw missing
-      }
-    }
-    const { abortController } = context
-    // densable @195074180: `if (p && p.agentId === s && !n.innerCall && !B.aborted)`
-    // Main thread may inspect evicted subagent snapshots, but only the owning
-    // agent of a settled snapshot marks fetched and withdraws its queued notification.
-    if (
-      entry &&
-      entry.agentId === agentId &&
-      !context.innerCall &&
-      !abortController.signal.aborted
-    ) {
-      const wasFetched = entry.fetched
-      bag.markBashTaskSnapshotFetched(taskId)
-      const restore = bag.withdrawShellNotification?.(
-        taskId,
-        agentId,
-        context.taskRegistry,
-        () => context.messages,
-      )
-      abortController.signal.addEventListener(
-        'abort',
-        () => {
-          if (
-            !wasFetched &&
-            !hasPairedGetTaskResult(
-              taskId,
-              agentId,
-              context.taskRegistry,
-              () => context.messages,
+        if (lookupLiveBashTask(taskId, taskRegistryOf(deps), agentId)) {
+          return { result: true as const }
+        }
+        if (deps.toolState?.get(RemoteBackgroundShells).find(taskId, agentId)) {
+          return { result: true as const }
+        }
+        return {
+          result: false as const,
+          message: missingTaskMessage(taskId),
+          errorCode: 1,
+        }
+      },
+      async call({ taskId }: { taskId: string }, callCtx: ToolCallContext) {
+        const agentId = callerAgentId(deps)
+        const bag = getBashTaskDeliveryBag()
+        const entry = lookupBashTaskSnapshot(taskId, agentId)
+        const liveTask = lookupLiveBashTask(
+          taskId,
+          taskRegistryOf(deps),
+          agentId,
+        )
+        const status = entry
+          ? String(
+              (entry.snapshot as { status?: unknown } | undefined)?.status ??
+                '',
             )
-          ) {
-            bag.unmarkBashTaskSnapshotFetched(taskId)
-          }
-          restore?.()
-        },
-        { once: true },
-      )
-    }
-    const parsed = snapshot as { status?: string; createdAt?: string }
-    logEvent('tengu_bash_task_get', {
-      caller: (context.innerCall
-        ? 'script'
-        : 'model') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      status: String(
-        parsed.status ?? '',
-      ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      ...(!context.innerCall
-        ? {
+          : liveTask
+            ? liveTask.status === 'pending' ||
+              liveTask.status === 'running' ||
+              liveTask.status === 'paused'
+              ? 'working'
+              : liveTask.status === 'killed'
+                ? 'cancelled'
+                : 'completed'
+            : undefined
+        const innerCall = callCtx.innerCall ?? deps.innerCall
+        const parentId = innerCall
+          ? undefined
+          : callCtx.parentMessage?.message.id
+        const statusKey =
+          status === undefined
+            ? undefined
+            : { status, key: entry ? `settled:${status}` : status }
+        const repeats =
+          parentId !== undefined && statusKey !== undefined
+            ? bag.countBashTaskGetInResponse(parentId, taskId, statusKey.key)
+            : 1
+        if (statusKey !== undefined && repeats > REPEAT_CAP) {
+          logEvent('tengu_bash_task_get', {
+            caller:
+              'model' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            status:
+              statusKey.status as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
             get_count_for_task: bag.countBashTaskGet(taskId),
             repeat_in_response: repeats,
-            short_circuited: false,
+            short_circuited: true,
+          })
+          const err = new Error(
+            repeatMessage(repeats, statusKey.status),
+          ) as Error & { code?: string; detail?: string }
+          err.code = 'gettask_repeat_in_response'
+          err.detail = REPEAT_ERROR
+          throw err
+        }
+        let snapshot: unknown =
+          entry?.snapshot ??
+          (liveTask !== undefined
+            ? await snapshotFromLive(liveTask, agentId)
+            : undefined)
+        if (snapshot === undefined) {
+          snapshot = await jboRemoteBackground(
+            taskId,
+            agentId,
+            deps,
+            callCtx.signal,
+          )
+          if (snapshot === undefined) {
+            const missing = new Error(missingTaskMessage(taskId)) as Error & {
+              detail?: string
+            }
+            missing.detail = 'GetTask: no background command with this task ID'
+            throw missing
           }
-        : {}),
-      since_created_ms:
-        typeof parsed.createdAt === 'string'
-          ? Date.now() - Date.parse(parsed.createdAt)
-          : 0,
-    })
-    return { data: snapshot }
+        }
+        const { signal } = callCtx
+        // densable @195074180: `if (p && p.agentId === s && !n.innerCall && !B.aborted)`
+        // Main thread may inspect evicted subagent snapshots, but only the owning
+        // agent of a settled snapshot marks fetched and withdraws its queued notification.
+        if (
+          entry &&
+          entry.agentId === agentId &&
+          !innerCall &&
+          !signal.aborted
+        ) {
+          const wasFetched = entry.fetched
+          bag.markBashTaskSnapshotFetched(taskId)
+          const restore = bag.withdrawShellNotification?.(
+            taskId,
+            agentId,
+            deps.taskRegistry,
+            () => deps.messages(),
+          )
+          signal.addEventListener(
+            'abort',
+            () => {
+              if (
+                !wasFetched &&
+                !hasPairedGetTaskResult(
+                  taskId,
+                  agentId,
+                  deps.taskRegistry,
+                  () => deps.messages(),
+                )
+              ) {
+                bag.unmarkBashTaskSnapshotFetched(taskId)
+              }
+              restore?.()
+            },
+            { once: true },
+          )
+        }
+        const parsed = snapshot as { status?: string; createdAt?: string }
+        logEvent('tengu_bash_task_get', {
+          caller: (innerCall
+            ? 'script'
+            : 'model') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          status: String(
+            parsed.status ?? '',
+          ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          ...(!innerCall
+            ? {
+                get_count_for_task: bag.countBashTaskGet(taskId),
+                repeat_in_response: repeats,
+                short_circuited: false,
+              }
+            : {}),
+          since_created_ms:
+            typeof parsed.createdAt === 'string'
+              ? Date.now() - Date.parse(parsed.createdAt)
+              : 0,
+        })
+        return { data: snapshot }
+      },
+    }
   },
   mapToolResultToToolResultBlockParam(data: unknown, toolUseId: string) {
     const parsed = outputSchema().safeParse(data)

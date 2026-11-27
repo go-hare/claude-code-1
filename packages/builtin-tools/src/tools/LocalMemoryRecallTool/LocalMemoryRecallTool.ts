@@ -5,7 +5,7 @@ import {
   listEntriesBounded,
   listStores,
 } from 'src/services/SessionMemory/multiStore.js'
-import { buildTool, type ToolDef } from 'src/Tool.js'
+import { buildTool, type ToolDef, type ToolDeps } from 'src/Tool.js'
 import { isValidKey } from 'src/utils/localValidate.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { getRuleByContentsForToolName } from 'src/utils/permissions/permissions.js'
@@ -333,212 +333,228 @@ export const LocalMemoryRecallTool = buildTool({
   get outputSchema(): OutputSchema {
     return outputSchema()
   },
-  async checkPermissions(input, context) {
-    // Required-field validation
-    if (input.action !== 'list_stores' && !input.store) {
-      return {
-        behavior: 'deny',
-        message: `Missing 'store' for action '${input.action}'`,
-        decisionReason: { type: 'other', reason: 'missing_required_field' },
-      }
-    }
-    if (input.action === 'fetch' && !input.key) {
-      return {
-        behavior: 'deny',
-        message: 'Missing key for fetch',
-        decisionReason: { type: 'other', reason: 'missing_required_field' },
-      }
-    }
-    // Validate store and key with their respective backend validators —
-    // store uses validateStoreName (looser, allows e.g. spaces) and key uses
-    // validateKey (stricter, [A-Za-z0-9._-]). H8 fix: previously we used
-    // isValidKey on store, which would have made stores legitimately created
-    // via the /local-memory CLI with spaces or unicode permanently
-    // inaccessible to this tool.
-    if (input.store !== undefined && !isValidStoreName(input.store)) {
-      return {
-        behavior: 'deny',
-        message: `Invalid store name '${input.store}'`,
-        decisionReason: { type: 'other', reason: 'invalid_store_name' },
-      }
-    }
-    if (input.key !== undefined && !isValidKey(input.key)) {
-      return {
-        behavior: 'deny',
-        message: `Invalid key '${input.key}'`,
-        decisionReason: { type: 'other', reason: 'invalid_key' },
-      }
-    }
-
-    // list / preview always allow.
-    // preview_only !== false → undefined and true both treated as preview.
-    if (input.action !== 'fetch' || input.preview_only !== false) {
-      return { behavior: 'allow', updatedInput: input }
-    }
-
-    // Full fetch: per-content ACL via getRuleByContentsForToolName.
-    const appState = context.getAppState()
-    const permissionContext = appState.toolPermissionContext
-    const ruleContent = `fetch:${input.store}/${input.key}`
-
-    const denyRule = getRuleByContentsForToolName(
-      permissionContext,
-      LOCAL_MEMORY_RECALL_TOOL_NAME,
-      'deny',
-    ).get(ruleContent)
-    if (denyRule) {
-      return {
-        behavior: 'deny',
-        message: `Denied by rule: ${ruleContent}`,
-        decisionReason: { type: 'rule', rule: denyRule },
-      }
-    }
-
-    const allowRule = getRuleByContentsForToolName(
-      permissionContext,
-      LOCAL_MEMORY_RECALL_TOOL_NAME,
-      'allow',
-    ).get(ruleContent)
-    if (allowRule) {
-      return {
-        behavior: 'allow',
-        updatedInput: input,
-        decisionReason: { type: 'rule', rule: allowRule },
-      }
-    }
-
-    // L1 fix: ask branch carries decisionReason for audit completeness.
+  create(deps: ToolDeps) {
     return {
-      behavior: 'ask',
-      message: `Allow fetching full content of ${input.store}/${input.key}?`,
-      decisionReason: {
-        type: 'other',
-        reason: 'no_persistent_allow_for_store_key_pair',
-      },
-    }
-  },
-  async call(input: Input, context) {
-    try {
-      if (input.action === 'list_stores') {
-        const all = listStores()
-        const { list, truncated } = truncateListByByteCap(
-          all,
-          LIST_STORES_CAP_BYTES,
-        )
-        const out: Output = { action: 'list_stores', stores: list }
-        if (truncated) out.truncated = true
-        return { data: out }
-      }
-
-      if (input.action === 'list_entries') {
-        if (!input.store) {
+      async checkPermissions(input: Input) {
+        // Required-field validation
+        if (input.action !== 'list_stores' && !input.store) {
           return {
-            data: {
-              action: 'list_entries' as const,
-              error: 'internal: missing store',
+            behavior: 'deny' as const,
+            message: `Missing 'store' for action '${input.action}'`,
+            decisionReason: {
+              type: 'other' as const,
+              reason: 'missing_required_field',
             },
           }
         }
-        // M5 fix: use listEntriesBounded — caps at MAX_LIST_ENTRIES files
-        // so a 100k-entry store doesn't OOM the model.
-        const MAX_LIST_ENTRIES = 1024
-        const { entries: bounded, truncated: dirTruncated } =
-          listEntriesBounded(input.store, MAX_LIST_ENTRIES)
-        const { list, truncated: byteTruncated } = truncateListByByteCap(
-          bounded,
-          LIST_ENTRIES_CAP_BYTES,
-        )
-        const out: Output = {
-          action: 'list_entries',
-          store: input.store,
-          entries: list,
+        if (input.action === 'fetch' && !input.key) {
+          return {
+            behavior: 'deny' as const,
+            message: 'Missing key for fetch',
+            decisionReason: {
+              type: 'other' as const,
+              reason: 'missing_required_field',
+            },
+          }
         }
-        if (dirTruncated || byteTruncated) out.truncated = true
-        return { data: out }
-      }
+        // Validate store and key with their respective backend validators —
+        // store uses validateStoreName (looser, allows e.g. spaces) and key uses
+        // validateKey (stricter, [A-Za-z0-9._-]). H8 fix: previously we used
+        // isValidKey on store, which would have made stores legitimately created
+        // via the /local-memory CLI with spaces or unicode permanently
+        // inaccessible to this tool.
+        if (input.store !== undefined && !isValidStoreName(input.store)) {
+          return {
+            behavior: 'deny' as const,
+            message: `Invalid store name '${input.store}'`,
+            decisionReason: {
+              type: 'other' as const,
+              reason: 'invalid_store_name',
+            },
+          }
+        }
+        if (input.key !== undefined && !isValidKey(input.key)) {
+          return {
+            behavior: 'deny' as const,
+            message: `Invalid key '${input.key}'`,
+            decisionReason: {
+              type: 'other' as const,
+              reason: 'invalid_key',
+            },
+          }
+        }
 
-      // fetch — M3: explicit guards instead of `as string`
-      if (!input.store || !input.key) {
+        // list / preview always allow.
+        // preview_only !== false → undefined and true both treated as preview.
+        if (input.action !== 'fetch' || input.preview_only !== false) {
+          return { behavior: 'allow' as const, updatedInput: input }
+        }
+
+        // Full fetch: per-content ACL via getRuleByContentsForToolName.
+        const permissionContext = deps.permissions()
+        const ruleContent = `fetch:${input.store}/${input.key}`
+
+        const denyRule = getRuleByContentsForToolName(
+          permissionContext,
+          LOCAL_MEMORY_RECALL_TOOL_NAME,
+          'deny',
+        ).get(ruleContent)
+        if (denyRule) {
+          return {
+            behavior: 'deny' as const,
+            message: `Denied by rule: ${ruleContent}`,
+            decisionReason: { type: 'rule' as const, rule: denyRule },
+          }
+        }
+
+        const allowRule = getRuleByContentsForToolName(
+          permissionContext,
+          LOCAL_MEMORY_RECALL_TOOL_NAME,
+          'allow',
+        ).get(ruleContent)
+        if (allowRule) {
+          return {
+            behavior: 'allow' as const,
+            updatedInput: input,
+            decisionReason: { type: 'rule' as const, rule: allowRule },
+          }
+        }
+
+        // L1 fix: ask branch carries decisionReason for audit completeness.
         return {
-          data: {
-            action: 'fetch' as const,
-            error: 'internal: missing store or key',
+          behavior: 'ask' as const,
+          message: `Allow fetching full content of ${input.store}/${input.key}?`,
+          decisionReason: {
+            type: 'other' as const,
+            reason: 'no_persistent_allow_for_store_key_pair',
           },
         }
-      }
-      const store = input.store
-      const key = input.key
-      const previewMode = input.preview_only !== false
-      const cap = previewMode ? PREVIEW_CAP_BYTES : FETCH_CAP_BYTES
+      },
+      async call(input: Input, callCtx) {
+        try {
+          if (input.action === 'list_stores') {
+            const all = listStores()
+            const { list, truncated } = truncateListByByteCap(
+              all,
+              LIST_STORES_CAP_BYTES,
+            )
+            const out: Output = { action: 'list_stores', stores: list }
+            if (truncated) out.truncated = true
+            return { data: out }
+          }
 
-      // M4 fix: bounded read. Even if an attacker writes a 1GB markdown
-      // file directly to ~/.claude/local-memory/<store>/<key>.md, we only
-      // ever load `cap + 16` bytes into memory. The +16 slack covers
-      // the at-most-3-byte UTF-8 codepoint walk in truncateUtf8.
-      const bounded = getEntryBounded(store, key, cap + 16)
-      if (bounded === null) {
-        return {
-          data: {
-            action: 'fetch' as const,
+          if (input.action === 'list_entries') {
+            if (!input.store) {
+              return {
+                data: {
+                  action: 'list_entries' as const,
+                  error: 'internal: missing store',
+                },
+              }
+            }
+            // M5 fix: use listEntriesBounded — caps at MAX_LIST_ENTRIES files
+            // so a 100k-entry store doesn't OOM the model.
+            const MAX_LIST_ENTRIES = 1024
+            const { entries: bounded, truncated: dirTruncated } =
+              listEntriesBounded(input.store, MAX_LIST_ENTRIES)
+            const { list, truncated: byteTruncated } = truncateListByByteCap(
+              bounded,
+              LIST_ENTRIES_CAP_BYTES,
+            )
+            const out: Output = {
+              action: 'list_entries',
+              store: input.store,
+              entries: list,
+            }
+            if (dirTruncated || byteTruncated) out.truncated = true
+            return { data: out }
+          }
+
+          // fetch — M3: explicit guards instead of `as string`
+          if (!input.store || !input.key) {
+            return {
+              data: {
+                action: 'fetch' as const,
+                error: 'internal: missing store or key',
+              },
+            }
+          }
+          const store = input.store
+          const key = input.key
+          const previewMode = input.preview_only !== false
+          const cap = previewMode ? PREVIEW_CAP_BYTES : FETCH_CAP_BYTES
+
+          // M4 fix: bounded read. Even if an attacker writes a 1GB markdown
+          // file directly to ~/.claude/local-memory/<store>/<key>.md, we only
+          // ever load `cap + 16` bytes into memory. The +16 slack covers
+          // the at-most-3-byte UTF-8 codepoint walk in truncateUtf8.
+          const bounded = getEntryBounded(store, key, cap + 16)
+          if (bounded === null) {
+            return {
+              data: {
+                action: 'fetch' as const,
+                store,
+                key,
+                error: `Entry '${store}/${key}' not found`,
+              },
+            }
+          }
+          const raw = bounded.value
+          const fileTruncated = bounded.truncated
+
+          // H3 fix: budget keyed by turn-derived id, not toolUseId. H2 fix:
+          // no undefined-key fast-path bypass — deriveTurnKey always returns
+          // a string (falls back to NO_TURN_KEY singleton).
+          // Charge the cap (not actual length) so a single 50KB full fetch
+          // reserves its slot conservatively.
+          const charge = Math.min(Buffer.byteLength(raw, 'utf8'), cap)
+          const turnKey = deriveTurnKey({
+            toolUseId: callCtx.toolUseId,
+            messages: deps.messages() as ReadonlyArray<{
+              uuid?: string
+              type?: string
+            }>,
+          })
+          if (!consumeBudget(turnKey, charge)) {
+            return {
+              data: {
+                action: 'fetch' as const,
+                store,
+                key,
+                budget_exceeded: true,
+                error: `Per-turn fetch budget (${PER_TURN_FETCH_BUDGET_BYTES} bytes) exceeded`,
+              },
+            }
+          }
+
+          const stripped = stripUntrustedControl(raw)
+          const { value: capped, truncated: capTruncated } = truncateUtf8(
+            stripped,
+            cap,
+          )
+          const wrapped = wrapUntrustedContent(store, key, capped)
+          // truncated reflects either: tool-layer cap hit, or the on-disk file
+          // being larger than what we read.
+          const truncated = capTruncated || fileTruncated
+
+          const out: Output = {
+            action: 'fetch',
             store,
             key,
-            error: `Entry '${store}/${key}' not found`,
-          },
+            value: wrapped,
+            preview_only: previewMode,
+          }
+          if (truncated) out.truncated = true
+          return { data: out }
+        } catch (e) {
+          return {
+            data: {
+              action: input.action,
+              error: e instanceof Error ? e.message : String(e),
+            },
+          }
         }
-      }
-      const raw = bounded.value
-      const fileTruncated = bounded.truncated
-
-      // H3 fix: budget keyed by turn-derived id, not toolUseId. H2 fix:
-      // no undefined-key fast-path bypass — deriveTurnKey always returns
-      // a string (falls back to NO_TURN_KEY singleton).
-      // Charge the cap (not actual length) so a single 50KB full fetch
-      // reserves its slot conservatively.
-      const charge = Math.min(Buffer.byteLength(raw, 'utf8'), cap)
-      const turnKey = deriveTurnKey(
-        context as {
-          toolUseId?: string
-          messages?: ReadonlyArray<{ uuid?: string; type?: string }>
-        },
-      )
-      if (!consumeBudget(turnKey, charge)) {
-        return {
-          data: {
-            action: 'fetch' as const,
-            store,
-            key,
-            budget_exceeded: true,
-            error: `Per-turn fetch budget (${PER_TURN_FETCH_BUDGET_BYTES} bytes) exceeded`,
-          },
-        }
-      }
-
-      const stripped = stripUntrustedControl(raw)
-      const { value: capped, truncated: capTruncated } = truncateUtf8(
-        stripped,
-        cap,
-      )
-      const wrapped = wrapUntrustedContent(store, key, capped)
-      // truncated reflects either: tool-layer cap hit, or the on-disk file
-      // being larger than what we read.
-      const truncated = capTruncated || fileTruncated
-
-      const out: Output = {
-        action: 'fetch',
-        store,
-        key,
-        value: wrapped,
-        preview_only: previewMode,
-      }
-      if (truncated) out.truncated = true
-      return { data: out }
-    } catch (e) {
-      return {
-        data: {
-          action: input.action,
-          error: e instanceof Error ? e.message : String(e),
-        },
-      }
+      },
     }
   },
   renderToolUseMessage,

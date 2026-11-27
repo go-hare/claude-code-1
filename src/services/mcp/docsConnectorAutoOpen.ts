@@ -6,7 +6,11 @@
  */
 import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import { getOauthConfig } from '../../constants/oauth.js'
-import type { Tool } from '../../Tool.js'
+import {
+  createDefaultCanUseTool,
+  resolveToolUseContext,
+  type Tool,
+} from '../../Tool.js'
 import { openBrowser } from '../../utils/browser.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
@@ -144,9 +148,9 @@ export function wrapDocsConnectorToolForTerminalAutoOpen(
   }
 
   const originalCall = tool.call
-  return {
+  const wrapped: Tool = {
     ...tool,
-    async call(input, context, canUseTool, parentMessage, onProgress) {
+    async call(input, context, canUseTool, parentMessage, onProgress, opts) {
       const result = await originalCall.call(
         this,
         input,
@@ -154,6 +158,7 @@ export function wrapDocsConnectorToolForTerminalAutoOpen(
         canUseTool,
         parentMessage,
         onProgress,
+        opts,
       )
       try {
         if (
@@ -195,5 +200,46 @@ export function wrapDocsConnectorToolForTerminalAutoOpen(
       }
       return result
     },
+    create(deps) {
+      return {
+        call(args, callCtx) {
+          const ctx = resolveToolUseContext(deps, callCtx)
+          return wrapped.call(
+            args,
+            ctx,
+            callCtx.canUseTool ?? createDefaultCanUseTool(),
+            callCtx.parentMessage as Parameters<Tool['call']>[3],
+            callCtx.onProgress,
+            {
+              userModified: callCtx.userModified,
+              globLimits: callCtx.globLimits,
+              fileReadingLimits: callCtx.fileReadingLimits,
+              gitDiffRead: callCtx.gitDiffRead,
+              smallResultAsked: callCtx.smallResultAsked,
+              callerLogsSharedEvents: callCtx.callerLogsSharedEvents,
+              timing: callCtx.timing,
+              remoteCall: callCtx.remoteCall,
+            },
+          )
+        },
+        ...(wrapped.validateInput !== undefined
+          ? {
+              validateInput(input, callCtx) {
+                return wrapped.validateInput!(
+                  input,
+                  resolveToolUseContext(deps, callCtx),
+                )
+              },
+            }
+          : {}),
+        checkPermissions(input, callCtx) {
+          return wrapped.checkPermissions(
+            input,
+            resolveToolUseContext(deps, callCtx),
+          )
+        },
+      }
+    },
   }
+  return wrapped
 }

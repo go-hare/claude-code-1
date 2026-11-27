@@ -11,7 +11,6 @@ import {
   buildTool,
   type ToolDef,
   type ToolResultBlockParam,
-  type ToolUseContext,
   type ValidationResult,
 } from 'src/Tool.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
@@ -274,44 +273,47 @@ export const ProposeSkillsTool = buildTool({
     return `Propose ${list.length} ${list.length === 1 ? 'skill' : 'skills'}: ${parts.join(', ')}`
   },
 
-  async validateInput(
-    { proposals }: ProposeSkillsInput,
-    _context?: ToolUseContext,
-  ): Promise<ValidationResult> {
-    const problems: string[] = []
-    for (const proposal of proposals) {
-      if (
-        proposal.kind === 'improvement' &&
-        proposal.edits !== undefined &&
-        proposal.skillMd !== undefined
-      ) {
-        const label = proposal.target ?? proposal.name
-        problems.push(
-          `${label} has both edits and skillMd. Call again with one of the two.`,
-        )
-      }
-    }
-    if (problems.length > 0) {
-      return {
-        result: false,
-        message: problems.join(' '),
-        errorCode: 2,
-      }
-    }
-    return { result: true }
-  },
-
-  async call({ proposals }: ProposeSkillsInput, _context?: ToolUseContext) {
-    const improvementCount = proposals.filter(
-      p => p.kind === 'improvement',
-    ).length
-    logEvent('tengu_propose_skills', {
-      proposal_count: proposals.length,
-      improvement_count: improvementCount,
-    })
+  create() {
     return {
-      data: {
-        proposalCount: proposals.length,
+      async validateInput({
+        proposals,
+      }: ProposeSkillsInput): Promise<ValidationResult> {
+        const problems: string[] = []
+        for (const proposal of proposals) {
+          if (
+            proposal.kind === 'improvement' &&
+            proposal.edits !== undefined &&
+            proposal.skillMd !== undefined
+          ) {
+            const label = proposal.target ?? proposal.name
+            problems.push(
+              `${label} has both edits and skillMd. Call again with one of the two.`,
+            )
+          }
+        }
+        if (problems.length > 0) {
+          return {
+            result: false,
+            message: problems.join(' '),
+            errorCode: 2,
+          }
+        }
+        return { result: true }
+      },
+
+      async call({ proposals }: ProposeSkillsInput) {
+        const improvementCount = proposals.filter(
+          p => p.kind === 'improvement',
+        ).length
+        logEvent('tengu_propose_skills', {
+          proposal_count: proposals.length,
+          improvement_count: improvementCount,
+        })
+        return {
+          data: {
+            proposalCount: proposals.length,
+          },
+        }
       },
     }
   },

@@ -4,7 +4,12 @@ import {
   WORKFLOW_TOOL_NAME,
   type WorkflowToolDescriptor,
 } from '@claude-code/workflow-engine'
-import { buildTool, type Tool } from '../Tool.js'
+import {
+  buildTool,
+  createDefaultCanUseTool,
+  resolveToolUseContext,
+  type Tool,
+} from '../Tool.js'
 import { isWorkflowsDisabled } from '../utils/workflowDisableGate.js'
 import { formatWorkflowSizeGuidelineToolSuffix } from '../utils/workflowSizeGuideline.js'
 import { getGlobalConfig } from '../utils/config.js'
@@ -97,96 +102,107 @@ function buildWorkflowTool(): Tool {
       const base = await descriptor().prompt()
       return base + getWorkflowSizeGuidelineToolSuffix()
     },
-    async call(input, context, canUseTool, parentMessage, onProgress) {
-      const result = await descriptor().call(
-        input,
-        context,
-        canUseTool,
-        parentMessage,
-        onProgress,
-      )
-      return { data: result.data }
-    },
     renderToolUseMessage: input => descriptor().renderToolUseMessage(input),
-    async validateInput(input) {
-      const scriptPath = input.scriptPath
-      if (typeof scriptPath !== 'string' || scriptPath.length === 0) {
-        return { result: true }
+    create(deps) {
+      return {
+        async call(input, callCtx) {
+          const context = resolveToolUseContext(deps, callCtx)
+          const result = await descriptor().call(
+            input,
+            context,
+            callCtx.canUseTool ?? createDefaultCanUseTool(),
+            callCtx.parentMessage as Parameters<
+              ReturnType<typeof descriptor>['call']
+            >[3],
+            callCtx.onProgress,
+          )
+          return { data: result.data }
+        },
+        async validateInput(input) {
+          const scriptPath = input.scriptPath
+          if (typeof scriptPath !== 'string' || scriptPath.length === 0) {
+            return { result: true }
+          }
+          const { getProjectRoot } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+          const {
+            workflowScriptPathIsReadable,
+            workflowScriptReadRefusal,
+            isForbiddenWorkflowScriptPath,
+          } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('@claude-code/workflow-engine') as typeof import('@claude-code/workflow-engine')
+          const { resolve } = await import('node:path')
+          const cwd = deps.cwd?.() ?? getProjectRoot()
+          let resolved = scriptPath
+          try {
+            resolved = resolve(cwd, scriptPath)
+          } catch {
+            return {
+              result: false,
+              message: workflowScriptReadRefusal(scriptPath),
+              errorCode: 1,
+            }
+          }
+          if (
+            isForbiddenWorkflowScriptPath(scriptPath) ||
+            isForbiddenWorkflowScriptPath(resolved)
+          ) {
+            return {
+              result: false,
+              message: `Network (UNC, NT-namespace, or automount) paths are not allowed for workflow scriptPath: ${scriptPath}`,
+              errorCode: 1,
+            }
+          }
+          if (
+            !workflowScriptPathIsReadable(
+              scriptPath,
+              cwd,
+              workflowReadableRoots(),
+            )
+          ) {
+            return {
+              result: false,
+              message: workflowScriptReadRefusal(scriptPath),
+              errorCode: 1,
+            }
+          }
+          return { result: true }
+        },
+        async checkPermissions(input) {
+          const scriptPath = input.scriptPath
+          if (typeof scriptPath !== 'string' || scriptPath.length === 0) {
+            return { behavior: 'allow', updatedInput: input }
+          }
+          const { getProjectRoot } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+          const {
+            workflowScriptPathIsReadable,
+            WORKFLOW_SCRIPT_OUTSIDE_READABLE_SET,
+          } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('@claude-code/workflow-engine') as typeof import('@claude-code/workflow-engine')
+          if (
+            !workflowScriptPathIsReadable(
+              scriptPath,
+              deps.cwd?.() ?? getProjectRoot(),
+              workflowReadableRoots(),
+            )
+          ) {
+            return {
+              behavior: 'deny',
+              message: WORKFLOW_SCRIPT_OUTSIDE_READABLE_SET,
+              decisionReason: {
+                type: 'other',
+                reason: WORKFLOW_SCRIPT_OUTSIDE_READABLE_SET,
+              },
+            }
+          }
+          return { behavior: 'allow', updatedInput: input }
+        },
       }
-      const { getProjectRoot } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
-      const {
-        workflowScriptPathIsReadable,
-        workflowScriptReadRefusal,
-        isForbiddenWorkflowScriptPath,
-      } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('@claude-code/workflow-engine') as typeof import('@claude-code/workflow-engine')
-      const { resolve } = await import('node:path')
-      const cwd = getProjectRoot()
-      let resolved = scriptPath
-      try {
-        resolved = resolve(cwd, scriptPath)
-      } catch {
-        return {
-          result: false,
-          message: workflowScriptReadRefusal(scriptPath),
-          errorCode: 1,
-        }
-      }
-      if (
-        isForbiddenWorkflowScriptPath(scriptPath) ||
-        isForbiddenWorkflowScriptPath(resolved)
-      ) {
-        return {
-          result: false,
-          message: `Network (UNC, NT-namespace, or automount) paths are not allowed for workflow scriptPath: ${scriptPath}`,
-          errorCode: 1,
-        }
-      }
-      if (
-        !workflowScriptPathIsReadable(scriptPath, cwd, workflowReadableRoots())
-      ) {
-        return {
-          result: false,
-          message: workflowScriptReadRefusal(scriptPath),
-          errorCode: 1,
-        }
-      }
-      return { result: true }
-    },
-    async checkPermissions(input) {
-      const scriptPath = input.scriptPath
-      if (typeof scriptPath !== 'string' || scriptPath.length === 0) {
-        return { behavior: 'allow', updatedInput: input }
-      }
-      const { getProjectRoot } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
-      const {
-        workflowScriptPathIsReadable,
-        WORKFLOW_SCRIPT_OUTSIDE_READABLE_SET,
-      } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('@claude-code/workflow-engine') as typeof import('@claude-code/workflow-engine')
-      if (
-        !workflowScriptPathIsReadable(
-          scriptPath,
-          getProjectRoot(),
-          workflowReadableRoots(),
-        )
-      ) {
-        return {
-          behavior: 'deny',
-          message: WORKFLOW_SCRIPT_OUTSIDE_READABLE_SET,
-          decisionReason: {
-            type: 'other',
-            reason: WORKFLOW_SCRIPT_OUTSIDE_READABLE_SET,
-          },
-        }
-      }
-      return { behavior: 'allow', updatedInput: input }
     },
     mapToolResultToToolResultBlockParam: (data, toolUseId) =>
       descriptor().mapToolResultToToolResultBlockParam(data, toolUseId),

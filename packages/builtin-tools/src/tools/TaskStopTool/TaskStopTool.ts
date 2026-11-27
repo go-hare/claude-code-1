@@ -1,6 +1,6 @@
 import { z } from 'zod/v4'
 import type { TaskStateBase } from 'src/Task.js'
-import { buildTool, type ToolDef } from 'src/Tool.js'
+import { buildTool, type ToolDef, type ToolDeps } from 'src/Tool.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { isObserverAgentTask } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
 import { isUnsettledTerminalKillLoop, stopTask } from 'src/tasks/stopTask.js'
@@ -130,80 +130,6 @@ export const TaskStopTool = buildTool({
   toAutoClassifierInput(input) {
     return input.task_id ?? input.shell_id ?? ''
   },
-  async validateInput(input, { getAppState }) {
-    // densable xd(r) — a named host is refused before the local lookup (errorCode 3)
-    if (namesRemoteHost(input)) {
-      return {
-        result: false,
-        message: remoteHostNotForwardedMessage(),
-        errorCode: 3,
-      }
-    }
-    const { task_id, shell_id } = input
-    // Support both task_id and shell_id (deprecated KillShell compat)
-    const id = task_id ?? shell_id
-    if (!id) {
-      return {
-        result: false,
-        message: 'Missing required parameter: task_id',
-        errorCode: 1,
-      }
-    }
-
-    const appState = getAppState()
-    let task = appState.tasks?.[id] as TaskStateBase | undefined
-    let resolvedId = id
-
-    // densable Elo: allow name/registry resolve in validate
-    if (!task) {
-      const { resolveTaskForStop, formatTaskNotFoundMessage } = await import(
-        'src/tasks/resolveTaskForStop.js'
-      )
-      const resolved = resolveTaskForStop(id, getAppState)
-      if (resolved.status === 'ambiguous') {
-        return { result: false, message: resolved.message, errorCode: 1 }
-      }
-      if (resolved.status === 'found') {
-        task = resolved.task
-        resolvedId = resolved.taskId
-      } else {
-        return {
-          result: false,
-          message: formatTaskNotFoundMessage(
-            id,
-            getAppState,
-            resolved.suggestion,
-            undefined,
-          ),
-          errorCode: 1,
-        }
-      }
-    }
-
-    // Official 2.1.331 `Ut.validateInput` (@325140900): allow running, YC-parked,
-    // non-running observer agents (`Sp`), paused `local_workflow`, and unsettled
-    // terminal agent/workflow kill-loops (`ho`).
-    const parked = isParkedKeepaliveAgent(task)
-    const isObserver = isObserverAgentTask(task)
-    const pausedWorkflow =
-      task.type === 'local_workflow' && task.status === 'paused'
-    const unsettledKillLoop = isUnsettledTerminalKillLoop(task, resolvedId)
-    if (
-      task.status !== 'running' &&
-      !parked &&
-      !isObserver &&
-      !pausedWorkflow &&
-      !unsettledKillLoop
-    ) {
-      return {
-        result: false,
-        message: `Task ${resolvedId} is not running (status: ${task.status})`,
-        errorCode: 3,
-      }
-    }
-
-    return { result: true }
-  },
   async description() {
     return `Stop a running background task by ID`
   },
@@ -230,36 +156,118 @@ export const TaskStopTool = buildTool({
     return ''
   },
   renderToolResultMessage,
-  async call({ task_id, shell_id }, { getAppState, setAppState, agentId }) {
-    // Support both task_id and shell_id (deprecated KillShell compat)
-    const id = task_id ?? shell_id
-    if (!id) {
-      throw new Error('Missing required parameter: task_id')
+  create(deps: ToolDeps) {
+    const getAppStateWithTasks = () => {
+      const state = deps.getAppState()
+      const taskMap = deps.tasks()
+      return state?.tasks === taskMap ? state : { ...state, tasks: taskMap }
     }
-
-    // densable H1e / TaskStop call (~0xe201e9a):
-    // pNe({ callerAgentId, killedBy:"parent" }) — NO source:"user".
-    // parent kill → BRt "was stopped by Claude"; jCe only when source==="user".
-    const result = (await stopTask(id, {
-      getAppState,
-      setAppState,
-      callerAgentId: agentId,
-      killedBy: 'parent',
-    })) as {
-      taskId: string
-      taskType: string
-      command: string | undefined
-      note?: string
-    }
-
     return {
-      data: {
-        message: result.note
-          ? `Task ${result.taskId} ${result.note}`
-          : `Successfully stopped task: ${result.taskId} (${result.command})`,
-        task_id: result.taskId,
-        task_type: result.taskType,
-        command: result.command,
+      async validateInput(input) {
+        // densable xd(r) — a named host is refused before the local lookup (errorCode 3)
+        if (namesRemoteHost(input)) {
+          return {
+            result: false,
+            message: remoteHostNotForwardedMessage(),
+            errorCode: 3,
+          }
+        }
+        const { task_id, shell_id } = input
+        // Support both task_id and shell_id (deprecated KillShell compat)
+        const id = task_id ?? shell_id
+        if (!id) {
+          return {
+            result: false,
+            message: 'Missing required parameter: task_id',
+            errorCode: 1,
+          }
+        }
+
+        const taskMap = deps.tasks()
+        let task = taskMap?.[id] as TaskStateBase | undefined
+        let resolvedId = id
+
+        // densable Elo: allow name/registry resolve in validate
+        if (!task) {
+          const { resolveTaskForStop, formatTaskNotFoundMessage } =
+            await import('src/tasks/resolveTaskForStop.js')
+          const resolved = resolveTaskForStop(id, getAppStateWithTasks)
+          if (resolved.status === 'ambiguous') {
+            return { result: false, message: resolved.message, errorCode: 1 }
+          }
+          if (resolved.status === 'found') {
+            task = resolved.task
+            resolvedId = resolved.taskId
+          } else {
+            return {
+              result: false,
+              message: formatTaskNotFoundMessage(
+                id,
+                getAppStateWithTasks,
+                resolved.suggestion,
+                undefined,
+              ),
+              errorCode: 1,
+            }
+          }
+        }
+
+        // Official 2.1.331 `Ut.validateInput` (@325140900): allow running, YC-parked,
+        // non-running observer agents (`Sp`), paused `local_workflow`, and unsettled
+        // terminal agent/workflow kill-loops (`ho`).
+        const parked = isParkedKeepaliveAgent(task)
+        const isObserver = isObserverAgentTask(task)
+        const pausedWorkflow =
+          task.type === 'local_workflow' && task.status === 'paused'
+        const unsettledKillLoop = isUnsettledTerminalKillLoop(task, resolvedId)
+        if (
+          task.status !== 'running' &&
+          !parked &&
+          !isObserver &&
+          !pausedWorkflow &&
+          !unsettledKillLoop
+        ) {
+          return {
+            result: false,
+            message: `Task ${resolvedId} is not running (status: ${task.status})`,
+            errorCode: 3,
+          }
+        }
+
+        return { result: true }
+      },
+      async call({ task_id, shell_id }) {
+        // Support both task_id and shell_id (deprecated KillShell compat)
+        const id = task_id ?? shell_id
+        if (!id) {
+          throw new Error('Missing required parameter: task_id')
+        }
+
+        // densable H1e / TaskStop call (~0xe201e9a):
+        // pNe({ callerAgentId, killedBy:"parent" }) — NO source:"user".
+        // parent kill → BRt "was stopped by Claude"; jCe only when source==="user".
+        const result = (await stopTask(id, {
+          getAppState: getAppStateWithTasks,
+          setAppState: deps.setAppStateForTasks ?? deps.setAppState,
+          callerAgentId: deps.agentId,
+          killedBy: 'parent',
+        })) as {
+          taskId: string
+          taskType: string
+          command: string | undefined
+          note?: string
+        }
+
+        return {
+          data: {
+            message: result.note
+              ? `Task ${result.taskId} ${result.note}`
+              : `Successfully stopped task: ${result.taskId} (${result.command})`,
+            task_id: result.taskId,
+            task_type: result.taskType,
+            command: result.command,
+          },
+        }
       },
     }
   },

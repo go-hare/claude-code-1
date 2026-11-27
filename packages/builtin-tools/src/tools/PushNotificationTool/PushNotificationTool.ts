@@ -1,6 +1,6 @@
 import { feature } from 'bun:bundle'
 import { z } from 'zod/v4'
-import type { ToolResultBlockParam } from 'src/Tool.js'
+import type { ToolDef, ToolDeps, ToolResultBlockParam } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { logForDebugging } from 'src/utils/debug.js'
@@ -182,187 +182,194 @@ Requires Remote Control to be configured. Respects user notification settings (t
     }
   },
 
-  async call(input: PushInput, context) {
-    const appState = context.getAppState()
-    // Official REMOTE densable.
-    let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
-    try {
-      const { isRemoteEnvEnabled } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
-      isRemote = isRemoteEnvEnabled()
-    } catch {
-      // keep raw env fallback
-    }
+  create(deps: ToolDeps) {
+    return {
+      async call(input: PushInput) {
+        const appState = deps.getAppState()
+        // Official REMOTE densable.
+        let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+        try {
+          const { isRemoteEnvEnabled } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
+          isRemote = isRemoteEnvEnabled()
+        } catch {
+          // keep raw env fallback
+        }
 
-    // Official 2.1.325: c = isRemote || isRemoteControlSession; f = c || replBridgeActive
-    const isRemoteControl =
-      isRemote ||
-      appState.replBridgeExplicit ||
-      appState.replBridgeSessionActive
-    const hasTransport =
-      isRemoteControl ||
-      appState.replBridgeEnabled ||
-      appState.replBridgeConnected
-    const localSent = !context.options?.isNonInteractiveSession
+        // Official 2.1.325: c = isRemote || isRemoteControlSession; f = c || replBridgeActive
+        const isRemoteControl =
+          isRemote ||
+          appState.replBridgeExplicit ||
+          appState.replBridgeSessionActive
+        const hasTransport =
+          isRemoteControl ||
+          appState.replBridgeEnabled ||
+          appState.replBridgeConnected
+        const localSent = !deps.isNonInteractiveSession
 
-    if (
-      hasTransport &&
-      !isRemoteControl &&
-      getGlobalConfig().agentPushNotifEnabled !== true
-    ) {
-      return {
-        data: {
-          sent: false,
-          pushSent: false,
-          localSent: false,
-          disabledReason: 'config_off' as const,
-        },
-      }
-    }
-
-    // Official densable: skip push when user is present (last interaction < 60s)
-    // unless CLAUDE_CODE_DISABLE_NOTIFICATION_PRESENCE_CHECK or remote / remote-control session (#369).
-    if (!isRemoteControl) {
-      try {
-        const { getLastInteractionTime } = await import(
-          'src/bootstrap/state.js'
-        )
         if (
-          shouldSuppressPushForUserPresence({
-            isRemote,
-            lastInteractionAgeMs: Date.now() - getLastInteractionTime(),
-          })
+          hasTransport &&
+          !isRemoteControl &&
+          getGlobalConfig().agentPushNotifEnabled !== true
+        ) {
+          return {
+            data: {
+              sent: false,
+              pushSent: false,
+              localSent: false,
+              disabledReason: 'config_off' as const,
+            },
+          }
+        }
+
+        // Official densable: skip push when user is present (last interaction < 60s)
+        // unless CLAUDE_CODE_DISABLE_NOTIFICATION_PRESENCE_CHECK or remote / remote-control session (#369).
+        if (!isRemoteControl) {
+          try {
+            const { getLastInteractionTime } = await import(
+              'src/bootstrap/state.js'
+            )
+            if (
+              shouldSuppressPushForUserPresence({
+                isRemote,
+                lastInteractionAgeMs: Date.now() - getLastInteractionTime(),
+              })
+            ) {
+              logForDebugging(
+                `[PushNotification] suppressed: user_present (${input.title})`,
+              )
+              return {
+                data: {
+                  sent: false,
+                  pushSent: false,
+                  localSent: false,
+                  disabledReason: 'user_present' as const,
+                  error: 'Notification suppressed: user is present.',
+                },
+              }
+            }
+          } catch (e) {
+            logForDebugging(`[PushNotification] presence check failed: ${e}`)
+          }
+        }
+
+        if (!hasTransport) {
+          logForDebugging(
+            `[PushNotification] no transport active, not delivered: ${input.title}`,
+          )
+          return {
+            data: {
+              sent: false,
+              pushSent: false,
+              localSent,
+              disabledReason: 'no_transport' as const,
+              error:
+                'No Remote Control bridge configured. Notification not delivered.',
+            },
+          }
+        }
+
+        const effectiveStatus = input.status ?? 'normal'
+        const dedupKey = `${input.title}\0${input.body}\0${effectiveStatus}`
+        const now = Date.now()
+        const recentPushByKey = getRecentPushByKey()
+        const lastSentAt = recentPushByKey.get(dedupKey)
+        if (
+          lastSentAt !== undefined &&
+          now - lastSentAt < PUSH_DEDUP_WINDOW_MS
         ) {
           logForDebugging(
-            `[PushNotification] suppressed: user_present (${input.title})`,
+            `[PushNotification] suppressed duplicate (${effectiveStatus}): ${input.title}`,
           )
           return {
             data: {
               sent: false,
               pushSent: false,
               localSent: false,
-              disabledReason: 'user_present' as const,
-              error: 'Notification suppressed: user is present.',
+              status: effectiveStatus,
+              deduplicated: true,
             },
           }
         }
-      } catch (e) {
-        logForDebugging(`[PushNotification] presence check failed: ${e}`)
-      }
-    }
 
-    if (!hasTransport) {
-      logForDebugging(
-        `[PushNotification] no transport active, not delivered: ${input.title}`,
-      )
-      return {
-        data: {
-          sent: false,
-          pushSent: false,
-          localSent,
-          disabledReason: 'no_transport' as const,
-          error:
-            'No Remote Control bridge configured. Notification not delivered.',
-        },
-      }
-    }
-
-    const effectiveStatus = input.status ?? 'normal'
-    const dedupKey = `${input.title}\0${input.body}\0${effectiveStatus}`
-    const now = Date.now()
-    const recentPushByKey = getRecentPushByKey()
-    const lastSentAt = recentPushByKey.get(dedupKey)
-    if (lastSentAt !== undefined && now - lastSentAt < PUSH_DEDUP_WINDOW_MS) {
-      logForDebugging(
-        `[PushNotification] suppressed duplicate (${effectiveStatus}): ${input.title}`,
-      )
-      return {
-        data: {
-          sent: false,
-          pushSent: false,
-          localSent: false,
-          status: effectiveStatus,
-          deduplicated: true,
-        },
-      }
-    }
-
-    // Try bridge delivery (for remote / remote-control / mobile viewers)
-    if (hasTransport) {
-      if (feature('BRIDGE_MODE')) {
-        try {
-          const { getBridgeAccessToken, getBridgeBaseUrl } = await import(
-            'src/bridge/bridgeConfig.js'
-          )
-          const { getSessionId } = await import('src/bootstrap/state.js')
-          const token = getBridgeAccessToken()
-          const sessionId = getSessionId()
-          if (token && sessionId) {
-            const baseUrl = getBridgeBaseUrl()
-            const axios = (await import('axios')).default
-            const maskedTitle = maskPushNotificationSecrets(input.title)
-            const maskedBody = maskPushNotificationSecrets(input.body)
-            const response = await axios.post(
-              `${baseUrl}/v1/sessions/${sessionId}/events`,
-              {
-                events: [
-                  {
-                    type: 'push_notification',
-                    title: maskedTitle,
-                    body: maskedBody,
-                    priority: input.priority ?? 'normal',
-                    status: effectiveStatus,
-                  },
-                ],
-              },
-              {
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                  'Content-Type': 'application/json',
-                  'anthropic-version': '2023-06-01',
-                },
-                timeout: 10_000,
-                validateStatus: (s: number) => s < 500,
-              },
-            )
-            if (response.status >= 200 && response.status < 300) {
-              recentPushByKey.set(dedupKey, now)
-              logForDebugging(
-                `[PushNotification] delivered via bridge session=${sessionId}`,
+        // Try bridge delivery (for remote / remote-control / mobile viewers)
+        if (hasTransport) {
+          if (feature('BRIDGE_MODE')) {
+            try {
+              const { getBridgeAccessToken, getBridgeBaseUrl } = await import(
+                'src/bridge/bridgeConfig.js'
               )
-              return {
-                data: {
-                  sent: true,
-                  pushSent: true,
-                  localSent,
-                  status: effectiveStatus,
-                },
+              const { getSessionId } = await import('src/bootstrap/state.js')
+              const token = getBridgeAccessToken()
+              const sessionId = getSessionId()
+              if (token && sessionId) {
+                const baseUrl = getBridgeBaseUrl()
+                const axios = (await import('axios')).default
+                const maskedTitle = maskPushNotificationSecrets(input.title)
+                const maskedBody = maskPushNotificationSecrets(input.body)
+                const response = await axios.post(
+                  `${baseUrl}/v1/sessions/${sessionId}/events`,
+                  {
+                    events: [
+                      {
+                        type: 'push_notification',
+                        title: maskedTitle,
+                        body: maskedBody,
+                        priority: input.priority ?? 'normal',
+                        status: effectiveStatus,
+                      },
+                    ],
+                  },
+                  {
+                    headers: {
+                      Authorization: `Bearer ${token}`,
+                      'Content-Type': 'application/json',
+                      'anthropic-version': '2023-06-01',
+                    },
+                    timeout: 10_000,
+                    validateStatus: (s: number) => s < 500,
+                  },
+                )
+                if (response.status >= 200 && response.status < 300) {
+                  recentPushByKey.set(dedupKey, now)
+                  logForDebugging(
+                    `[PushNotification] delivered via bridge session=${sessionId}`,
+                  )
+                  return {
+                    data: {
+                      sent: true,
+                      pushSent: true,
+                      localSent,
+                      status: effectiveStatus,
+                    },
+                  }
+                }
+                logForDebugging(
+                  `[PushNotification] bridge delivery failed: status=${response.status}`,
+                )
               }
+            } catch (e) {
+              logForDebugging(`[PushNotification] bridge delivery error: ${e}`)
             }
-            logForDebugging(
-              `[PushNotification] bridge delivery failed: status=${response.status}`,
-            )
           }
-        } catch (e) {
-          logForDebugging(`[PushNotification] bridge delivery error: ${e}`)
         }
-      }
-    }
 
-    // Fallback: no bridge available, push was not delivered to a remote device.
-    logForDebugging(
-      `[PushNotification] no bridge available, not delivered: ${input.title}`,
-    )
-    return {
-      data: {
-        sent: false,
-        pushSent: false,
-        localSent,
-        disabledReason: 'no_transport' as const,
-        error:
-          'No Remote Control bridge configured. Notification not delivered.',
+        // Fallback: no bridge available, push was not delivered to a remote device.
+        logForDebugging(
+          `[PushNotification] no bridge available, not delivered: ${input.title}`,
+        )
+        return {
+          data: {
+            sent: false,
+            pushSent: false,
+            localSent,
+            disabledReason: 'no_transport' as const,
+            error:
+              'No Remote Control bridge configured. Notification not delivered.',
+          },
+        }
       },
     }
   },
-})
+} satisfies ToolDef<InputSchema, PushOutput>)

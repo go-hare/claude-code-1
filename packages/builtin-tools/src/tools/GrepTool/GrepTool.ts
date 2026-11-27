@@ -1,7 +1,13 @@
 import { isAbsolute, join } from 'path'
 import { z } from 'zod/v4'
-import type { ValidationResult } from 'src/Tool.js'
-import { buildTool, type ToolDef } from 'src/Tool.js'
+import {
+  buildTool,
+  isNativeToolDisabledInThisProcess,
+  type ToolDef,
+  type ToolDeps,
+  type ToolResult,
+  type ValidationResult,
+} from 'src/Tool.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { isENOENT } from 'src/utils/errors.js'
 import { FILE_NOT_FOUND_CWD_NOTE, suggestPathUnderCwd } from 'src/utils/file.js'
@@ -278,67 +284,13 @@ export const GrepTool = buildTool({
     return { isSearch: true, isRead: false }
   },
   getPath({ path }): string {
+    if (isNativeToolDisabledInThisProcess(GREP_TOOL_NAME)) {
+      return path ?? ''
+    }
     return path || getCwd()
   },
   async preparePermissionMatcher({ pattern }) {
     return rulePattern => matchWildcardPattern(rulePattern, pattern)
-  },
-  async validateInput(input): Promise<ValidationResult> {
-    // densable BT() && xd(n) — named host is not forwarded (errorCode 3)
-    const hostRefusal = remoteHostForwardRefusal(input, GREP_TOOL_NAME)
-    if (hostRefusal) return { ...hostRefusal, errorCode: 3 }
-    // Official 2.1.326 (#122): reject malformed/pathological glob patterns
-    // upfront so Grep never hangs on catastrophic backtracking or unbalanced braces.
-    if (input.glob) {
-      const globCheck = isSafeGlobPattern(input.glob)
-      if (!globCheck.safe) {
-        return {
-          result: false,
-          message: `Invalid glob pattern: ${globCheck.reason}`,
-          errorCode: 2,
-        }
-      }
-    }
-    const { path } = input
-    // If path is provided, validate that it exists
-    if (path) {
-      const fs = getFsImplementation()
-      const absolutePath = expandPath(path)
-
-      // SECURITY: Skip filesystem operations for UNC paths to prevent NTLM credential leaks.
-      if (absolutePath.startsWith('\\\\') || absolutePath.startsWith('//')) {
-        return { result: true }
-      }
-
-      try {
-        await fs.stat(absolutePath)
-      } catch (e: unknown) {
-        if (isENOENT(e)) {
-          const cwdSuggestion = await suggestPathUnderCwd(absolutePath)
-          let message = `Path does not exist: ${path}. ${FILE_NOT_FOUND_CWD_NOTE} ${getCwd()}.`
-          if (cwdSuggestion) {
-            message += ` Did you mean ${cwdSuggestion}?`
-          }
-          return {
-            result: false,
-            message,
-            errorCode: 1,
-          }
-        }
-        throw e
-      }
-    }
-
-    return { result: true }
-  },
-  async checkPermissions(input, context): Promise<PermissionDecision> {
-    noteApprovedFileToolPath(input.path ? expandPath(input.path) : getCwd())
-    const appState = context.getAppState()
-    return checkReadPermissionForTool(
-      GrepTool,
-      input,
-      appState.toolPermissionContext,
-    )
   },
   async prompt() {
     return getDescription()
@@ -409,330 +361,389 @@ export const GrepTool = buildTool({
       content: result,
     }
   },
-  async call(
-    {
-      pattern,
-      path,
-      glob,
-      type,
-      output_mode = 'files_with_matches',
-      '-B': context_before,
-      '-A': context_after,
-      '-C': context_c,
-      context,
-      '-n': show_line_numbers = true,
-      '-i': case_insensitive = false,
-      head_limit,
-      offset = 0,
-      multiline = false,
-    },
-    { abortController, getAppState },
-  ) {
-    const absolutePath = path ? expandPath(path) : getCwd()
-    const args = ['--hidden']
-
-    // Exclude VCS directories to avoid noise from version control metadata
-    for (const dir of VCS_DIRECTORIES_TO_EXCLUDE) {
-      args.push('--glob', `!${dir}`)
-    }
-
-    // Limit line length to prevent base64/minified content from cluttering output
-    args.push('--max-columns', '500')
-
-    // Only apply multiline flags when explicitly requested
-    if (multiline) {
-      args.push('-U', '--multiline-dotall')
-    }
-
-    // Add optional flags
-    if (case_insensitive) {
-      args.push('-i')
-    }
-
-    // Add output mode flags
-    if (output_mode === 'files_with_matches') {
-      args.push('-l')
-    } else if (output_mode === 'count') {
-      args.push('-c')
-    }
-
-    // In content mode, always pass `--null` and `-n` to ripgrep so file paths
-    // end unambiguously at `\0` (avoiding `:`/`-` filename ambiguity when
-    // sorting/relativizing) and line-number prefixes can be stripped when
-    // `show_line_numbers` is false (matching official 2.1.328).
-    if (output_mode === 'content') {
-      args.push('--null', '-n')
-    }
-
-    // Add context flags (-C/context takes precedence over context_before/context_after)
-    if (output_mode === 'content') {
-      if (context !== undefined) {
-        args.push('-C', context.toString())
-      } else if (context_c !== undefined) {
-        args.push('-C', context_c.toString())
-      } else {
-        if (context_before !== undefined) {
-          args.push('-B', context_before.toString())
-        }
-        if (context_after !== undefined) {
-          args.push('-A', context_after.toString())
-        }
-      }
-    }
-
-    // If pattern starts with dash, use -e flag to specify it as a pattern
-    // This prevents ripgrep from interpreting it as a command-line option
-    if (pattern.startsWith('-')) {
-      args.push('-e', pattern)
-    } else {
-      args.push(pattern)
-    }
-
-    // Add type filter if specified
-    if (type) {
-      args.push('--type', type)
-    }
-
-    if (glob) {
-      // Split on commas and spaces, but preserve patterns with braces
-      const globPatterns: string[] = []
-      const rawPatterns = glob.split(/\s+/)
-
-      for (const rawPattern of rawPatterns) {
-        // If pattern contains braces, don't split further
-        if (rawPattern.includes('{') && rawPattern.includes('}')) {
-          globPatterns.push(rawPattern)
-        } else {
-          // Split on commas for patterns without braces
-          globPatterns.push(...rawPattern.split(',').filter(Boolean))
-        }
-      }
-
-      for (const globPattern of globPatterns.filter(Boolean)) {
-        args.push('--glob', globPattern)
-      }
-    }
-
-    const appState = getAppState()
-    const approved = takeApprovedFileToolPath(absolutePath)
-    const root = await openSearchRoot(absolutePath, approved)
-    let results: string[] = []
-    if (root) {
-      let boundTaskOutput:
-        | Awaited<ReturnType<typeof bindTaskOutputForRead>>
-        | undefined
-      try {
-        await root.recheckBeforeSpawn()
-        for (const denyGlob of compileReadDenyRgGlobs(
-          appState.toolPermissionContext,
-          root,
-        )) {
-          args.push('--glob', denyGlob)
-        }
-
-        for (const exclusion of await getGlobExclusionsForPluginCache(
-          absolutePath,
-        )) {
-          args.push('--glob', exclusion)
-        }
-
-        const taskOutputCandidate = isTaskOutputFilePath(absolutePath)
-          ? absolutePath
-          : isTaskOutputFilePath(root.canonical)
-            ? root.canonical
-            : undefined
-        if (taskOutputCandidate !== undefined) {
-          boundTaskOutput = await bindTaskOutputForRead(taskOutputCandidate)
-        } else {
-          const taskExclusions = taskOutputDirExclusions(root.canonical)
-          if (taskExclusions.includes('!**')) {
-            throw new Error(
-              "Task output files are read individually: Grep (or Read) a specific task's output path rather than the tasks directory.",
-            )
-          }
-          for (const taskExcl of taskExclusions) {
-            args.push('--glob', taskExcl)
-          }
-        }
-
-        results = await ripGrep(args, root.target, abortController.signal, {
-          rejectOnInputError: true,
-          rejectOnPartial: true,
-          cwd: root.spawnCwd,
-        }).catch(err => {
-          if (
-            err instanceof RipgrepTimeoutError &&
-            err.partialResults.length > 0
-          ) {
-            return err.partialResults
-          }
-          throw err
-        })
-        if (root.relativeOutput) {
-          results = results.map(line =>
-            absolutizeRipgrepLine(line, root, output_mode),
-          )
-        }
-      } finally {
-        await boundTaskOutput?.close()
-        await root.close()
-      }
-    }
-
-    if (output_mode === 'content') {
-      // Official 2.1.327 (#414, SEA `zns`/`mHn`): sort content results by file
-      // path before paging with head_limit & offset so pages never repeat or
-      // skip matches when ripgrep returns files in non-deterministic worker order.
-      const hasContextBreaks = [
-        context,
-        context_c,
-        context_before,
-        context_after,
-      ].some(v => typeof v === 'number' && v > 0)
-      // Single-file rg output omits the filename prefix (lines start with `lineno:text`),
-      // so skip file-path sorting to preserve line order.
-      const sortedResults =
-        root?.isDirectory === false
-          ? results
-          : sortGrepContentLines(results, hasContextBreaks)
-
-      // Apply head_limit first — relativize is per-line work, so
-      // avoid processing lines that will be discarded (broad patterns can
-      // return 10k+ lines with head_limit keeping only ~30-100).
-      const { items: limitedResults, appliedLimit } = applyHeadLimit(
-        sortedResults,
-        head_limit,
-        offset,
-      )
-
-      const finalLines = limitedResults.map(line => {
-        if (line === '--') return line
-        const nulIdx = line.indexOf('\0')
-        if (nulIdx < 0) {
-          // Single-file rg output omits the filename prefix (`lineno:text` or `lineno-text`).
-          return show_line_numbers ? line : line.replace(/^\d+[:-]/, '')
-        }
-        const filePath = line.substring(0, nulIdx)
-        const rest = line.substring(nulIdx + 1)
-        const lineNoMatch = /^(\d+)([:-])/.exec(rest)
-        const sep = lineNoMatch?.[2] ?? ':'
-        const formattedRest =
-          show_line_numbers || lineNoMatch === null
-            ? rest
-            : rest.substring(lineNoMatch[0].length)
-        return toRelativePath(filePath) + sep + formattedRest
-      })
-      const output = {
-        mode: 'content' as const,
-        numFiles: 0, // Not applicable for content mode
-        filenames: [],
-        content: finalLines.join('\n'),
-        numLines: finalLines.length,
-        ...(appliedLimit !== undefined && { appliedLimit }),
-        ...(offset > 0 && { appliedOffset: offset }),
-      }
-      return { data: output }
-    }
-
-    if (output_mode === 'count') {
-      // Official 2.1.327 (#414, SEA `mHn`): sort count results by file path
-      // before paging with head_limit & offset so pages are deterministic.
-      const sortedCountResults = sortGrepCountLines(results)
-      // Apply head_limit first to avoid relativizing entries that will be discarded.
-      const { items: limitedResults, appliedLimit } = applyHeadLimit(
-        sortedCountResults,
-        head_limit,
-        offset,
-      )
-
-      // Convert absolute paths to relative paths to save tokens
-      const finalCountLines = limitedResults.map(line => {
-        // Lines have format: /absolute/path:count
-        const colonIndex = line.lastIndexOf(':')
-        if (colonIndex > 0) {
-          const filePath = line.substring(0, colonIndex)
-          const count = line.substring(colonIndex)
-          return toRelativePath(filePath) + count
-        }
-        return line
-      })
-
-      // Parse count output to extract total matches and file count
-      let totalMatches = 0
-      let fileCount = 0
-      for (const line of finalCountLines) {
-        const colonIndex = line.lastIndexOf(':')
-        if (colonIndex > 0) {
-          const countStr = line.substring(colonIndex + 1)
-          const count = parseInt(countStr, 10)
-          if (!isNaN(count)) {
-            totalMatches += count
-            fileCount += 1
-          }
-        }
-      }
-
-      const output = {
-        mode: 'count' as const,
-        numFiles: fileCount,
-        filenames: [],
-        content: finalCountLines.join('\n'),
-        numMatches: totalMatches,
-        ...(appliedLimit !== undefined && { appliedLimit }),
-        ...(offset > 0 && { appliedOffset: offset }),
-      }
-      return { data: output }
-    }
-
-    // For files_with_matches mode (default)
-    // Use allSettled so a single ENOENT (file deleted between ripgrep's scan
-    // and this stat) does not reject the whole batch. Failed stats sort as mtime 0.
-    const stats = await Promise.allSettled(
-      results.map(_ => getFsImplementation().stat(_)),
-    )
-    const sortedMatches = results
-      // Sort by modification time
-      .map((_, i) => {
-        const r = stats[i]!
-        return [
-          _,
-          r.status === 'fulfilled' ? (r.value.mtimeMs ?? 0) : 0,
-        ] as const
-      })
-      .sort((a, b) => {
-        if (process.env.NODE_ENV === 'test') {
-          // In tests, we always want to sort by filename, so that results are deterministic
-          return a[0].localeCompare(b[0])
-        }
-        const timeComparison = b[1] - a[1]
-        if (timeComparison === 0) {
-          // Sort by filename as a tiebreaker
-          return a[0].localeCompare(b[0])
-        }
-        return timeComparison
-      })
-      .map(_ => _[0])
-
-    // Apply head_limit to sorted file list (like "| head -N")
-    const { items: finalMatches, appliedLimit } = applyHeadLimit(
-      sortedMatches,
-      head_limit,
-      offset,
-    )
-
-    // Convert absolute paths to relative paths to save tokens
-    const relativeMatches = finalMatches.map(toRelativePath)
-
-    const output = {
-      mode: 'files_with_matches' as const,
-      filenames: relativeMatches,
-      numFiles: relativeMatches.length,
-      ...(appliedLimit !== undefined && { appliedLimit }),
-      ...(offset > 0 && { appliedOffset: offset }),
-    }
-
+  create(deps: ToolDeps) {
     return {
-      data: output,
+      async validateInput(input): Promise<ValidationResult> {
+        // densable BT() && xd(n) — named host is not forwarded (errorCode 3)
+        const hostRefusal = remoteHostForwardRefusal(input, GREP_TOOL_NAME)
+        if (hostRefusal) return { ...hostRefusal, errorCode: 3 }
+        // Official 2.1.326 (#122): reject malformed/pathological glob patterns
+        // upfront so Grep never hangs on catastrophic backtracking or unbalanced braces.
+        if (input.glob) {
+          const globCheck = isSafeGlobPattern(input.glob)
+          if (!globCheck.safe) {
+            return {
+              result: false,
+              message: `Invalid glob pattern: ${globCheck.reason}`,
+              errorCode: 2,
+            }
+          }
+        }
+        const { path } = input
+        // If path is provided, validate that it exists
+        if (path) {
+          const fs = getFsImplementation()
+          const absolutePath = expandPath(path)
+
+          // SECURITY: Skip filesystem operations for UNC paths to prevent NTLM credential leaks.
+          if (
+            absolutePath.startsWith('\\\\') ||
+            absolutePath.startsWith('//')
+          ) {
+            return { result: true }
+          }
+
+          try {
+            await fs.stat(absolutePath)
+          } catch (e: unknown) {
+            if (isENOENT(e)) {
+              const cwdSuggestion = await suggestPathUnderCwd(absolutePath)
+              let message = `Path does not exist: ${path}. ${FILE_NOT_FOUND_CWD_NOTE} ${getCwd()}.`
+              if (cwdSuggestion) {
+                message += ` Did you mean ${cwdSuggestion}?`
+              }
+              return {
+                result: false,
+                message,
+                errorCode: 1,
+              }
+            }
+            throw e
+          }
+        }
+
+        return { result: true }
+      },
+      async checkPermissions(input): Promise<PermissionDecision> {
+        noteApprovedFileToolPath(input.path ? expandPath(input.path) : getCwd())
+        return checkReadPermissionForTool(GrepTool, input, deps.permissions())
+      },
+      async call(
+        {
+          pattern,
+          path,
+          glob,
+          type,
+          output_mode = 'files_with_matches',
+          '-B': context_before,
+          '-A': context_after,
+          '-C': context_c,
+          context,
+          '-n': show_line_numbers = true,
+          '-i': case_insensitive = false,
+          head_limit,
+          offset = 0,
+          multiline = false,
+        },
+        callCtx,
+      ) {
+        const absolutePath = path ? expandPath(path) : getCwd()
+        const args = ['--hidden']
+
+        // Exclude VCS directories to avoid noise from version control metadata
+        for (const dir of VCS_DIRECTORIES_TO_EXCLUDE) {
+          args.push('--glob', `!${dir}`)
+        }
+
+        // Limit line length to prevent base64/minified content from cluttering output
+        args.push('--max-columns', '500')
+
+        // Only apply multiline flags when explicitly requested
+        if (multiline) {
+          args.push('-U', '--multiline-dotall')
+        }
+
+        // Add optional flags
+        if (case_insensitive) {
+          args.push('-i')
+        }
+
+        // Add output mode flags
+        if (output_mode === 'files_with_matches') {
+          args.push('-l')
+        } else if (output_mode === 'count') {
+          args.push('-c')
+        }
+
+        // In content mode, always pass `--null` and `-n` to ripgrep so file paths
+        // end unambiguously at `\0` (avoiding `:`/`-` filename ambiguity when
+        // sorting/relativizing) and line-number prefixes can be stripped when
+        // `show_line_numbers` is false (matching official 2.1.328).
+        if (output_mode === 'content') {
+          args.push('--null', '-n')
+        }
+
+        // Add context flags (-C/context takes precedence over context_before/context_after)
+        if (output_mode === 'content') {
+          if (context !== undefined) {
+            args.push('-C', context.toString())
+          } else if (context_c !== undefined) {
+            args.push('-C', context_c.toString())
+          } else {
+            if (context_before !== undefined) {
+              args.push('-B', context_before.toString())
+            }
+            if (context_after !== undefined) {
+              args.push('-A', context_after.toString())
+            }
+          }
+        }
+
+        // If pattern starts with dash, use -e flag to specify it as a pattern
+        // This prevents ripgrep from interpreting it as a command-line option
+        if (pattern.startsWith('-')) {
+          args.push('-e', pattern)
+        } else {
+          args.push(pattern)
+        }
+
+        // Add type filter if specified
+        if (type) {
+          args.push('--type', type)
+        }
+
+        if (glob) {
+          // Split on commas and spaces, but preserve patterns with braces
+          const globPatterns: string[] = []
+          const rawPatterns = glob.split(/\s+/)
+
+          for (const rawPattern of rawPatterns) {
+            // If pattern contains braces, don't split further
+            if (rawPattern.includes('{') && rawPattern.includes('}')) {
+              globPatterns.push(rawPattern)
+            } else {
+              // Split on commas for patterns without braces
+              globPatterns.push(...rawPattern.split(',').filter(Boolean))
+            }
+          }
+
+          for (const globPattern of globPatterns.filter(Boolean)) {
+            args.push('--glob', globPattern)
+          }
+        }
+
+        const permissionContext = deps.permissions()
+        const approved = takeApprovedFileToolPath(absolutePath)
+        const root = await openSearchRoot(absolutePath, approved)
+        let results: string[] = []
+        if (root) {
+          let boundTaskOutput:
+            | Awaited<ReturnType<typeof bindTaskOutputForRead>>
+            | undefined
+          try {
+            await root.recheckBeforeSpawn()
+            for (const denyGlob of compileReadDenyRgGlobs(
+              permissionContext,
+              root,
+            )) {
+              args.push('--glob', denyGlob)
+            }
+
+            for (const exclusion of await getGlobExclusionsForPluginCache(
+              absolutePath,
+            )) {
+              args.push('--glob', exclusion)
+            }
+
+            const taskOutputCandidate = isTaskOutputFilePath(absolutePath)
+              ? absolutePath
+              : isTaskOutputFilePath(root.canonical)
+                ? root.canonical
+                : undefined
+            if (taskOutputCandidate !== undefined) {
+              boundTaskOutput = await bindTaskOutputForRead(taskOutputCandidate)
+            } else {
+              const taskExclusions = taskOutputDirExclusions(root.canonical)
+              if (taskExclusions.includes('!**')) {
+                throw new Error(
+                  "Task output files are read individually: Grep (or Read) a specific task's output path rather than the tasks directory.",
+                )
+              }
+              for (const taskExcl of taskExclusions) {
+                args.push('--glob', taskExcl)
+              }
+            }
+
+            results = await ripGrep(args, root.target, callCtx.signal, {
+              rejectOnInputError: true,
+              rejectOnPartial: true,
+              cwd: root.spawnCwd,
+            }).catch(err => {
+              if (
+                err instanceof RipgrepTimeoutError &&
+                err.partialResults.length > 0
+              ) {
+                return err.partialResults
+              }
+              throw err
+            })
+            if (root.relativeOutput) {
+              results = results.map(line =>
+                absolutizeRipgrepLine(line, root, output_mode),
+              )
+            }
+          } finally {
+            await boundTaskOutput?.close()
+            await root.close()
+          }
+        }
+
+        if (output_mode === 'content') {
+          // Official 2.1.327 (#414, SEA `zns`/`mHn`): sort content results by file
+          // path before paging with head_limit & offset so pages never repeat or
+          // skip matches when ripgrep returns files in non-deterministic worker order.
+          const hasContextBreaks = [
+            context,
+            context_c,
+            context_before,
+            context_after,
+          ].some(v => typeof v === 'number' && v > 0)
+          // Single-file rg output omits the filename prefix (lines start with `lineno:text`),
+          // so skip file-path sorting to preserve line order.
+          const sortedResults =
+            root?.isDirectory === false
+              ? results
+              : sortGrepContentLines(results, hasContextBreaks)
+
+          // Apply head_limit first — relativize is per-line work, so
+          // avoid processing lines that will be discarded (broad patterns can
+          // return 10k+ lines with head_limit keeping only ~30-100).
+          const { items: limitedResults, appliedLimit } = applyHeadLimit(
+            sortedResults,
+            head_limit,
+            offset,
+          )
+
+          const finalLines = limitedResults.map(line => {
+            if (line === '--') return line
+            const nulIdx = line.indexOf('\0')
+            if (nulIdx < 0) {
+              // Single-file rg output omits the filename prefix (`lineno:text` or `lineno-text`).
+              return show_line_numbers ? line : line.replace(/^\d+[:-]/, '')
+            }
+            const filePath = line.substring(0, nulIdx)
+            const rest = line.substring(nulIdx + 1)
+            const lineNoMatch = /^(\d+)([:-])/.exec(rest)
+            const sep = lineNoMatch?.[2] ?? ':'
+            const formattedRest =
+              show_line_numbers || lineNoMatch === null
+                ? rest
+                : rest.substring(lineNoMatch[0].length)
+            return toRelativePath(filePath) + sep + formattedRest
+          })
+          const output = {
+            mode: 'content' as const,
+            numFiles: 0, // Not applicable for content mode
+            filenames: [],
+            content: finalLines.join('\n'),
+            numLines: finalLines.length,
+            ...(appliedLimit !== undefined && { appliedLimit }),
+            ...(offset > 0 && { appliedOffset: offset }),
+          }
+          return { data: output }
+        }
+
+        if (output_mode === 'count') {
+          // Official 2.1.327 (#414, SEA `mHn`): sort count results by file path
+          // before paging with head_limit & offset so pages are deterministic.
+          const sortedCountResults = sortGrepCountLines(results)
+          // Apply head_limit first to avoid relativizing entries that will be discarded.
+          const { items: limitedResults, appliedLimit } = applyHeadLimit(
+            sortedCountResults,
+            head_limit,
+            offset,
+          )
+
+          // Convert absolute paths to relative paths to save tokens
+          const finalCountLines = limitedResults.map(line => {
+            // Lines have format: /absolute/path:count
+            const colonIndex = line.lastIndexOf(':')
+            if (colonIndex > 0) {
+              const filePath = line.substring(0, colonIndex)
+              const count = line.substring(colonIndex)
+              return toRelativePath(filePath) + count
+            }
+            return line
+          })
+
+          // Parse count output to extract total matches and file count
+          let totalMatches = 0
+          let fileCount = 0
+          for (const line of finalCountLines) {
+            const colonIndex = line.lastIndexOf(':')
+            if (colonIndex > 0) {
+              const countStr = line.substring(colonIndex + 1)
+              const count = parseInt(countStr, 10)
+              if (!isNaN(count)) {
+                totalMatches += count
+                fileCount += 1
+              }
+            }
+          }
+
+          const output = {
+            mode: 'count' as const,
+            numFiles: fileCount,
+            filenames: [],
+            content: finalCountLines.join('\n'),
+            numMatches: totalMatches,
+            ...(appliedLimit !== undefined && { appliedLimit }),
+            ...(offset > 0 && { appliedOffset: offset }),
+          }
+          return { data: output }
+        }
+
+        // For files_with_matches mode (default)
+        // Use allSettled so a single ENOENT (file deleted between ripgrep's scan
+        // and this stat) does not reject the whole batch. Failed stats sort as mtime 0.
+        const stats = await Promise.allSettled(
+          results.map(_ => getFsImplementation().stat(_)),
+        )
+        const sortedMatches = results
+          // Sort by modification time
+          .map((_, i) => {
+            const r = stats[i]!
+            return [
+              _,
+              r.status === 'fulfilled' ? (r.value.mtimeMs ?? 0) : 0,
+            ] as const
+          })
+          .sort((a, b) => {
+            if (process.env.NODE_ENV === 'test') {
+              // In tests, we always want to sort by filename, so that results are deterministic
+              return a[0].localeCompare(b[0])
+            }
+            const timeComparison = b[1] - a[1]
+            if (timeComparison === 0) {
+              // Sort by filename as a tiebreaker
+              return a[0].localeCompare(b[0])
+            }
+            return timeComparison
+          })
+          .map(_ => _[0])
+
+        // Apply head_limit to sorted file list (like "| head -N")
+        const { items: finalMatches, appliedLimit } = applyHeadLimit(
+          sortedMatches,
+          head_limit,
+          offset,
+        )
+
+        // Convert absolute paths to relative paths to save tokens
+        const relativeMatches = finalMatches.map(toRelativePath)
+
+        const output = {
+          mode: 'files_with_matches' as const,
+          filenames: relativeMatches,
+          numFiles: relativeMatches.length,
+          ...(appliedLimit !== undefined && { appliedLimit }),
+          ...(offset > 0 && { appliedOffset: offset }),
+        }
+
+        return {
+          data: output,
+        }
+      },
     }
   },
 } satisfies ToolDef<InputSchema, Output>)

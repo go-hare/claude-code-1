@@ -1,5 +1,5 @@
 import { z } from 'zod/v4'
-import type { ToolResultBlockParam } from 'src/Tool.js'
+import type { ToolDef, ToolDeps, ToolResultBlockParam } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { tokenCountWithEstimation } from 'src/utils/tokens.js'
@@ -79,47 +79,51 @@ Use this to understand your context budget before deciding whether to snip old m
     }
   },
 
-  async call(input: CtxInput, context) {
-    const messages = context.messages ?? []
-    const model = context.options?.mainLoopModel ?? 'unknown'
-    const totalTokens = tokenCountWithEstimation(messages)
-    const collapseEnabled = isContextCollapseEnabled()
-    const collapseStats = getStats()
-    const focused = input.query?.trim()
-
-    const sessionMemoryEnabled = isSessionMemoryInitialized()
-    // Prompt caching is an API-level feature controlled by the provider, not
-    // a user-facing toggle. Report as enabled only for providers known to
-    // support Anthropic-style prompt caching (first-party, Bedrock, Vertex).
-    const promptCachingEnabled =
-      !model.startsWith('openai/') &&
-      !model.startsWith('grok/') &&
-      !model.startsWith('gemini/')
-
-    const summaryParts = [
-      focused ? `Focus: ${focused}` : 'Overall context summary',
-      `Model context: ${model}`,
-      `Prompt caching: ${promptCachingEnabled ? 'enabled' : 'disabled'}`,
-      `Session memory: ${sessionMemoryEnabled ? 'enabled' : 'disabled'}`,
-      `Context collapse: ${collapseEnabled ? 'enabled' : 'disabled'}`,
-    ]
-
-    if (collapseEnabled) {
-      summaryParts.push(
-        `Collapse spans: ${collapseStats.collapsedSpans} committed, ${collapseStats.stagedSpans} staged, ${collapseStats.collapsedMessages} messages summarized`,
-      )
-    }
-
+  create(deps: ToolDeps) {
     return {
-      data: {
-        total_tokens: totalTokens,
-        message_count: messages.length,
-        context_window_model: model,
-        prompt_caching_enabled: promptCachingEnabled,
-        session_memory_enabled: sessionMemoryEnabled,
-        context_collapse_enabled: collapseEnabled,
-        summary: summaryParts.join('\n'),
+      async call(input: CtxInput) {
+        const messages = deps.messages()
+        const model = deps.loopModel() || 'unknown'
+        const totalTokens = tokenCountWithEstimation(messages)
+        const collapseEnabled = isContextCollapseEnabled()
+        const collapseStats = getStats()
+        const focused = input.query?.trim()
+
+        const sessionMemoryEnabled = isSessionMemoryInitialized()
+        // Prompt caching is an API-level feature controlled by the provider, not
+        // a user-facing toggle. Report as enabled only for providers known to
+        // support Anthropic-style prompt caching (first-party, Bedrock, Vertex).
+        const promptCachingEnabled =
+          !model.startsWith('openai/') &&
+          !model.startsWith('grok/') &&
+          !model.startsWith('gemini/')
+
+        const summaryParts = [
+          focused ? `Focus: ${focused}` : 'Overall context summary',
+          `Model context: ${model}`,
+          `Prompt caching: ${promptCachingEnabled ? 'enabled' : 'disabled'}`,
+          `Session memory: ${sessionMemoryEnabled ? 'enabled' : 'disabled'}`,
+          `Context collapse: ${collapseEnabled ? 'enabled' : 'disabled'}`,
+        ]
+
+        if (collapseEnabled) {
+          summaryParts.push(
+            `Collapse spans: ${collapseStats.collapsedSpans} committed, ${collapseStats.stagedSpans} staged, ${collapseStats.collapsedMessages} messages summarized`,
+          )
+        }
+
+        return {
+          data: {
+            total_tokens: totalTokens,
+            message_count: messages.length,
+            context_window_model: model,
+            prompt_caching_enabled: promptCachingEnabled,
+            session_memory_enabled: sessionMemoryEnabled,
+            context_collapse_enabled: collapseEnabled,
+            summary: summaryParts.join('\n'),
+          },
+        }
       },
     }
   },
-})
+} satisfies ToolDef<InputSchema, CtxOutput>)

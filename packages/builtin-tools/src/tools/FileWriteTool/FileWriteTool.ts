@@ -9,8 +9,14 @@ import { getLspServerManager } from 'src/services/lsp/manager.js'
 import { notifyVscodeFileUpdated } from 'src/services/mcp/vscodeSdkMcp.js'
 import { checkTeamMemSecrets } from 'src/services/teamMemorySync/teamMemSecretGuard.js'
 import { discoverAndActivateSkillsForFilePath } from 'src/skills/loadSkillsDir.js'
-import type { ToolUseContext } from 'src/Tool.js'
-import { buildTool, type ToolDef } from 'src/Tool.js'
+import {
+  buildTool,
+  isNativeToolDisabledInThisProcess,
+  resolveToolUseContext,
+  type ToolDef,
+  type ToolDeps,
+  type ToolResult,
+} from 'src/Tool.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { countLinesChanged, getPatchForDisplay } from 'src/utils/diff.js'
 import { isBareMode, isEnvTruthy } from 'src/utils/envUtils.js'
@@ -161,6 +167,14 @@ const outputSchema = lazySchema(() =>
   }),
 )
 type OutputSchema = ReturnType<typeof outputSchema>
+
+const outputSchemaAcrossProcesses = lazySchema(() =>
+  outputSchema().extend({
+    filePath: z.string().optional(),
+    userModified: z.boolean().optional(),
+    memdirStamped: z.boolean().optional().catch(undefined),
+  }),
+)
 
 /** densable 2.1.239 — subagent REPORT/SUMMARY/FINDINGS/ANALYSIS.md gate. */
 const SUBAGENT_REPORT_NAME = /^(REPORT|SUMMARY|FINDINGS|ANALYSIS).*\.md$/i
@@ -326,6 +340,18 @@ export const FileWriteTool = buildTool({
   get outputSchema(): OutputSchema {
     return outputSchema()
   },
+  get outputSchemaAcrossProcesses() {
+    return outputSchemaAcrossProcesses()
+  },
+  fromAnotherProcess(data, input, opts) {
+    return {
+      data: {
+        ...data,
+        filePath: String(input.file_path ?? data.filePath ?? ''),
+        userModified: opts?.userModified === true,
+      },
+    }
+  },
   toAutoClassifierInput(input) {
     return `${input.file_path}: ${input.content}`
   },
@@ -356,22 +382,16 @@ export const FileWriteTool = buildTool({
   backfillObservableInput(input) {
     // hooks.mdx documents file_path as absolute; expand so hook allowlists
     // can't be bypassed via ~ or relative paths.
-    if (typeof input.file_path === 'string') {
+    if (
+      typeof input.file_path === 'string' &&
+      !isNativeToolDisabledInThisProcess(FILE_WRITE_TOOL_NAME)
+    ) {
       input.file_path = expandPath(input.file_path)
     }
   },
   async preparePermissionMatcher({ file_path }) {
     // densable hqe: allow-style single-segment dir/** is cwd-only (#44)
     return pattern => matchesPathRule(pattern, file_path)
-  },
-  async checkPermissions(input, context): Promise<PermissionDecision> {
-    noteApprovedFileToolPath(input.file_path, context.toolUseId)
-    const appState = context.getAppState()
-    return checkWritePermissionForTool(
-      FileWriteTool,
-      input,
-      appState.toolPermissionContext,
-    )
   },
   renderToolUseRejectedMessage,
   renderToolUseErrorMessage,
@@ -383,503 +403,510 @@ export const FileWriteTool = buildTool({
     // shown — phantom. Under-count: tool_use already indexes file_path.
     return ''
   },
-  async validateInput(
-    { file_path, content, ...rest },
-    toolUseContext: ToolUseContext,
-  ) {
-    // densable BT() && xd(n) — named host is not forwarded (errorCode 14)
-    const hostRefusal = remoteHostForwardRefusal(
-      {
-        file_path,
-        content,
-        ...rest,
+  create(deps: ToolDeps) {
+    return {
+      async checkPermissions(input, callCtx): Promise<PermissionDecision> {
+        noteApprovedFileToolPath(input.file_path, callCtx.toolUseId)
+        return checkWritePermissionForTool(
+          FileWriteTool,
+          input,
+          deps.permissions(),
+        )
       },
-      FILE_WRITE_TOOL_NAME,
-    )
-    if (hostRefusal) return { ...hostRefusal, errorCode: 14 }
-    const fullFilePath = expandPath(file_path)
+      async validateInput({ file_path, content, ...rest }, callCtx) {
+        // densable BT() && xd(n) — named host is not forwarded (errorCode 14)
+        const hostRefusal = remoteHostForwardRefusal(
+          {
+            file_path,
+            content,
+            ...rest,
+          },
+          FILE_WRITE_TOOL_NAME,
+        )
+        if (hostRefusal) return { ...hostRefusal, errorCode: 14 }
+        const fullFilePath = expandPath(file_path)
 
-    // Official 2.1.326 #307 / #309: refuse writes to Claude sign-in files or
-    // blocked device/process files even before permission prompts.
-    if (isClaudeSignInFilePath(fullFilePath)) {
-      return {
-        result: false,
-        message: `Cannot write to Claude Code sign-in file ${fullFilePath}. Sign-in files such as .credentials.json are protected from modification.`,
-        errorCode: 15,
-      }
-    }
-    if (isBlockedDeviceOrProcessPath(fullFilePath)) {
-      return {
-        result: false,
-        message: `Cannot write to device or process file ${fullFilePath}.`,
-        errorCode: 16,
-      }
-    }
-
-    // densable 2.1.217 #5 hsr — bg / worktree isolation containment (errorCode 7)
-    const isolationBlock = checkBgIsolationWriteBlock(fullFilePath, {
-      agentId: toolUseContext.agentId,
-      agentWorktree: toolUseContext.agentWorktree,
-    })
-    if (isolationBlock) {
-      return { result: false, message: isolationBlock, errorCode: 7 }
-    }
-
-    // densable 2.1.239: subagent must return findings as text, not report.md
-    if (
-      toolUseContext.agentId &&
-      SUBAGENT_REPORT_NAME.test(basename(fullFilePath))
-    ) {
-      logEvent('tengu_subagent_md_report_blocked', {
-        contentBytes: Buffer.byteLength(content),
-      })
-      return {
-        result: false,
-        message: SUBAGENT_REPORT_BLOCKED,
-        errorCode: 5,
-      }
-    }
-
-    // Reject writes to team memory files that contain secrets
-    const secretError = checkTeamMemSecrets(fullFilePath, content)
-    if (secretError) {
-      return { result: false, message: secretError, errorCode: 0 }
-    }
-
-    // Check if path should be ignored based on permission settings
-    const appState = toolUseContext.getAppState()
-    const denyRule = matchingRuleForInput(
-      fullFilePath,
-      appState.toolPermissionContext,
-      'edit',
-      'deny',
-    )
-    if (denyRule !== null) {
-      return {
-        result: false,
-        message:
-          'File is in a directory that is denied by your permission settings.',
-        errorCode: 1,
-      }
-    }
-
-    // densable l8t — Read deny covers this path/tool → dedicated write copy
-    // (errorCode 13), not the generic "has not been read yet" unread message.
-    if (
-      isPathCoveredByReadDenyRule(fullFilePath, appState.toolPermissionContext)
-    ) {
-      return {
-        result: false,
-        message: FILE_READ_DENY_CANNOT_WRITE,
-        errorCode: 13,
-      }
-    }
-
-    // SECURITY: Skip filesystem operations for UNC paths to prevent NTLM credential leaks.
-    // On Windows, fs.existsSync() on UNC paths triggers SMB authentication which could
-    // leak credentials to malicious servers. Let the permission check handle UNC paths.
-    if (fullFilePath.startsWith('\\\\') || fullFilePath.startsWith('//')) {
-      return { result: true }
-    }
-
-    const fs = getFsImplementation()
-    let fileMtimeMs: number
-    try {
-      const fileStat = await fs.stat(fullFilePath)
-      // densable hNr(d.mode) → errorCode 6 + mNr.
-      if (isPerforceUnopenedReadOnly(fileStat.mode)) {
-        return {
-          result: false,
-          message: PERFORCE_UNOPENED_READONLY,
-          errorCode: 6,
+        // Official 2.1.326 #307 / #309: refuse writes to Claude sign-in files or
+        // blocked device/process files even before permission prompts.
+        if (isClaudeSignInFilePath(fullFilePath)) {
+          return {
+            result: false,
+            message: `Cannot write to Claude Code sign-in file ${fullFilePath}. Sign-in files such as .credentials.json are protected from modification.`,
+            errorCode: 15,
+          }
         }
-      }
-      // Local: refuse directory/FIFO with a filename hint (errorCode 10).
-      if (isExistingDirectoryOrFifo(fileStat)) {
-        const kind = fileStat.isDirectory()
-          ? 'an existing directory'
-          : 'a FIFO or pipe, not a regular file'
-        return {
-          result: false,
-          message: `Cannot write '${file_path}': the specified path is ${kind}. Specify a path that includes a filename.`,
-          errorCode: 10,
+        if (isBlockedDeviceOrProcessPath(fullFilePath)) {
+          return {
+            result: false,
+            message: `Cannot write to device or process file ${fullFilePath}.`,
+            errorCode: 16,
+          }
         }
-      }
-      fileMtimeMs = fileStat.mtimeMs
-    } catch (e) {
-      if (isENOENT(e)) {
+
+        // densable 2.1.217 #5 hsr — bg / worktree isolation containment (errorCode 7)
+        // Official 2.1.331: deps.agentWorktree (projected from toolUseContext.agentWorktree)
+        const isolationBlock = checkBgIsolationWriteBlock(fullFilePath, {
+          agentId: deps.agentId,
+          agentWorktree: deps.agentWorktree,
+        })
+        if (isolationBlock) {
+          return { result: false, message: isolationBlock, errorCode: 7 }
+        }
+
+        // densable 2.1.239: subagent must return findings as text, not report.md
+        if (deps.agentId && SUBAGENT_REPORT_NAME.test(basename(fullFilePath))) {
+          logEvent('tengu_subagent_md_report_blocked', {
+            contentBytes: Buffer.byteLength(content),
+          })
+          return {
+            result: false,
+            message: SUBAGENT_REPORT_BLOCKED,
+            errorCode: 5,
+          }
+        }
+
+        // Reject writes to team memory files that contain secrets
+        const secretError = checkTeamMemSecrets(fullFilePath, content)
+        if (secretError) {
+          return { result: false, message: secretError, errorCode: 0 }
+        }
+
+        // Check if path should be ignored based on permission settings
+        const permissionContext = deps.permissions()
+        const denyRule = matchingRuleForInput(
+          fullFilePath,
+          permissionContext,
+          'edit',
+          'deny',
+        )
+        if (denyRule !== null) {
+          return {
+            result: false,
+            message:
+              'File is in a directory that is denied by your permission settings.',
+            errorCode: 1,
+          }
+        }
+
+        // densable l8t — Read deny covers this path/tool → dedicated write copy
+        // (errorCode 13), not the generic "has not been read yet" unread message.
+        if (isPathCoveredByReadDenyRule(fullFilePath, permissionContext)) {
+          return {
+            result: false,
+            message: FILE_READ_DENY_CANNOT_WRITE,
+            errorCode: 13,
+          }
+        }
+
+        // SECURITY: Skip filesystem operations for UNC paths to prevent NTLM credential leaks.
+        // On Windows, fs.existsSync() on UNC paths triggers SMB authentication which could
+        // leak credentials to malicious servers. Let the permission check handle UNC paths.
+        if (fullFilePath.startsWith('\\\\') || fullFilePath.startsWith('//')) {
+          return { result: true }
+        }
+
+        const fs = getFsImplementation()
+        let fileMtimeMs: number
+        try {
+          const fileStat = await fs.stat(fullFilePath)
+          // densable hNr(d.mode) → errorCode 6 + mNr.
+          if (isPerforceUnopenedReadOnly(fileStat.mode)) {
+            return {
+              result: false,
+              message: PERFORCE_UNOPENED_READONLY,
+              errorCode: 6,
+            }
+          }
+          // Local: refuse directory/FIFO with a filename hint (errorCode 10).
+          if (isExistingDirectoryOrFifo(fileStat)) {
+            const kind = fileStat.isDirectory()
+              ? 'an existing directory'
+              : 'a FIFO or pipe, not a regular file'
+            return {
+              result: false,
+              message: `Cannot write '${file_path}': the specified path is ${kind}. Specify a path that includes a filename.`,
+              errorCode: 10,
+            }
+          }
+          fileMtimeMs = fileStat.mtimeMs
+        } catch (e) {
+          if (isENOENT(e)) {
+            return validateCoordinatorWriteAccess({
+              filePath: fullFilePath,
+              sourceTool: 'FileWriteTool',
+            })
+          }
+          throw e
+        }
+
+        const startOnlyRefusal = await checkWriteStartOnlyFile(
+          fullFilePath,
+          resolveToolUseContext(deps, callCtx) as StartOnlyContext,
+        )
+        if (startOnlyRefusal !== undefined) {
+          return {
+            result: false,
+            message: startOnlyRefusal.message,
+            errorCode: startOnlyRefusal.errorCode,
+          }
+        }
+
+        // densable 2.1.228 #17 Write: existing file requires prior non-partial read
+        // (errorCode 2) unless guardSkipped (non-legacy model + Read auto-allow).
+        // stale mtime uses HOe+xOe content equality bypass (errorCode 3).
+        const readTimestamp = deps.readFileState.get(fullFilePath)
+        if (!readTimestamp || readTimestamp.isPartialView) {
+          // densable:
+          //   f=!c&&!ZYd(n)&&!J4t(d)&&MCt(nu,n,r,yn(r))
+          //   if(!f) return not-read errorCode 2; return ok
+          const guardSkipped = shouldSkipWriteUnreadGate(
+            fullFilePath,
+            resolveToolUseContext(deps, callCtx),
+            Boolean(readTimestamp),
+            readTimestamp?.isPartialView === true,
+          )
+          logEvent('tengu_write_tool_not_read_hypothetical', {
+            isPartialView: readTimestamp?.isPartialView === true,
+            isFilePathAbsolute: isAbsolute(fullFilePath),
+            guardSkipped,
+          })
+          if (!guardSkipped) {
+            return {
+              result: false,
+              message:
+                'File has not been read yet. Read it first before writing to it.',
+              errorCode: 2,
+            }
+          }
+          return validateCoordinatorWriteAccess({
+            filePath: fullFilePath,
+            sourceTool: 'FileWriteTool',
+          })
+        }
+
+        // Reuse mtime from the stat above — avoids a redundant statSync via
+        // getFileModificationTime.
+        const lastWriteTime = Math.floor(fileMtimeMs)
+        if (lastWriteTime > readTimestamp.timestamp) {
+          let contentUnchanged = false
+          if (isFullEnoughFileRead(readTimestamp)) {
+            try {
+              const fileBuffer = await fs.readFileBytes(fullFilePath)
+              const diskContent = fileBuffer
+                .toString('utf8')
+                .replaceAll('\r\n', '\n')
+              contentUnchanged = fileStateContentMatches(
+                readTimestamp,
+                diskContent,
+              )
+            } catch {
+              contentUnchanged = false
+            }
+          }
+          if (!contentUnchanged) {
+            return {
+              result: false,
+              message:
+                'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
+              errorCode: 3,
+            }
+          }
+        }
+
         return validateCoordinatorWriteAccess({
           filePath: fullFilePath,
           sourceTool: 'FileWriteTool',
         })
-      }
-      throw e
-    }
-
-    const startOnlyRefusal = await checkWriteStartOnlyFile(
-      fullFilePath,
-      toolUseContext as StartOnlyContext,
-    )
-    if (startOnlyRefusal !== undefined) {
-      return {
-        result: false,
-        message: startOnlyRefusal.message,
-        errorCode: startOnlyRefusal.errorCode,
-      }
-    }
-
-    // densable 2.1.228 #17 Write: existing file requires prior non-partial read
-    // (errorCode 2) unless guardSkipped (non-legacy model + Read auto-allow).
-    // stale mtime uses HOe+xOe content equality bypass (errorCode 3).
-    const readTimestamp = toolUseContext.readFileState.get(fullFilePath)
-    if (!readTimestamp || readTimestamp.isPartialView) {
-      // densable:
-      //   f=!c&&!ZYd(n)&&!J4t(d)&&MCt(nu,n,r,yn(r))
-      //   if(!f) return not-read errorCode 2; return ok
-      const guardSkipped = shouldSkipWriteUnreadGate(
-        fullFilePath,
-        toolUseContext,
-        Boolean(readTimestamp),
-        readTimestamp?.isPartialView === true,
-      )
-      logEvent('tengu_write_tool_not_read_hypothetical', {
-        isPartialView: readTimestamp?.isPartialView === true,
-        isFilePathAbsolute: isAbsolute(fullFilePath),
-        guardSkipped,
-      })
-      if (!guardSkipped) {
-        return {
-          result: false,
-          message:
-            'File has not been read yet. Read it first before writing to it.',
-          errorCode: 2,
-        }
-      }
-      return validateCoordinatorWriteAccess({
-        filePath: fullFilePath,
-        sourceTool: 'FileWriteTool',
-      })
-    }
-
-    // Reuse mtime from the stat above — avoids a redundant statSync via
-    // getFileModificationTime.
-    const lastWriteTime = Math.floor(fileMtimeMs)
-    if (lastWriteTime > readTimestamp.timestamp) {
-      let contentUnchanged = false
-      if (isFullEnoughFileRead(readTimestamp)) {
-        try {
-          const fileBuffer = await fs.readFileBytes(fullFilePath)
-          const diskContent = fileBuffer
-            .toString('utf8')
-            .replaceAll('\r\n', '\n')
-          contentUnchanged = fileStateContentMatches(readTimestamp, diskContent)
-        } catch {
-          contentUnchanged = false
-        }
-      }
-      if (!contentUnchanged) {
-        return {
-          result: false,
-          message:
-            'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
-          errorCode: 3,
-        }
-      }
-    }
-
-    return validateCoordinatorWriteAccess({
-      filePath: fullFilePath,
-      sourceTool: 'FileWriteTool',
-    })
-  },
-  async call(
-    { file_path, content },
-    toolUseContext: ToolUseContext,
-    _,
-    parentMessage,
-  ) {
-    const {
-      readFileState,
-      updateFileHistoryState,
-      dynamicSkillDirTriggers,
-      userModified,
-    } = toolUseContext
-    const fullFilePath = expandPath(file_path)
-
-    // Official 2.1.326 #307 / #309: defense-in-depth at call() time too.
-    if (isClaudeSignInFilePath(fullFilePath)) {
-      throw new Error(
-        `Cannot write to Claude Code sign-in file ${fullFilePath}. Sign-in files such as .credentials.json are protected from modification.`,
-      )
-    }
-    if (isBlockedDeviceOrProcessPath(fullFilePath)) {
-      throw new Error(`Cannot write to device or process file ${fullFilePath}.`)
-    }
-
-    const toolPermissionContext =
-      toolUseContext.getAppState?.()?.toolPermissionContext
-    if (toolPermissionContext) {
-      const outsideWriteBlock = checkBlockWritesOutsideWorkingDirectories(
-        fullFilePath,
-        toolPermissionContext,
-      )
-      if (outsideWriteBlock !== undefined) {
-        throw new Error(outsideWriteBlock)
-      }
-
-      // 2.1.323 #2023 defense-in-depth: also enforce Read deny rules at call()
-      // time across all resolved path spellings (symlinks / realpath).
-      if (isPathCoveredByReadDenyRule(fullFilePath, toolPermissionContext)) {
-        throw new Error(FILE_READ_DENY_CANNOT_WRITE)
-      }
-    }
-
-    // Discover skills from this file's path (official 2.1.328 BJ).
-    if (!isBareMode()) {
-      await discoverAndActivateSkillsForFilePath(
-        fullFilePath,
-        dynamicSkillDirTriggers,
-      )
-    }
-
-    await diagnosticTracker.beforeFileEdited(fullFilePath)
-
-    const approved = takeApprovedFileToolPath(
-      fullFilePath,
-      toolUseContext.toolUseId,
-      'write',
-    )
-    const openedWrite = await openApprovedWrite(fullFilePath, approved, {
-      createParents: true,
-    })
-    let openedRead: ApprovedRead | null = null
-    let meta: ReturnType<typeof readFileSyncWithMetadata> | null = null
-    let oldContent: string | null = null
-    let contentToWrite = content
-    let memdirStamped = false
-    try {
-      if (fileHistoryEnabled()) {
-        await fileHistoryTrackEdit(
+      },
+      async call({ file_path, content }, callCtx): Promise<ToolResult<Output>> {
+        const {
+          readFileState,
           updateFileHistoryState,
+          dynamicSkillDirTriggers,
+        } = deps
+        const { userModified, parentMessage, toolUseId } = callCtx
+        const fullFilePath = expandPath(file_path)
+
+        // Official 2.1.326 #307 / #309: defense-in-depth at call() time too.
+        if (isClaudeSignInFilePath(fullFilePath)) {
+          throw new Error(
+            `Cannot write to Claude Code sign-in file ${fullFilePath}. Sign-in files such as .credentials.json are protected from modification.`,
+          )
+        }
+        if (isBlockedDeviceOrProcessPath(fullFilePath)) {
+          throw new Error(
+            `Cannot write to device or process file ${fullFilePath}.`,
+          )
+        }
+
+        const toolPermissionContext = deps.permissions()
+        const outsideWriteBlock = checkBlockWritesOutsideWorkingDirectories(
           fullFilePath,
-          parentMessage.uuid,
+          toolPermissionContext,
         )
-      }
-
-      try {
-        openedRead = await openApprovedRead(fullFilePath, approved)
-        meta = readFileSyncWithMetadata(openedRead.ioPath)
-      } catch (e) {
-        if (isENOENT(e)) {
-          meta = null
-        } else if (e instanceof SymlinkResolutionChangedError) {
-          throw e
-        } else {
-          // Official 2.1.319 #1740: non-ENOENT read failure on an existing file
-          // is a recoverable tool error, NOT a turn-aborting refusal.
-          const rawMsg = e instanceof Error ? e.message : String(e)
-          const cleanMsg =
-            openedWrite.ioPath !== fullFilePath
-              ? rawMsg.split(openedWrite.ioPath).join(fullFilePath)
-              : rawMsg
-          const err = new Error(
-            `Could not read existing file ${file_path} before overwriting: ${cleanMsg}`,
-          )
-          err.name = 'ToolExecutionError'
-          throw err
+        if (outsideWriteBlock !== undefined) {
+          throw new Error(outsideWriteBlock)
         }
-      }
 
-      if (meta !== null) {
-        const startOnlyRefusal = await checkWriteStartOnlyFile(
+        // 2.1.323 #2023 defense-in-depth: also enforce Read deny rules at call()
+        // time across all resolved path spellings (symlinks / realpath).
+        if (isPathCoveredByReadDenyRule(fullFilePath, toolPermissionContext)) {
+          throw new Error(FILE_READ_DENY_CANNOT_WRITE)
+        }
+
+        // Discover skills from this file's path (official 2.1.328 BJ).
+        if (!isBareMode()) {
+          await discoverAndActivateSkillsForFilePath(
+            fullFilePath,
+            dynamicSkillDirTriggers,
+          )
+        }
+
+        await diagnosticTracker.beforeFileEdited(fullFilePath)
+
+        const approved = takeApprovedFileToolPath(
           fullFilePath,
-          toolUseContext as StartOnlyContext,
+          toolUseId,
+          'write',
         )
-        if (startOnlyRefusal !== undefined) {
-          throw new Error(startOnlyRefusal.message)
-        }
-        const lastWriteTime = getFileModificationTime(fullFilePath)
-        const lastRead = readFileState.get(fullFilePath)
-        // densable 2.1.228 #17 call-path: missing/partial may pass when the same
-        // guardSkipped as validateInput would; true staleness still throws.
-        if (!lastRead || lastRead.isPartialView) {
-          if (
-            !shouldAllowCallDespiteMissingOrPartialRead(
-              'write',
-              fullFilePath,
-              toolUseContext,
-              lastRead,
-            )
-          ) {
-            throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
-          }
-        } else if (
-          lastWriteTime > lastRead.timestamp &&
-          !(
-            isFullEnoughFileRead(lastRead) &&
-            fileStateContentMatches(lastRead, meta.content)
-          )
-        ) {
-          throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
-        }
-      }
-
-      if (meta?.notText) {
-        throw new Error(formatNonTextFileRefusal(meta.notText))
-      }
-
-      const enc = meta?.encoding ?? 'utf8'
-      oldContent = meta?.content ?? null
-
-      contentToWrite = stampNewMemoryContent(fullFilePath, content)
-      memdirStamped = contentToWrite !== content
-      contentToWrite = preserveBom(oldContent, contentToWrite)
-
-      await openedWrite.recheckBeforeWrite()
-      writeTextContent(openedWrite.ioPath, contentToWrite, enc, 'LF')
-    } finally {
-      await openedRead?.close()
-      await openedWrite.close()
-    }
-
-    // Notify LSP servers about file modification (didChange) and save (didSave)
-    const lspManager = getLspServerManager()
-    if (lspManager) {
-      // Clear previously delivered diagnostics so new ones will be shown
-      clearDeliveredDiagnosticsForFile(`file://${fullFilePath}`)
-      // didChange: Content has been modified
-      lspManager
-        .changeFile(fullFilePath, contentToWrite)
-        .catch((err: Error) => {
-          logForDebugging(
-            `LSP: Failed to notify server of file change for ${fullFilePath}: ${err.message}`,
-          )
-          logError(err)
+        const openedWrite = await openApprovedWrite(fullFilePath, approved, {
+          createParents: true,
         })
-      // didSave: File has been saved to disk (triggers diagnostics in TypeScript server)
-      lspManager.saveFile(fullFilePath).catch((err: Error) => {
-        logForDebugging(
-          `LSP: Failed to notify server of file save for ${fullFilePath}: ${err.message}`,
+        let openedRead: ApprovedRead | null = null
+        let meta: ReturnType<typeof readFileSyncWithMetadata> | null = null
+        let oldContent: string | null = null
+        let contentToWrite = content
+        let memdirStamped = false
+        try {
+          if (
+            fileHistoryEnabled() &&
+            updateFileHistoryState &&
+            parentMessage?.uuid
+          ) {
+            await fileHistoryTrackEdit(
+              updateFileHistoryState,
+              fullFilePath,
+              parentMessage.uuid,
+            )
+          }
+
+          try {
+            openedRead = await openApprovedRead(fullFilePath, approved)
+            meta = readFileSyncWithMetadata(openedRead.ioPath)
+          } catch (e) {
+            if (isENOENT(e)) {
+              meta = null
+            } else if (e instanceof SymlinkResolutionChangedError) {
+              throw e
+            } else {
+              // Official 2.1.319 #1740: non-ENOENT read failure on an existing file
+              // is a recoverable tool error, NOT a turn-aborting refusal.
+              const rawMsg = e instanceof Error ? e.message : String(e)
+              const cleanMsg =
+                openedWrite.ioPath !== fullFilePath
+                  ? rawMsg.split(openedWrite.ioPath).join(fullFilePath)
+                  : rawMsg
+              const err = new Error(
+                `Could not read existing file ${file_path} before overwriting: ${cleanMsg}`,
+              )
+              err.name = 'ToolExecutionError'
+              throw err
+            }
+          }
+
+          if (meta !== null) {
+            const startOnlyRefusal = await checkWriteStartOnlyFile(
+              fullFilePath,
+              resolveToolUseContext(deps, callCtx) as StartOnlyContext,
+            )
+            if (startOnlyRefusal !== undefined) {
+              throw new Error(startOnlyRefusal.message)
+            }
+            const lastWriteTime = getFileModificationTime(fullFilePath)
+            const lastRead = readFileState.get(fullFilePath)
+            // densable 2.1.228 #17 call-path: missing/partial may pass when the same
+            // guardSkipped as validateInput would; true staleness still throws.
+            if (!lastRead || lastRead.isPartialView) {
+              if (
+                !shouldAllowCallDespiteMissingOrPartialRead(
+                  'write',
+                  fullFilePath,
+                  resolveToolUseContext(deps, callCtx),
+                  lastRead,
+                )
+              ) {
+                throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
+              }
+            } else if (
+              lastWriteTime > lastRead.timestamp &&
+              !(
+                isFullEnoughFileRead(lastRead) &&
+                fileStateContentMatches(lastRead, meta.content)
+              )
+            ) {
+              throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
+            }
+          }
+
+          if (meta?.notText) {
+            throw new Error(formatNonTextFileRefusal(meta.notText))
+          }
+
+          const enc = meta?.encoding ?? 'utf8'
+          oldContent = meta?.content ?? null
+
+          contentToWrite = stampNewMemoryContent(fullFilePath, content)
+          memdirStamped = contentToWrite !== content
+          contentToWrite = preserveBom(oldContent, contentToWrite)
+
+          await openedWrite.recheckBeforeWrite()
+          writeTextContent(openedWrite.ioPath, contentToWrite, enc, 'LF')
+        } finally {
+          await openedRead?.close()
+          await openedWrite.close()
+        }
+
+        // Notify LSP servers about file modification (didChange) and save (didSave)
+        const lspManager = getLspServerManager()
+        if (lspManager) {
+          // Clear previously delivered diagnostics so new ones will be shown
+          clearDeliveredDiagnosticsForFile(`file://${fullFilePath}`)
+          // didChange: Content has been modified
+          lspManager
+            .changeFile(fullFilePath, contentToWrite)
+            .catch((err: Error) => {
+              logForDebugging(
+                `LSP: Failed to notify server of file change for ${fullFilePath}: ${err.message}`,
+              )
+              logError(err)
+            })
+          // didSave: File has been saved to disk (triggers diagnostics in TypeScript server)
+          lspManager.saveFile(fullFilePath).catch((err: Error) => {
+            logForDebugging(
+              `LSP: Failed to notify server of file save for ${fullFilePath}: ${err.message}`,
+            )
+            logError(err)
+          })
+        }
+
+        // Notify VSCode about the file change for diff view
+        // densable EU(d, _?null:h, t): omit old when oversize
+        const omitLargeOld =
+          oldContent !== null &&
+          oldContent.length > WRITE_OMIT_OLD_CONTENT_CHARS
+        notifyVscodeFileUpdated(
+          fullFilePath,
+          omitLargeOld ? null : oldContent,
+          contentToWrite,
         )
-        logError(err)
-      })
-    }
 
-    // Notify VSCode about the file change for diff view
-    // densable EU(d, _?null:h, t): omit old when oversize
-    const omitLargeOld =
-      oldContent !== null && oldContent.length > WRITE_OMIT_OLD_CONTENT_CHARS
-    notifyVscodeFileUpdated(
-      fullFilePath,
-      omitLargeOld ? null : oldContent,
-      contentToWrite,
-    )
+        // Update read timestamp, to invalidate stale writes
+        readFileState.set(fullFilePath, {
+          content: contentToWrite,
+          timestamp: getFileModificationTime(fullFilePath),
+          offset: undefined,
+          limit: undefined,
+        })
 
-    // Update read timestamp, to invalidate stale writes
-    readFileState.set(fullFilePath, {
-      content: contentToWrite,
-      timestamp: getFileModificationTime(fullFilePath),
-      offset: undefined,
-      limit: undefined,
-    })
+        // Log when writing to CLAUDE.md
+        if (fullFilePath.endsWith(`${sep}CLAUDE.md`)) {
+          logEvent('tengu_write_claudemd', {})
+        }
 
-    // Log when writing to CLAUDE.md
-    if (fullFilePath.endsWith(`${sep}CLAUDE.md`)) {
-      logEvent('tengu_write_claudemd', {})
-    }
+        let gitDiff: ToolUseDiff | undefined
+        // Official REMOTE densable for remote git-diff side channel.
+        let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+        try {
+          const { isRemoteEnvEnabled } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
+          isRemote = isRemoteEnvEnabled()
+        } catch {
+          // keep raw env fallback
+        }
+        // densable: skip remote gitDiff when omit-large (`!_`)
+        if (
+          isRemote &&
+          !omitLargeOld &&
+          getFeatureValue_CACHED_MAY_BE_STALE('tengu_quartz_lantern', false)
+        ) {
+          const startTime = Date.now()
+          const diff = await fetchSingleFileGitDiff(fullFilePath)
+          if (diff) gitDiff = diff
+          logEvent('tengu_tool_use_diff_computed', {
+            isWriteTool: true,
+            durationMs: Date.now() - startTime,
+            hasDiff: !!diff,
+          })
+        }
 
-    let gitDiff: ToolUseDiff | undefined
-    // Official REMOTE densable for remote git-diff side channel.
-    let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
-    try {
-      const { isRemoteEnvEnabled } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
-      isRemote = isRemoteEnvEnabled()
-    } catch {
-      // keep raw env fallback
-    }
-    // densable: skip remote gitDiff when omit-large (`!_`)
-    if (
-      isRemote &&
-      !omitLargeOld &&
-      getFeatureValue_CACHED_MAY_BE_STALE('tengu_quartz_lantern', false)
-    ) {
-      const startTime = Date.now()
-      const diff = await fetchSingleFileGitDiff(fullFilePath)
-      if (diff) gitDiff = diff
-      logEvent('tengu_tool_use_diff_computed', {
-        isWriteTool: true,
-        durationMs: Date.now() - startTime,
-        hasDiff: !!diff,
-      })
-    }
+        if (oldContent) {
+          // densable `_`: length>TB → empty patch + null originalFile (still wrote)
+          const patch = omitLargeOld
+            ? []
+            : getFastPatchFromContents({
+                oldContent,
+                newContent: contentToWrite,
+                convertTabs: true,
+              })
 
-    if (oldContent) {
-      // densable `_`: length>TB → empty patch + null originalFile (still wrote)
-      const patch = omitLargeOld
-        ? []
-        : getFastPatchFromContents({
-            oldContent,
-            newContent: contentToWrite,
-            convertTabs: true,
+          const data = {
+            type: 'update' as const,
+            filePath: file_path,
+            content: contentToWrite,
+            structuredPatch: patch,
+            originalFile: omitLargeOld ? null : oldContent,
+            userModified: userModified ?? false,
+            memdirStamped,
+            ...(gitDiff && { gitDiff }),
+          }
+          // densable wme(v, model, _?t, _?h)
+          if (
+            omitLargeOld ||
+            (patch.length === 0 && oldContent !== contentToWrite)
+          ) {
+            countLinesChanged([], contentToWrite, oldContent)
+          } else {
+            countLinesChanged(patch)
+          }
+
+          logFileOperation({
+            operation: 'write',
+            tool: 'FileWriteTool',
+            filePath: fullFilePath,
+            type: 'update',
           })
 
-      const data = {
-        type: 'update' as const,
-        filePath: file_path,
-        content: contentToWrite,
-        structuredPatch: patch,
-        originalFile: omitLargeOld ? null : oldContent,
-        userModified: userModified ?? false,
-        memdirStamped,
-        ...(gitDiff && { gitDiff }),
-      }
-      // densable wme(v, model, _?t, _?h)
-      if (
-        omitLargeOld ||
-        (patch.length === 0 && oldContent !== contentToWrite)
-      ) {
-        countLinesChanged([], contentToWrite, oldContent)
-      } else {
-        countLinesChanged(patch)
-      }
+          return {
+            data,
+          }
+        }
 
-      logFileOperation({
-        operation: 'write',
-        tool: 'FileWriteTool',
-        filePath: fullFilePath,
-        type: 'update',
-      })
+        const data = {
+          type: 'create' as const,
+          filePath: file_path,
+          content: contentToWrite,
+          structuredPatch: [],
+          originalFile: null,
+          userModified: userModified ?? false,
+          memdirStamped,
+          ...(gitDiff && { gitDiff }),
+        }
 
-      return {
-        data,
-      }
-    }
+        // For creation of new files, count all lines as additions, right before yielding the result
+        countLinesChanged([], contentToWrite)
 
-    const data = {
-      type: 'create' as const,
-      filePath: file_path,
-      content: contentToWrite,
-      structuredPatch: [],
-      originalFile: null,
-      userModified: userModified ?? false,
-      memdirStamped,
-      ...(gitDiff && { gitDiff }),
-    }
+        logFileOperation({
+          operation: 'write',
+          tool: 'FileWriteTool',
+          filePath: fullFilePath,
+          type: 'create',
+        })
 
-    // For creation of new files, count all lines as additions, right before yielding the result
-    countLinesChanged([], contentToWrite)
-
-    logFileOperation({
-      operation: 'write',
-      tool: 'FileWriteTool',
-      filePath: fullFilePath,
-      type: 'create',
-    })
-
-    return {
-      data,
+        return {
+          data,
+        }
+      },
     }
   },
   mapToolResultToToolResultBlockParam(

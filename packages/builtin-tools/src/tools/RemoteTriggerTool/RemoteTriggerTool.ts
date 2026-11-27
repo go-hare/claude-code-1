@@ -2,7 +2,6 @@ import axios from 'axios'
 import { z } from 'zod/v4'
 import { getOauthConfig } from 'src/constants/oauth.js'
 import { getOrganizationUUID } from 'src/services/oauth/client.js'
-import type { ToolUseContext } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import type { PermissionResult } from 'src/types/permissions.js'
 import {
@@ -298,178 +297,184 @@ export const RemoteTriggerTool = buildTool({
   async prompt() {
     return PROMPT
   },
-  async checkPermissions(
-    input: Input,
-    context: ToolUseContext,
-  ): Promise<PermissionResult> {
-    if (context.getAppState().toolPermissionContext.mode === 'auto') {
-      return {
-        behavior: 'passthrough',
-        message: 'Remote trigger management requires classifier review.',
-      }
-    }
-    return { behavior: 'allow', updatedInput: input }
-  },
-  async call(input: Input, context: ToolUseContext) {
-    const auditBase = {
-      action: input.action,
-      ...(input.trigger_id ? { triggerId: input.trigger_id } : {}),
-    }
-    try {
-      await checkAndRefreshOAuthTokenIfNeeded()
-      const accessToken = getClaudeAIOAuthTokens()?.accessToken
-      if (!accessToken) {
-        throw new Error(
-          'Not authenticated with a claude.ai account. Run /login and try again.',
-        )
-      }
-      const orgUUID = await getOrganizationUUID()
-      if (!orgUUID) {
-        throw new Error('Unable to resolve organization UUID.')
-      }
-
-      const apiBase = getOauthConfig().BASE_API_URL
-      const triggersBase = `${apiBase}/v1/code/triggers`
-      const headers = {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'anthropic-version': '2023-06-01',
-        'anthropic-beta': TRIGGERS_BETA,
-        'x-organization-uuid': orgUUID,
-      }
-
-      const { action, trigger_id, session_id, cursor, body } = input
-      let method: 'GET' | 'POST'
-      let url: string
-      let data: unknown
-      switch (action) {
-        case 'list':
-          method = 'GET'
-          url = triggersBase
-          break
-        case 'get':
-          if (!trigger_id) throw new Error('get requires trigger_id')
-          method = 'GET'
-          url = `${triggersBase}/${trigger_id}`
-          break
-        case 'create':
-          if (!body) throw new Error('create requires body')
-          method = 'POST'
-          url = triggersBase
-          data = body
-          break
-        case 'update':
-          if (!trigger_id) throw new Error('update requires trigger_id')
-          if (!body) throw new Error('update requires body')
-          method = 'POST'
-          url = `${triggersBase}/${trigger_id}`
-          data = body
-          break
-        case 'create_webhook_trigger':
-          if (!body) throw new Error('create_webhook_trigger requires body')
-          method = 'POST'
-          url = `${apiBase}/v1/code/webhook-triggers`
-          data = body
-          break
-        case 'list_runs': {
-          if (!trigger_id) throw new Error('list_runs requires trigger_id')
-          const params = new URLSearchParams({
-            trigger_id,
-            limit: String(LIST_RUNS_LIMIT),
-            ...(cursor ? { cursor } : {}),
-          })
-          method = 'GET'
-          url = `${apiBase}/v1/code/sessions?${params}`
-          break
-        }
-        case 'get_run_log': {
-          if (!session_id) throw new Error('get_run_log requires session_id')
-          const params = new URLSearchParams({
-            limit: String(GET_RUN_LOG_LIMIT),
-            sort_order: 'desc',
-            ...(cursor ? { cursor } : {}),
-          })
-          method = 'GET'
-          url = `${apiBase}/v1/code/sessions/${encodeURIComponent(session_id)}/events?${params}`
-          break
-        }
-        case 'run': {
-          if (!trigger_id) throw new Error('run requires trigger_id')
-          method = 'POST'
-          url = `${triggersBase}/${trigger_id}/run`
-          if (body) {
-            const { trigger_id: _omit, ...rest } = body
-            data = rest
-          } else {
-            data = {}
+  create(deps) {
+    return {
+      async checkPermissions(input: Input): Promise<PermissionResult> {
+        if (deps.permissions().mode === 'auto') {
+          return {
+            behavior: 'passthrough',
+            message: 'Remote trigger management requires classifier review.',
           }
-          break
         }
-      }
-
-      const res = await axios.request({
-        method,
-        url,
-        headers,
-        data,
-        timeout: 20_000,
-        signal: context.abortController.signal,
-        validateStatus: () => true,
-      })
-      const audit = await appendRemoteTriggerAuditRecord({
-        ...auditBase,
-        ok: res.status >= 200 && res.status < 300,
-        status: res.status,
-      })
-
-      const ok = res.status >= 200 && res.status < 300
-      let json = jsonStringify(res.data)
-      let summary: string | undefined
-      if (action === 'list_runs' && ok && trigger_id) {
-        ;({ json, summary } = trimListRunsPage(res.data, trigger_id, cursor))
-      }
-      if (action === 'get_run_log' && ok && session_id) {
-        ;({ json, summary } = trimRunLogPage(res.data, session_id))
-      }
-      if (
-        ok &&
-        (action === 'create' || action === 'update' || action === 'get')
-      ) {
-        const origin = (
-          getOauthConfig().CLAUDE_AI_ORIGIN ?? 'https://claude.ai'
-        ).replace(/\/$/, '')
-        summary = summarizeTriggerResponse(res.data, origin)
-      }
-      if (ok && action === 'create') {
-        const mcpSummary = summarizeCreatedMcpConnections(res.data, body)
-        if (mcpSummary) {
-          summary = summary ? `${summary}\n${mcpSummary}` : mcpSummary
+        return { behavior: 'allow', updatedInput: input }
+      },
+      async call(input: Input, callCtx) {
+        const auditBase = {
+          action: input.action,
+          ...(input.trigger_id ? { triggerId: input.trigger_id } : {}),
         }
-      }
-      if (ok && action === 'create_webhook_trigger') {
-        const routineId = body?.routine_trigger_id
-        if (typeof routineId === 'string' && /^[\w-]+$/.test(routineId)) {
-          const origin =
-            getOauthConfig().CLAUDE_AI_ORIGIN ?? 'https://claude.ai'
-          summary = `→ Fires routine: ${origin.replace(/\/$/, '')}/code/routines/${routineId}`
-        }
-      }
+        try {
+          await checkAndRefreshOAuthTokenIfNeeded()
+          const accessToken = getClaudeAIOAuthTokens()?.accessToken
+          if (!accessToken) {
+            throw new Error(
+              'Not authenticated with a claude.ai account. Run /login and try again.',
+            )
+          }
+          const orgUUID = await getOrganizationUUID()
+          if (!orgUUID) {
+            throw new Error('Unable to resolve organization UUID.')
+          }
 
-      return {
-        data: {
-          status: res.status,
-          json,
-          ...(summary ? { summary } : {}),
-          audit_id: audit.auditId,
-        },
-      }
-    } catch (error) {
-      await appendRemoteTriggerAuditRecord({
-        ...auditBase,
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
-      })
-      throw error
+          const apiBase = getOauthConfig().BASE_API_URL
+          const triggersBase = `${apiBase}/v1/code/triggers`
+          const headers = {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+            'anthropic-version': '2023-06-01',
+            'anthropic-beta': TRIGGERS_BETA,
+            'x-organization-uuid': orgUUID,
+          }
+
+          const { action, trigger_id, session_id, cursor, body } = input
+          let method: 'GET' | 'POST'
+          let url: string
+          let data: unknown
+          switch (action) {
+            case 'list':
+              method = 'GET'
+              url = triggersBase
+              break
+            case 'get':
+              if (!trigger_id) throw new Error('get requires trigger_id')
+              method = 'GET'
+              url = `${triggersBase}/${trigger_id}`
+              break
+            case 'create':
+              if (!body) throw new Error('create requires body')
+              method = 'POST'
+              url = triggersBase
+              data = body
+              break
+            case 'update':
+              if (!trigger_id) throw new Error('update requires trigger_id')
+              if (!body) throw new Error('update requires body')
+              method = 'POST'
+              url = `${triggersBase}/${trigger_id}`
+              data = body
+              break
+            case 'create_webhook_trigger':
+              if (!body) throw new Error('create_webhook_trigger requires body')
+              method = 'POST'
+              url = `${apiBase}/v1/code/webhook-triggers`
+              data = body
+              break
+            case 'list_runs': {
+              if (!trigger_id) throw new Error('list_runs requires trigger_id')
+              const params = new URLSearchParams({
+                trigger_id,
+                limit: String(LIST_RUNS_LIMIT),
+                ...(cursor ? { cursor } : {}),
+              })
+              method = 'GET'
+              url = `${apiBase}/v1/code/sessions?${params}`
+              break
+            }
+            case 'get_run_log': {
+              if (!session_id)
+                throw new Error('get_run_log requires session_id')
+              const params = new URLSearchParams({
+                limit: String(GET_RUN_LOG_LIMIT),
+                sort_order: 'desc',
+                ...(cursor ? { cursor } : {}),
+              })
+              method = 'GET'
+              url = `${apiBase}/v1/code/sessions/${encodeURIComponent(session_id)}/events?${params}`
+              break
+            }
+            case 'run': {
+              if (!trigger_id) throw new Error('run requires trigger_id')
+              method = 'POST'
+              url = `${triggersBase}/${trigger_id}/run`
+              if (body) {
+                const { trigger_id: _omit, ...rest } = body
+                data = rest
+              } else {
+                data = {}
+              }
+              break
+            }
+          }
+
+          const res = await axios.request({
+            method,
+            url,
+            headers,
+            data,
+            timeout: 20_000,
+            signal: callCtx.signal,
+            validateStatus: () => true,
+          })
+          const audit = await appendRemoteTriggerAuditRecord({
+            ...auditBase,
+            ok: res.status >= 200 && res.status < 300,
+            status: res.status,
+          })
+
+          const ok = res.status >= 200 && res.status < 300
+          let json = jsonStringify(res.data)
+          let summary: string | undefined
+          if (action === 'list_runs' && ok && trigger_id) {
+            ;({ json, summary } = trimListRunsPage(
+              res.data,
+              trigger_id,
+              cursor,
+            ))
+          }
+          if (action === 'get_run_log' && ok && session_id) {
+            ;({ json, summary } = trimRunLogPage(res.data, session_id))
+          }
+          if (
+            ok &&
+            (action === 'create' || action === 'update' || action === 'get')
+          ) {
+            const origin = (
+              getOauthConfig().CLAUDE_AI_ORIGIN ?? 'https://claude.ai'
+            ).replace(/\/$/, '')
+            summary = summarizeTriggerResponse(res.data, origin)
+          }
+          if (ok && action === 'create') {
+            const mcpSummary = summarizeCreatedMcpConnections(res.data, body)
+            if (mcpSummary) {
+              summary = summary ? `${summary}\n${mcpSummary}` : mcpSummary
+            }
+          }
+          if (ok && action === 'create_webhook_trigger') {
+            const routineId = body?.routine_trigger_id
+            if (typeof routineId === 'string' && /^[\w-]+$/.test(routineId)) {
+              const origin =
+                getOauthConfig().CLAUDE_AI_ORIGIN ?? 'https://claude.ai'
+              summary = `→ Fires routine: ${origin.replace(/\/$/, '')}/code/routines/${routineId}`
+            }
+          }
+
+          return {
+            data: {
+              status: res.status,
+              json,
+              ...(summary ? { summary } : {}),
+              audit_id: audit.auditId,
+            },
+          }
+        } catch (error) {
+          await appendRemoteTriggerAuditRecord({
+            ...auditBase,
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          })
+          throw error
+        }
+      },
     }
   },
   mapToolResultToToolResultBlockParam(output, toolUseID) {

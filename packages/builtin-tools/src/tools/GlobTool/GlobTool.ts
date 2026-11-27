@@ -1,7 +1,13 @@
 import { isAbsolute } from 'path'
 import { z } from 'zod/v4'
-import type { ValidationResult } from 'src/Tool.js'
-import { buildTool, type ToolDef } from 'src/Tool.js'
+import {
+  buildTool,
+  isNativeToolDisabledInThisProcess,
+  type ToolDef,
+  type ToolDeps,
+  type ToolResult,
+  type ValidationResult,
+} from 'src/Tool.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { isENOENT } from 'src/utils/errors.js'
 import { FILE_NOT_FOUND_CWD_NOTE, suggestPathUnderCwd } from 'src/utils/file.js'
@@ -89,68 +95,13 @@ export const GlobTool = buildTool({
     return { isSearch: true, isRead: false }
   },
   getPath({ path }): string {
+    if (isNativeToolDisabledInThisProcess(GLOB_TOOL_NAME)) {
+      return path ?? ''
+    }
     return path ? expandPath(path) : getCwd()
   },
   async preparePermissionMatcher({ pattern }) {
     return rulePattern => matchWildcardPattern(rulePattern, pattern)
-  },
-  async validateInput(input): Promise<ValidationResult> {
-    // densable BT() && xd(n) — named host is not forwarded (errorCode 3)
-    const hostRefusal = remoteHostForwardRefusal(input, GLOB_TOOL_NAME)
-    if (hostRefusal) return { ...hostRefusal, errorCode: 3 }
-    const { path } = input
-    // If path is provided, validate that it exists and is a directory
-    if (path) {
-      const fs = getFsImplementation()
-      const absolutePath = expandPath(path)
-
-      // SECURITY: Skip filesystem operations for UNC paths to prevent NTLM credential leaks.
-      if (absolutePath.startsWith('\\\\') || absolutePath.startsWith('//')) {
-        return { result: true }
-      }
-
-      let stats
-      try {
-        stats = await fs.stat(absolutePath)
-      } catch (e: unknown) {
-        if (isENOENT(e)) {
-          const cwdSuggestion = await suggestPathUnderCwd(absolutePath)
-          let message = `Directory does not exist: ${path}. ${FILE_NOT_FOUND_CWD_NOTE} ${getCwd()}.`
-          if (cwdSuggestion) {
-            message += ` Did you mean ${cwdSuggestion}?`
-          }
-          return {
-            result: false,
-            message,
-            errorCode: 1,
-          }
-        }
-        throw e
-      }
-
-      if (!stats.isDirectory()) {
-        return {
-          result: false,
-          message: `Path is not a directory: ${path}`,
-          errorCode: 2,
-        }
-      }
-    }
-
-    return { result: true }
-  },
-  async checkPermissions(input, context): Promise<PermissionDecision> {
-    noteApprovedFileToolPath(GlobTool.getPath(input))
-    if (isAbsolute(input.pattern)) {
-      const { baseDir } = extractGlobBaseDirectory(input.pattern)
-      if (baseDir) noteApprovedFileToolPath(baseDir)
-    }
-    const appState = context.getAppState()
-    return checkReadPermissionForTool(
-      GlobTool,
-      input,
-      appState.toolPermissionContext,
-    )
   },
   async prompt() {
     return DESCRIPTION
@@ -163,27 +114,86 @@ export const GlobTool = buildTool({
   extractSearchText({ filenames }) {
     return filenames.join('\n')
   },
-  async call(input, { abortController, getAppState, globLimits }) {
-    const start = Date.now()
-    const appState = getAppState()
-    const limit = globLimits?.maxResults ?? 100
-    const { files, truncated } = await glob(
-      input.pattern,
-      GlobTool.getPath(input),
-      { limit, offset: 0 },
-      abortController.signal,
-      appState.toolPermissionContext,
-    )
-    // Relativize paths under cwd to save tokens (same as GrepTool)
-    const filenames = files.map(toRelativePath)
-    const output: Output = {
-      filenames,
-      durationMs: Date.now() - start,
-      numFiles: filenames.length,
-      truncated,
-    }
+  create(deps: ToolDeps) {
     return {
-      data: output,
+      async validateInput(input): Promise<ValidationResult> {
+        // densable BT() && xd(n) — named host is not forwarded (errorCode 3)
+        const hostRefusal = remoteHostForwardRefusal(input, GLOB_TOOL_NAME)
+        if (hostRefusal) return { ...hostRefusal, errorCode: 3 }
+        const { path } = input
+        // If path is provided, validate that it exists and is a directory
+        if (path) {
+          const fs = getFsImplementation()
+          const absolutePath = expandPath(path)
+
+          // SECURITY: Skip filesystem operations for UNC paths to prevent NTLM credential leaks.
+          if (
+            absolutePath.startsWith('\\\\') ||
+            absolutePath.startsWith('//')
+          ) {
+            return { result: true }
+          }
+
+          let stats
+          try {
+            stats = await fs.stat(absolutePath)
+          } catch (e: unknown) {
+            if (isENOENT(e)) {
+              const cwdSuggestion = await suggestPathUnderCwd(absolutePath)
+              let message = `Directory does not exist: ${path}. ${FILE_NOT_FOUND_CWD_NOTE} ${getCwd()}.`
+              if (cwdSuggestion) {
+                message += ` Did you mean ${cwdSuggestion}?`
+              }
+              return {
+                result: false,
+                message,
+                errorCode: 1,
+              }
+            }
+            throw e
+          }
+
+          if (!stats.isDirectory()) {
+            return {
+              result: false,
+              message: `Path is not a directory: ${path}`,
+              errorCode: 2,
+            }
+          }
+        }
+
+        return { result: true }
+      },
+      async checkPermissions(input): Promise<PermissionDecision> {
+        noteApprovedFileToolPath(GlobTool.getPath(input))
+        if (isAbsolute(input.pattern)) {
+          const { baseDir } = extractGlobBaseDirectory(input.pattern)
+          if (baseDir) noteApprovedFileToolPath(baseDir)
+        }
+        return checkReadPermissionForTool(GlobTool, input, deps.permissions())
+      },
+      async call(input, callCtx): Promise<ToolResult<Output>> {
+        const start = Date.now()
+        const limit = callCtx.globLimits?.maxResults ?? 100
+        const { files, truncated } = await glob(
+          input.pattern,
+          GlobTool.getPath(input),
+          { limit, offset: 0 },
+          callCtx.signal,
+          deps.permissions(),
+        )
+        // Relativize paths under cwd to save tokens (same as GrepTool)
+        const filenames = files.map(toRelativePath)
+        const output: Output = {
+          filenames,
+          durationMs: Date.now() - start,
+          numFiles: filenames.length,
+          truncated,
+        }
+        return {
+          data: output,
+        }
+      },
     }
   },
   mapToolResultToToolResultBlockParam(output, toolUseID) {

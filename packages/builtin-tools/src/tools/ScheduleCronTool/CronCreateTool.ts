@@ -1,8 +1,21 @@
 import { z } from 'zod/v4'
 import { setScheduledTasksEnabled } from 'src/bootstrap/state.js'
+import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js'
 import { isBuiltinPluginId } from 'src/plugins/builtinPlugins.js'
-import type { ToolUseContext, ValidationResult } from 'src/Tool.js'
-import { buildTool, type ToolDef } from 'src/Tool.js'
+import {
+  buildTool,
+  resolveToolUseContext,
+  type ToolCallContext,
+  type ToolCallExecutionOptions,
+  type ToolCallProgress,
+  type ToolDef,
+  type ToolDeps,
+  type ToolProgressData,
+  type ToolResult,
+  type ToolUseContext,
+  type ValidationResult,
+} from 'src/Tool.js'
+import type { AssistantMessage } from 'src/types/message.js'
 import { cronToHuman, parseCronExpression } from 'src/utils/cron.js'
 import { getCronJitterConfig } from 'src/utils/cronJitterConfig.js'
 import {
@@ -134,7 +147,20 @@ const outputSchema = lazySchema(() =>
 type OutputSchema = ReturnType<typeof outputSchema>
 export type CreateOutput = z.infer<OutputSchema>
 
-export const CronCreateTool = buildTool({
+function resolveCronPluginContext(
+  deps: ToolDeps,
+  callCtx: ToolCallContext,
+): CronPluginContext {
+  const raw = resolveToolUseContext(deps, callCtx) as CronPluginContext
+  return {
+    hookCaller: deps.hookCaller ?? raw.hookCaller,
+    hookServesModel: raw.hookServesModel,
+    pluginUnnamed: raw.pluginUnnamed,
+    scheduledByPlugin: raw.scheduledByPlugin,
+  }
+}
+
+const builtCronCreateTool = buildTool({
   name: CRON_CREATE_TOOL_NAME,
   searchHint: 'schedule a recurring or one-shot prompt',
   // densable 2.1.248 #1 Unt — official enablesCodeExecution:!0 @196753194
@@ -163,115 +189,115 @@ export const CronCreateTool = buildTool({
   getPath() {
     return getCronFilePath()
   },
-  async checkPermissions(input, context) {
-    if (context.getAppState().toolPermissionContext.mode === 'auto') {
-      return {
-        behavior: 'passthrough' as const,
-        message: 'Scheduling a cron prompt requires classifier review.',
-      }
-    }
-    return { behavior: 'allow' as const, updatedInput: input }
-  },
-  async validateInput(
-    input,
-    context?: ToolUseContext,
-  ): Promise<ValidationResult> {
-    if (
-      isUnnamedPluginScheduleRefused(context as CronPluginContext | undefined)
-    ) {
-      logForDebugging(
-        `CronCreate refused: ${UNNAMED_PLUGIN_SCHEDULE_REFUSED_MESSAGE}`,
-      )
-      return {
-        result: false,
-        message: UNNAMED_PLUGIN_SCHEDULE_REFUSED_MESSAGE,
-        errorCode: 5,
-      }
-    }
-    // ExecuteExtraTool passes raw params through without re-running this
-    // tool's inputSchema, so when the model uses a wrong field name (e.g.
-    // 'schedule' instead of 'cron'), input.cron is undefined. parseCronExpression
-    // would throw on .trim(undefined); catch here with a message that tells
-    // the model which field is actually required.
-    if (typeof input.cron !== 'string' || input.cron.length === 0) {
-      return {
-        result: false,
-        message:
-          "Missing required parameter 'cron' (5-field cron expression, e.g. '*/5 * * * *'). Check parameter names against the schema.",
-        errorCode: 1,
-      }
-    }
-    if (!parseCronExpression(input.cron)) {
-      return {
-        result: false,
-        message: `Invalid cron expression '${input.cron}'. Expected 5 fields: M H DoM Mon DoW.`,
-        errorCode: 1,
-      }
-    }
-    if (nextCronRunMs(input.cron, Date.now()) === null) {
-      return {
-        result: false,
-        message: `Cron expression '${input.cron}' does not match any calendar date in the next year.`,
-        errorCode: 2,
-      }
-    }
-    const tasks = await listAllCronTasks()
-    if (tasks.length >= MAX_JOBS) {
-      return {
-        result: false,
-        message: `Too many scheduled jobs (max ${MAX_JOBS}). Cancel one first.`,
-        errorCode: 3,
-      }
-    }
-    // Teammates don't persist across sessions, so a durable teammate cron
-    // would orphan on restart (agentId would point to a nonexistent teammate).
-    if (input.durable && getTeammateContext()) {
-      return {
-        result: false,
-        message:
-          'durable crons are not supported for teammates (teammates do not persist across sessions)',
-        errorCode: 4,
-      }
-    }
-    return { result: true }
-  },
-  async call(
-    { cron, prompt, recurring = true, durable = false },
-    context?: ToolUseContext,
-  ) {
-    // Kill switch forces session-only; schema stays stable so the model sees
-    // no validation errors when the gate flips mid-session.
-    const effectiveDurable = durable && isDurableCronEnabled()
-    const createdAt = Date.now()
-    const pluginProvenance = resolveCronPluginProvenance(
-      context as CronPluginContext | undefined,
-    )
-    const id = await addCronTask(
-      cron,
-      prompt,
-      recurring,
-      effectiveDurable,
-      getTeammateContext()?.agentId,
-      createdAt,
-      pluginProvenance,
-    )
-    const nextFireAt = nextScheduledFireAtMs(
-      { id, cron, createdAt, recurring },
-      getCronJitterConfig(),
-    )
-    // Enable the scheduler so the task fires in this session. The
-    // useScheduledTasks hook polls this flag and will start watching
-    // on the next tick. For durable: false tasks the file never changes
-    // — check() reads the session store directly — but the enable flag
-    // is still what starts the tick loop.
-    setScheduledTasksEnabled(true)
+  create(deps) {
     return {
-      data: {
-        id,
-        humanSchedule: cronToHuman(cron),
-        recurring,
-        durable: effectiveDurable,
-        ...(nextFireAt !== null && { nextFireAt }),
+      async checkPermissions(input) {
+        if (deps.permissions().mode === 'auto') {
+          return {
+            behavior: 'passthrough' as const,
+            message: 'Scheduling a cron prompt requires classifier review.',
+          }
+        }
+        return { behavior: 'allow' as const, updatedInput: input }
+      },
+      async validateInput(input, callCtx): Promise<ValidationResult> {
+        if (
+          isUnnamedPluginScheduleRefused(
+            resolveCronPluginContext(deps, callCtx),
+          )
+        ) {
+          logForDebugging(
+            `CronCreate refused: ${UNNAMED_PLUGIN_SCHEDULE_REFUSED_MESSAGE}`,
+          )
+          return {
+            result: false,
+            message: UNNAMED_PLUGIN_SCHEDULE_REFUSED_MESSAGE,
+            errorCode: 5,
+          }
+        }
+        // ExecuteExtraTool passes raw params through without re-running this
+        // tool's inputSchema, so when the model uses a wrong field name (e.g.
+        // 'schedule' instead of 'cron'), input.cron is undefined. parseCronExpression
+        // would throw on .trim(undefined); catch here with a message that tells
+        // the model which field is actually required.
+        if (typeof input.cron !== 'string' || input.cron.length === 0) {
+          return {
+            result: false,
+            message:
+              "Missing required parameter 'cron' (5-field cron expression, e.g. '*/5 * * * *'). Check parameter names against the schema.",
+            errorCode: 1,
+          }
+        }
+        if (!parseCronExpression(input.cron)) {
+          return {
+            result: false,
+            message: `Invalid cron expression '${input.cron}'. Expected 5 fields: M H DoM Mon DoW.`,
+            errorCode: 1,
+          }
+        }
+        if (nextCronRunMs(input.cron, Date.now()) === null) {
+          return {
+            result: false,
+            message: `Cron expression '${input.cron}' does not match any calendar date in the next year.`,
+            errorCode: 2,
+          }
+        }
+        const tasks = await listAllCronTasks()
+        if (tasks.length >= MAX_JOBS) {
+          return {
+            result: false,
+            message: `Too many scheduled jobs (max ${MAX_JOBS}). Cancel one first.`,
+            errorCode: 3,
+          }
+        }
+        // Teammates don't persist across sessions, so a durable teammate cron
+        // would orphan on restart (agentId would point to a nonexistent teammate).
+        if (input.durable && getTeammateContext()) {
+          return {
+            result: false,
+            message:
+              'durable crons are not supported for teammates (teammates do not persist across sessions)',
+            errorCode: 4,
+          }
+        }
+        return { result: true }
+      },
+      async call({ cron, prompt, recurring = true, durable = false }, callCtx) {
+        // Kill switch forces session-only; schema stays stable so the model sees
+        // no validation errors when the gate flips mid-session.
+        const effectiveDurable = durable && isDurableCronEnabled()
+        const createdAt = Date.now()
+        const pluginProvenance = resolveCronPluginProvenance(
+          resolveCronPluginContext(deps, callCtx),
+        )
+        const id = await addCronTask(
+          cron,
+          prompt,
+          recurring,
+          effectiveDurable,
+          getTeammateContext()?.agentId,
+          createdAt,
+          pluginProvenance,
+        )
+        const nextFireAt = nextScheduledFireAtMs(
+          { id, cron, createdAt, recurring },
+          getCronJitterConfig(),
+        )
+        // Enable the scheduler so the task fires in this session. The
+        // useScheduledTasks hook polls this flag and will start watching
+        // on the next tick. For durable: false tasks the file never changes
+        // — check() reads the session store directly — but the enable flag
+        // is still what starts the tick loop.
+        setScheduledTasksEnabled(true)
+        return {
+          data: {
+            id,
+            humanSchedule: cronToHuman(cron),
+            recurring,
+            durable: effectiveDurable,
+            ...(nextFireAt !== null && { nextFireAt }),
+          },
+        }
       },
     }
   },
@@ -294,3 +320,26 @@ export const CronCreateTool = buildTool({
   renderToolUseMessage: renderCreateToolUseMessage,
   renderToolResultMessage: renderCreateResultMessage,
 } satisfies ToolDef<InputSchema, CreateOutput>)
+
+export const CronCreateTool: Omit<typeof builtCronCreateTool, 'call'> & {
+  call(
+    args: z.infer<InputSchema>,
+    context?: ToolUseContext,
+    canUseTool?: CanUseToolFn,
+    parentMessage?: AssistantMessage,
+    onProgress?: ToolCallProgress<ToolProgressData>,
+    opts?: ToolCallExecutionOptions,
+  ): Promise<ToolResult<CreateOutput>>
+} = builtCronCreateTool as unknown as Omit<
+  typeof builtCronCreateTool,
+  'call'
+> & {
+  call(
+    args: z.infer<InputSchema>,
+    context?: ToolUseContext,
+    canUseTool?: CanUseToolFn,
+    parentMessage?: AssistantMessage,
+    onProgress?: ToolCallProgress<ToolProgressData>,
+    opts?: ToolCallExecutionOptions,
+  ): Promise<ToolResult<CreateOutput>>
+}

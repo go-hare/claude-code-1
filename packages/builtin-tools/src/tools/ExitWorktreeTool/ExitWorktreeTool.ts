@@ -12,8 +12,7 @@ import {
   logEvent,
 } from 'src/services/analytics/index.js'
 import type { TaskStateBase } from 'src/Task.js'
-import type { Tool } from 'src/Tool.js'
-import { buildTool, type ToolDef } from 'src/Tool.js'
+import { buildTool, type ToolDef, type ToolDeps } from 'src/Tool.js'
 import { count } from 'src/utils/array.js'
 import { clearMemoryFileCaches } from 'src/utils/claudemd.js'
 import { execFileNoThrow } from 'src/utils/execFileNoThrow.js'
@@ -244,15 +243,12 @@ const WAIT_TASK_NEXT =
  */
 async function inspectWorktreeUnsavedWork(
   session: NonNullable<ReturnType<typeof getCurrentWorktreeSession>>,
-  context?: {
-    getAppState: () => { tasks?: Record<string, TaskStateBase> }
-    agentId?: string
-  },
+  deps?: Pick<ToolDeps, 'tasks' | 'agentId'>,
 ): Promise<WorktreeUnsavedWorkFinding | null> {
   const activeTasks = findActiveWorktreeTasks(
-    context?.getAppState().tasks,
+    deps?.tasks(),
     session.worktreePath,
-    context?.agentId,
+    deps?.agentId,
   )
   if (activeTasks.length > 0) {
     const taskLabels = activeTasks
@@ -301,7 +297,7 @@ async function inspectWorktreeUnsavedWork(
   return null
 }
 
-export const ExitWorktreeTool: Tool<InputSchema, Output> = buildTool({
+export const ExitWorktreeTool = buildTool({
   name: EXIT_WORKTREE_TOOL_NAME,
   searchHint: 'exit a worktree session and return to the original directory',
   maxResultSizeChars: 100_000,
@@ -327,189 +323,200 @@ export const ExitWorktreeTool: Tool<InputSchema, Output> = buildTool({
   toAutoClassifierInput(input) {
     return input.action
   },
-  async validateInput(input, context) {
-    // Scope guard: getCurrentWorktreeSession() is null unless EnterWorktree
-    // (specifically createWorktreeForSession) ran in THIS session. Worktrees
-    // created by `git worktree add`, or by EnterWorktree in a previous
-    // session, do not populate it. This is the sole entry gate — everything
-    // past this point operates on a path EnterWorktree created.
-    const session = getCurrentWorktreeSession()
-    if (!session) {
-      return {
-        result: false,
-        message:
-          'No-op: there is no active EnterWorktree session to exit. This tool only operates on worktrees created by EnterWorktree in the current session — it will not touch worktrees created manually or in a previous session. No filesystem changes were made.',
-        errorCode: 1,
-      }
-    }
-
-    if (input.action === 'remove' && !input.discard_changes) {
-      const unsaved = await inspectWorktreeUnsavedWork(session, context)
-      if (unsaved !== null) {
-        return {
-          result: false,
-          message: `${unsaved.found} ${unsaved.next}`,
-          errorCode: unsaved.errorCode,
-        }
-      }
-    }
-
-    return { result: true }
-  },
-  // Official 2.1.327 (#498): ask before removing a worktree that may hold
-  // unsaved work, even when `discard_changes: true` was passed. Refused in
-  // dontAsk mode or when nobody can answer, unless a whole-tool allow rule,
-  // auto mode, or bypassPermissions allows it.
-  async checkPermissions(input, context): Promise<PermissionDecision> {
-    const session = getCurrentWorktreeSession()
-    if (!session && input.discard_changes) {
-      const reason = 'The session left its worktree before this call ran.'
-      return {
-        behavior: 'deny',
-        message: reason,
-        decisionReason: { type: 'other', reason },
-      }
-    }
-    const unsaved =
-      session && input.action === 'remove' && input.discard_changes
-        ? await inspectWorktreeUnsavedWork(session, context)
-        : null
-    if (unsaved === null) {
-      return { behavior: 'allow', updatedInput: input }
-    }
-    const message = unsaved.found.replace('Nothing was removed: task', 'Task')
-    return {
-      behavior: 'ask',
-      message,
-      decisionReason: { type: 'other', reason: message },
-      suppressAlwaysAllowRule: true,
-    } as PermissionDecision
-  },
   renderToolUseMessage,
   renderToolResultMessage,
-  async call(input, context) {
-    const session = getCurrentWorktreeSession()
-    if (!session) {
-      // validateInput guards this, but the session is host-scoped mutable
-      // state — defend against a race between validation and execution.
-      throw new Error('Not in a worktree session')
-    }
+  create(deps: ToolDeps) {
+    return {
+      async validateInput(input) {
+        // Scope guard: getCurrentWorktreeSession() is null unless EnterWorktree
+        // (specifically createWorktreeForSession) ran in THIS session. Worktrees
+        // created by `git worktree add`, or by EnterWorktree in a previous
+        // session, do not populate it. This is the sole entry gate — everything
+        // past this point operates on a path EnterWorktree created.
+        const session = getCurrentWorktreeSession()
+        if (!session) {
+          return {
+            result: false,
+            message:
+              'No-op: there is no active EnterWorktree session to exit. This tool only operates on worktrees created by EnterWorktree in the current session — it will not touch worktrees created manually or in a previous session. No filesystem changes were made.',
+            errorCode: 1,
+          }
+        }
 
-    // Capture before keepWorktree/cleanupWorktree null out currentWorktreeSession.
-    const {
-      originalCwd: recordedOriginalCwd,
-      worktreePath,
-      worktreeBranch,
-      tmuxSessionName,
-      originalHeadCommit,
-    } = session
-    // 2.1.323 #1988: If the directory the shell was in before entering the
-    // worktree has been deleted, resolve the nearest valid fallback directory
-    // so ExitWorktree does not leave the session in a deleted/wrong folder.
-    const { targetDir: originalCwd, fellBackFromDeletedOriginalCwd } =
-      resolveWorktreeExitTargetDir(session)
-    const deletedCwdNote = fellBackFromDeletedOriginalCwd
-      ? ` (previous directory ${recordedOriginalCwd} no longer exists)`
-      : ''
+        if (input.action === 'remove' && !input.discard_changes) {
+          const unsaved = await inspectWorktreeUnsavedWork(session, deps)
+          if (unsaved !== null) {
+            return {
+              result: false,
+              message: `${unsaved.found} ${unsaved.next}`,
+              errorCode: unsaved.errorCode,
+            }
+          }
+        }
 
-    // --worktree startup calls setOriginalCwd(getCwd()) and
-    // setProjectRoot(getCwd()) back-to-back right after setCwd(worktreePath)
-    // (setup.ts:235/239), so both hold the same realpath'd value and BashTool
-    // cd never touches either. Mid-session EnterWorktreeTool sets originalCwd
-    // but NOT projectRoot. (Can't use getCwd() — BashTool mutates it on every
-    // cd. Can't use session.worktreePath — it's join()'d, not realpath'd.)
-    const projectRootIsWorktree = getProjectRoot() === getOriginalCwd()
+        return { result: true }
+      },
+      // Official 2.1.327 (#498): ask before removing a worktree that may hold
+      // unsaved work, even when `discard_changes: true` was passed. Refused in
+      // dontAsk mode or when nobody can answer, unless a whole-tool allow rule,
+      // auto mode, or bypassPermissions allows it.
+      async checkPermissions(input): Promise<PermissionDecision> {
+        const session = getCurrentWorktreeSession()
+        if (!session && input.discard_changes) {
+          const reason = 'The session left its worktree before this call ran.'
+          return {
+            behavior: 'deny',
+            message: reason,
+            decisionReason: { type: 'other', reason },
+          }
+        }
+        const unsaved =
+          session && input.action === 'remove' && input.discard_changes
+            ? await inspectWorktreeUnsavedWork(session, deps)
+            : null
+        if (unsaved === null) {
+          return { behavior: 'allow', updatedInput: input }
+        }
+        const message = unsaved.found.replace(
+          'Nothing was removed: task',
+          'Task',
+        )
+        return {
+          behavior: 'ask',
+          message,
+          decisionReason: { type: 'other', reason: message },
+          suppressAlwaysAllowRule: true,
+        } as PermissionDecision
+      },
+      async call(input) {
+        const session = getCurrentWorktreeSession()
+        if (!session) {
+          // validateInput guards this, but the session is host-scoped mutable
+          // state — defend against a race between validation and execution.
+          throw new Error('Not in a worktree session')
+        }
 
-    // Re-count at execution time for accurate analytics and output — the
-    // worktree state at validateInput time may not match now. Null (git
-    // failure) falls back to 0/0; safety gating already happened in
-    // validateInput, so this only affects analytics + messaging.
-    const { changedFiles, commits } = (await countWorktreeChanges(
-      worktreePath,
-      originalHeadCommit,
-    )) ?? { changedFiles: 0, commits: 0 }
-
-    if (input.action === 'keep') {
-      // Official 2.1.326 #299: hold sandbox across worktree exit root move.
-      captureSandboxRootMoveHold()
-      await keepWorktree()
-      await restoreSessionToOriginalCwd(originalCwd, projectRootIsWorktree)
-
-      logEvent('tengu_worktree_kept', {
-        mid_session: true,
-        commits,
-        changed_files: changedFiles,
-      })
-
-      const tmuxNote = tmuxSessionName
-        ? ` Tmux session ${tmuxSessionName} is still running; reattach with: tmux attach -t ${tmuxSessionName}`
-        : ''
-      return {
-        data: {
-          action: 'keep' as const,
-          originalCwd,
+        // Capture before keepWorktree/cleanupWorktree null out currentWorktreeSession.
+        const {
+          originalCwd: recordedOriginalCwd,
           worktreePath,
           worktreeBranch,
           tmuxSessionName,
-          message: `Exited worktree. Your work is preserved at ${worktreePath}${worktreeBranch ? ` on branch ${worktreeBranch}` : ''}. Session is now back in ${originalCwd}${deletedCwdNote}.${tmuxNote}`,
-        },
-      }
-    }
+          originalHeadCommit,
+        } = session
+        // 2.1.323 #1988: If the directory the shell was in before entering the
+        // worktree has been deleted, resolve the nearest valid fallback directory
+        // so ExitWorktree does not leave the session in a deleted/wrong folder.
+        const { targetDir: originalCwd, fellBackFromDeletedOriginalCwd } =
+          resolveWorktreeExitTargetDir(session)
+        const deletedCwdNote = fellBackFromDeletedOriginalCwd
+          ? ` (previous directory ${recordedOriginalCwd} no longer exists)`
+          : ''
 
-    // action === 'remove'
-    if (tmuxSessionName) {
-      await killTmuxSession(tmuxSessionName)
-    }
-    // Official 2.1.326 #299: hold sandbox across worktree exit root move.
-    captureSandboxRootMoveHold()
-    const removed = await cleanupWorktree({
-      storageV5: context.storageV5,
-      credentials: context.credentials,
-    })
-    await restoreSessionToOriginalCwd(originalCwd, projectRootIsWorktree)
+        // --worktree startup calls setOriginalCwd(getCwd()) and
+        // setProjectRoot(getCwd()) back-to-back right after setCwd(worktreePath)
+        // (setup.ts:235/239), so both hold the same realpath'd value and BashTool
+        // cd never touches either. Mid-session EnterWorktreeTool sets originalCwd
+        // but NOT projectRoot. (Can't use getCwd() — BashTool mutates it on every
+        // cd. Can't use session.worktreePath — it's join()'d, not realpath'd.)
+        const projectRootIsWorktree = getProjectRoot() === getOriginalCwd()
 
-    if (!removed) {
-      return {
-        data: {
-          action: 'remove' as const,
-          originalCwd,
+        // Re-count at execution time for accurate analytics and output — the
+        // worktree state at validateInput time may not match now. Null (git
+        // failure) falls back to 0/0; safety gating already happened in
+        // validateInput, so this only affects analytics + messaging.
+        const { changedFiles, commits } = (await countWorktreeChanges(
           worktreePath,
-          worktreeBranch,
-          discardedFiles: 0,
-          discardedCommits: 0,
-          message: `Exited worktree but could not remove it — kept at ${worktreePath}. Session is now back in ${originalCwd}.`,
-        },
-      }
-    }
+          originalHeadCommit,
+        )) ?? { changedFiles: 0, commits: 0 }
 
-    logEvent('tengu_worktree_removed', {
-      source:
-        'exit_tool' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      mid_session: true,
-      commits,
-      changed_files: changedFiles,
-    })
+        if (input.action === 'keep') {
+          // Official 2.1.326 #299: hold sandbox across worktree exit root move.
+          captureSandboxRootMoveHold()
+          await keepWorktree()
+          await restoreSessionToOriginalCwd(originalCwd, projectRootIsWorktree)
 
-    const discardParts: string[] = []
-    if (commits > 0) {
-      discardParts.push(`${commits} ${commits === 1 ? 'commit' : 'commits'}`)
-    }
-    if (changedFiles > 0) {
-      discardParts.push(
-        `${changedFiles} uncommitted ${changedFiles === 1 ? 'file' : 'files'}`,
-      )
-    }
-    const discardNote =
-      discardParts.length > 0 ? ` Discarded ${discardParts.join(' and ')}.` : ''
-    return {
-      data: {
-        action: 'remove' as const,
-        originalCwd,
-        worktreePath,
-        worktreeBranch,
-        discardedFiles: changedFiles,
-        discardedCommits: commits,
-        message: `Exited and removed worktree at ${worktreePath}.${discardNote} Session is now back in ${originalCwd}.`,
+          logEvent('tengu_worktree_kept', {
+            mid_session: true,
+            commits,
+            changed_files: changedFiles,
+          })
+
+          const tmuxNote = tmuxSessionName
+            ? ` Tmux session ${tmuxSessionName} is still running; reattach with: tmux attach -t ${tmuxSessionName}`
+            : ''
+          return {
+            data: {
+              action: 'keep' as const,
+              originalCwd,
+              worktreePath,
+              worktreeBranch,
+              tmuxSessionName,
+              message: `Exited worktree. Your work is preserved at ${worktreePath}${worktreeBranch ? ` on branch ${worktreeBranch}` : ''}. Session is now back in ${originalCwd}${deletedCwdNote}.${tmuxNote}`,
+            },
+          }
+        }
+
+        // action === 'remove'
+        if (tmuxSessionName) {
+          await killTmuxSession(tmuxSessionName)
+        }
+        // Official 2.1.326 #299: hold sandbox across worktree exit root move.
+        captureSandboxRootMoveHold()
+        const removed = await cleanupWorktree({
+          storageV5: deps.storageV5,
+          credentials: deps.credentials,
+        })
+        await restoreSessionToOriginalCwd(originalCwd, projectRootIsWorktree)
+
+        if (!removed) {
+          return {
+            data: {
+              action: 'remove' as const,
+              originalCwd,
+              worktreePath,
+              worktreeBranch,
+              discardedFiles: 0,
+              discardedCommits: 0,
+              message: `Exited worktree but could not remove it — kept at ${worktreePath}. Session is now back in ${originalCwd}.`,
+            },
+          }
+        }
+
+        logEvent('tengu_worktree_removed', {
+          source:
+            'exit_tool' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          mid_session: true,
+          commits,
+          changed_files: changedFiles,
+        })
+
+        const discardParts: string[] = []
+        if (commits > 0) {
+          discardParts.push(
+            `${commits} ${commits === 1 ? 'commit' : 'commits'}`,
+          )
+        }
+        if (changedFiles > 0) {
+          discardParts.push(
+            `${changedFiles} uncommitted ${changedFiles === 1 ? 'file' : 'files'}`,
+          )
+        }
+        const discardNote =
+          discardParts.length > 0
+            ? ` Discarded ${discardParts.join(' and ')}.`
+            : ''
+        return {
+          data: {
+            action: 'remove' as const,
+            originalCwd,
+            worktreePath,
+            worktreeBranch,
+            discardedFiles: changedFiles,
+            discardedCommits: commits,
+            message: `Exited and removed worktree at ${worktreePath}.${discardNote} Session is now back in ${originalCwd}.`,
+          },
+        }
       },
     }
   },

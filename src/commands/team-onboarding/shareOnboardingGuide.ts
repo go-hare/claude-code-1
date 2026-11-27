@@ -304,9 +304,13 @@ export const ShareOnboardingGuideTool = buildTool({
     }
     return input.mode && input.mode !== 'check' ? input.mode : null
   },
-  async call(input) {
-    const data = await runShareOnboardingGuide(input)
-    return { data }
+  create() {
+    return {
+      async call(input) {
+        const data = await runShareOnboardingGuide(input)
+        return { data }
+      },
+    }
   },
   mapToolResultToToolResultBlockParam(
     output: ShareOnboardingGuideResult,

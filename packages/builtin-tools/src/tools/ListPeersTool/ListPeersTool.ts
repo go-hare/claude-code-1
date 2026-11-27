@@ -6,8 +6,12 @@
  * Local discovery: UDS + local registry bridge + account bridge walk + cloud walk.
  */
 import { z } from 'zod/v4'
-import { toolMatchesName, type ToolResultBlockParam } from 'src/Tool.js'
-import { buildTool } from 'src/Tool.js'
+import {
+  buildTool,
+  type ToolDeps,
+  toolMatchesName,
+  type ToolResultBlockParam,
+} from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js'
 import { listAgentsIncompleteNotes } from 'src/utils/sessionListIncompleteCopy.js'
@@ -443,70 +447,11 @@ export const __test = {
   resolvePeerStatusLabel,
 }
 
-export const ListAgentsTool = buildTool({
-  name: LIST_AGENTS_TOOL_NAME,
-  // densable aliases:[qWu]
-  aliases: [LIST_PEERS_LEGACY_TOOL_NAME],
-  searchHint: 'list agents you can SendMessage to',
-  maxResultSizeChars: LIST_AGENTS_MAX_RESULT_CHARS,
-  strict: true,
-
-  get inputSchema(): InputSchema {
-    return inputSchema()
-  },
-
-  toAutoClassifierInput(_input: ListAgentsInput) {
-    return 'list agents'
-  },
-
-  async description(
-    _input?: ListAgentsInput,
-    context?: { tools?: readonly { name: string; aliases?: string[] }[] },
-  ) {
-    const tools = context?.tools
-    const canSendMessages = tools
-      ? tools.some(t => toolMatchesName(t, SEND_MESSAGE_TOOL_NAME))
-      : true
-    return getListAgentsPrompt({ canSendMessages })
-  },
-  async prompt(context?: {
-    tools?: readonly { name: string; aliases?: string[] }[]
-  }) {
-    const tools = context?.tools
-    const canSendMessages = tools
-      ? tools.some(t => toolMatchesName(t, SEND_MESSAGE_TOOL_NAME))
-      : true
-    return getListAgentsPrompt({ canSendMessages })
-  },
-
-  isConcurrencySafe() {
-    return true
-  },
-  isReadOnly() {
-    return true
-  },
-
-  userFacingName() {
-    return LIST_AGENTS_TOOL_NAME
-  },
-
-  // densable renderToolUseMessage(){return null}
-  renderToolUseMessage() {
-    return null
-  },
-
-  mapToolResultToToolResultBlockParam(
-    content: ListAgentsOutput,
-    toolUseID: string,
-  ): ToolResultBlockParam {
-    return {
-      tool_use_id: toolUseID,
-      type: 'tool_result',
-      content: content.listing,
-    }
-  },
-
-  async call(input: ListAgentsInput, context) {
+const listAgentsRuntime = {
+  async call(
+    input: ListAgentsInput,
+    deps: ToolDeps,
+  ): Promise<{ data: ListAgentsOutput }> {
     // Official 2.1.328 (#440): validate input.cursor BEFORE doing any peer
     // lookups so callers immediately know no agents were looked up.
     const cursorToken = input.cursor?.trim() || undefined
@@ -635,26 +580,31 @@ export const ListAgentsTool = buildTool({
     /* eslint-enable @typescript-eslint/no-require-imports */
 
     // densable SRl(t, g5(t)) — leftover maps official tool-context fields
-    // (e.teammateContext / e.agentContext) from ALS + context.agentId.
+    // (e.teammateContext / e.agentContext) from ALS + deps.agentId.
     // DHm reads QV() (`getRegisteredSessionName`).
     const self = describeOwnSession(
       callerIsSubagentFromContext({
         teammateContext: getTeammateContext(),
         agentContext:
           getAgentContext() ??
-          (context.agentId ? { agentType: 'subagent' } : undefined),
+          (deps.agentId ? { agentType: 'subagent' } : undefined),
       }),
     )
 
     // densable SRl / OHm / Z1w / MHm / J1w / GCe — live listing
     let teammatesSection: string | null = null
     let subagentsSection: string | null = null
-    const appState = context.getAppState()
+    const baseAppState = deps.getAppState()
+    const explicitTasks = deps.tasks()
+    const appState =
+      baseAppState?.tasks === explicitTasks
+        ? baseAppState
+        : { ...baseAppState, tasks: explicitTasks }
     const teamName = appState.teamContext?.teamName
     const teamFile = teamName ? await readTeamFileAsync(teamName) : null
     const callerTeammateId = callerTeammateIdFromContext(
       getTeammateContext(),
-      getAgentContext()?.agentId ?? context.agentId,
+      getAgentContext()?.agentId ?? deps.agentId,
     )
     const teammateRows = listTeammatesForListing(
       appState,
@@ -754,6 +704,78 @@ export const ListAgentsTool = buildTool({
           subagentsSection,
           candidates,
         }),
+      },
+    }
+  },
+}
+
+export const ListAgentsTool = buildTool({
+  name: LIST_AGENTS_TOOL_NAME,
+  // densable aliases:[qWu]
+  aliases: [LIST_PEERS_LEGACY_TOOL_NAME],
+  searchHint: 'list agents you can SendMessage to',
+  maxResultSizeChars: LIST_AGENTS_MAX_RESULT_CHARS,
+  strict: true,
+
+  get inputSchema(): InputSchema {
+    return inputSchema()
+  },
+
+  toAutoClassifierInput(_input: ListAgentsInput) {
+    return 'list agents'
+  },
+
+  async description(
+    _input?: ListAgentsInput,
+    context?: { tools?: readonly { name: string; aliases?: string[] }[] },
+  ) {
+    const tools = context?.tools
+    const canSendMessages = tools
+      ? tools.some(t => toolMatchesName(t, SEND_MESSAGE_TOOL_NAME))
+      : true
+    return getListAgentsPrompt({ canSendMessages })
+  },
+  async prompt(context?: {
+    tools?: readonly { name: string; aliases?: string[] }[]
+  }) {
+    const tools = context?.tools
+    const canSendMessages = tools
+      ? tools.some(t => toolMatchesName(t, SEND_MESSAGE_TOOL_NAME))
+      : true
+    return getListAgentsPrompt({ canSendMessages })
+  },
+
+  isConcurrencySafe() {
+    return true
+  },
+  isReadOnly() {
+    return true
+  },
+
+  userFacingName() {
+    return LIST_AGENTS_TOOL_NAME
+  },
+
+  // densable renderToolUseMessage(){return null}
+  renderToolUseMessage() {
+    return null
+  },
+
+  mapToolResultToToolResultBlockParam(
+    content: ListAgentsOutput,
+    toolUseID: string,
+  ): ToolResultBlockParam {
+    return {
+      tool_use_id: toolUseID,
+      type: 'tool_result',
+      content: content.listing,
+    }
+  },
+
+  create(deps: ToolDeps) {
+    return {
+      call(input: ListAgentsInput) {
+        return listAgentsRuntime.call(input, deps)
       },
     }
   },

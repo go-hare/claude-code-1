@@ -9,8 +9,16 @@ import {
   formatUnreachableElevatedRefusal,
   isRemoteControlPeerUnreachableFromHere,
 } from 'src/bridge/trustedDevice.js'
-import type { Tool, ToolUseContext } from 'src/Tool.js'
-import { buildTool, type ToolDef } from 'src/Tool.js'
+import {
+  buildTool,
+  createDefaultCanUseTool,
+  resolveToolUseContext,
+  type Tool,
+  type ToolCallContext,
+  type ToolDef,
+  type ToolDeps,
+  type ToolUseContext,
+} from 'src/Tool.js'
 import { findTeammateTaskByAgentId } from 'src/tasks/InProcessTeammateTask/InProcessTeammateTask.js'
 import {
   isLocalAgentTask,
@@ -974,28 +982,28 @@ function emitUdsBlankGate(route: 'uds', errorClass: string): void {
 
 function classifyUdsIdleFlags(
   input: unknown,
-  context: ToolUseContext,
+  deps: Pick<ToolDeps, 'agentId'>,
 ): { notify: boolean; refusedForPrincipal: boolean } {
   const wanted = wantsNotifyWhenIdle(input)
-  const refusedForPrincipal =
-    wanted && isNotifyWhenIdlePrincipalRefused(context)
+  const refusedForPrincipal = wanted && isNotifyWhenIdlePrincipalRefused(deps)
   return { notify: wanted && !refusedForPrincipal, refusedForPrincipal }
 }
 
 function applyUdsBlankMessageGate(
   input: unknown,
   plainMessage: string,
-  context: ToolUseContext,
+  deps: Pick<ToolDeps, 'agentId'>,
+  toolUseId: string | undefined,
   assistantMessage: { message?: { content?: unknown } } | undefined,
 ): UdsBlankGateResult | undefined {
-  const flags = classifyUdsIdleFlags(input, context)
+  const flags = classifyUdsIdleFlags(input, deps)
   return udsBlankMessageGate({
     input,
     plainMessage,
     notify: flags.notify,
     refusedForPrincipal: flags.refusedForPrincipal,
     assistantMessage,
-    toolUseId: context.toolUseId,
+    toolUseId,
     emit: emitUdsBlankGate,
   })
 }
@@ -1010,7 +1018,9 @@ function appendHandlerStrippedIdleNote(message: string): string {
 }
 
 /** densable VRi — main conversation only (not subagent / teammate). */
-function isNotifyWhenIdlePrincipalRefused(context: ToolUseContext): boolean {
+function isNotifyWhenIdlePrincipalRefused(
+  context: Pick<ToolDeps, 'agentId'>,
+): boolean {
   if (context.agentId !== undefined) return true
   if (getAgentContext()?.agentType === 'teammate') return true
   if (isTeammate()) return true
@@ -1030,7 +1040,7 @@ async function maybeSubscribePeerIdle(opts: {
   socketPath: string
   displayLabel?: string
   fromMode?: 'bypass' | 'prompting'
-  context: ToolUseContext
+  context: Pick<ToolDeps, 'agentId'>
 }): Promise<{
   ok: boolean
   modelLine: string
@@ -1170,7 +1180,7 @@ export function resolveSenderDisplayName(
   }
 
   const appState = context.getAppState()
-  for (const [name, id] of appState.agentNameRegistry) {
+  for (const [name, id] of appState.agentNameRegistry ?? []) {
     if (id === senderAgentId) return { from: name, displayName: name }
   }
   const task = appState.tasks[senderAgentId]
@@ -1654,9 +1664,9 @@ async function tryDeliverToLocalAgent(
   }
   const appState = context.getAppState()
   const parsedTo = parseNameRef(to)
-  const registeredExact = appState.agentNameRegistry.get(to)
+  const registeredExact = appState.agentNameRegistry?.get(to)
   const registeredBare = parsedTo
-    ? appState.agentNameRegistry.get(parsedTo.name)
+    ? appState.agentNameRegistry?.get(parsedTo.name)
     : undefined
   // `Name [ref]` only stays local when the ref matches this subagent.
   // Otherwise fall through so a UDS/bridge peer with that listing ref wins.
@@ -1931,100 +1941,130 @@ async function handlePlanRejection(
   }
 }
 
-export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
-  buildTool({
-    name: SEND_MESSAGE_TOOL_NAME,
-    searchHint: 'send messages to agent teammates',
-    maxResultSizeChars: 100_000,
+export const SendMessageTool = buildTool({
+  name: SEND_MESSAGE_TOOL_NAME,
+  searchHint: 'send messages to agent teammates',
+  maxResultSizeChars: 100_000,
 
-    userFacingName() {
-      return 'SendMessage'
-    },
+  userFacingName() {
+    return 'SendMessage'
+  },
 
-    get inputSchema(): InputSchema {
-      // densable FTl: rg()=UDS_INBOX, xd()=isAgentSwarmsEnabled
-      if (feature('UDS_INBOX')) {
-        return (
-          isAgentSwarmsEnabled()
-            ? sendMessageInputSchemaUdsTeams()
-            : sendMessageInputSchemaUdsPlain()
-        ) as InputSchema
-      }
+  get inputSchema(): InputSchema {
+    // densable FTl: rg()=UDS_INBOX, xd()=isAgentSwarmsEnabled
+    if (feature('UDS_INBOX')) {
       return (
         isAgentSwarmsEnabled()
-          ? sendMessageInputSchemaTeams()
-          : sendMessageInputSchemaPlain()
+          ? sendMessageInputSchemaUdsTeams()
+          : sendMessageInputSchemaUdsPlain()
       ) as InputSchema
-    },
-    shouldDefer: true,
+    }
+    return (
+      isAgentSwarmsEnabled()
+        ? sendMessageInputSchemaTeams()
+        : sendMessageInputSchemaPlain()
+    ) as InputSchema
+  },
+  shouldDefer: true,
 
-    isEnabled() {
-      return true
-    },
+  isEnabled() {
+    return true
+  },
 
-    isReadOnly(input) {
-      return typeof input.message === 'string'
-    },
+  isReadOnly(input) {
+    return typeof input.message === 'string'
+  },
 
-    // densable vMi — coerceInput:(e)=>vMi(e,{applySplit:QTl()})
-    coerceInput: input =>
-      coerceSendMessageInput(input, {
-        applySplit: isSlippedSummarySplitEnabled(),
-      }),
+  // densable vMi — coerceInput:(e)=>vMi(e,{applySplit:QTl()})
+  coerceInput: input =>
+    coerceSendMessageInput(input, {
+      applySplit: isSlippedSummarySplitEnabled(),
+    }),
 
-    // densable xKg.backfillObservableInput: content/reason/feedback via Bs(…, 50)
-    // so telemetry / observable clones never carry the full message body.
-    backfillObservableInput(input) {
-      if (typeof input.to !== 'string') return
+  // densable xKg.backfillObservableInput: content/reason/feedback via Bs(…, 50)
+  // so telemetry / observable clones never carry the full message body.
+  backfillObservableInput(input) {
+    if (typeof input.to !== 'string') return
 
-      redactObservableInlineUdsToken(input as { to: string })
-      if ('type' in input) return
-      // densable bMi: skip observable backfill on a repaired slipped summary
-      // (message still empty; type=message would preview the unsplit blob).
-      if (getRepairedSlippedSummarySplit(input) !== undefined) return
+    redactObservableInlineUdsToken(input as { to: string })
+    if ('type' in input) return
+    // densable bMi: skip observable backfill on a repaired slipped summary
+    // (message still empty; type=message would preview the unsplit blob).
+    if (getRepairedSlippedSummarySplit(input) !== undefined) return
 
-      if (input.to === '*') {
-        input.type = 'broadcast'
-        if (typeof input.message === 'string') {
-          input.content = truncate(input.message, 50)
-        }
-      } else if (typeof input.message === 'string') {
-        input.type = 'message'
-        input.recipient = recipientForDisplay(input.to)
-        input.content = truncate(input.message, 50)
-      } else if (typeof input.message === 'object' && input.message !== null) {
-        const msg = input.message as {
-          type?: string
-          request_id?: string
-          approve?: boolean
-          reason?: string
-          feedback?: string
-        }
-        input.type = msg.type
-        input.recipient = recipientForDisplay(input.to)
-        if (msg.request_id !== undefined) input.request_id = msg.request_id
-        if (msg.approve !== undefined) input.approve = msg.approve
-        const content = msg.reason ?? msg.feedback
-        if (content !== undefined) input.content = truncate(content, 50)
-      }
-    },
-
-    toAutoClassifierInput(input) {
-      const recipient = recipientForDisplay(input.to)
+    if (input.to === '*') {
+      input.type = 'broadcast'
       if (typeof input.message === 'string') {
-        return `to ${recipient}: ${input.message}`
+        input.content = truncate(input.message, 50)
       }
-      switch (input.message.type) {
-        case 'shutdown_request':
-          return `shutdown_request to ${recipient}`
-        case 'shutdown_response':
-          return `shutdown_response ${input.message.approve ? 'approve' : 'reject'} ${input.message.request_id}`
-        case 'plan_approval_response':
-          return `plan_approval ${input.message.approve ? 'approve' : 'reject'} to ${recipient}`
+    } else if (typeof input.message === 'string') {
+      input.type = 'message'
+      input.recipient = recipientForDisplay(input.to)
+      input.content = truncate(input.message, 50)
+    } else if (typeof input.message === 'object' && input.message !== null) {
+      const msg = input.message as {
+        type?: string
+        request_id?: string
+        approve?: boolean
+        reason?: string
+        feedback?: string
       }
-    },
+      input.type = msg.type
+      input.recipient = recipientForDisplay(input.to)
+      if (msg.request_id !== undefined) input.request_id = msg.request_id
+      if (msg.approve !== undefined) input.approve = msg.approve
+      const content = msg.reason ?? msg.feedback
+      if (content !== undefined) input.content = truncate(content, 50)
+    }
+  },
 
-    async checkPermissions(input, context) {
+  toAutoClassifierInput(input) {
+    const recipient = recipientForDisplay(input.to)
+    if (typeof input.message === 'string') {
+      return `to ${recipient}: ${input.message}`
+    }
+    switch (input.message.type) {
+      case 'shutdown_request':
+        return `shutdown_request to ${recipient}`
+      case 'shutdown_response':
+        return `shutdown_response ${input.message.approve ? 'approve' : 'reject'} ${input.message.request_id}`
+      case 'plan_approval_response':
+        return `plan_approval ${input.message.approve ? 'approve' : 'reject'} to ${recipient}`
+    }
+  },
+
+  async description() {
+    return DESCRIPTION
+  },
+
+  async prompt() {
+    return getPrompt(isAgentSwarmsEnabled())
+  },
+
+  mapToolResultToToolResultBlockParam(data, toolUseID) {
+    return {
+      tool_use_id: toolUseID,
+      type: 'tool_result' as const,
+      content: [
+        {
+          type: 'text' as const,
+          text: jsonStringify(data),
+        },
+      ],
+    }
+  },
+
+  create(deps: ToolDeps) {
+    return createSendMessageInstance(deps)
+  },
+
+  renderToolUseMessage,
+  renderToolResultMessage,
+} satisfies ToolDef<InputSchema, SendMessageToolOutput>)
+
+function createSendMessageInstance(deps: ToolDeps) {
+  return {
+    async checkPermissions(input: Input) {
       // Local safety (feature-gated OFF by default): bridge/LAN still ask.
       // densable SEA core for SendMessage is only Pjs passthrough — no bridge/LAN.
       if (feature('UDS_INBOX') && parseAddress(input.to).scheme === 'bridge') {
@@ -2034,7 +2074,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             behavior: 'deny' as const,
             message: formatUnreachableElevatedRefusal(input.to),
             decisionReason: {
-              type: 'other',
+              type: 'other' as const,
               reason:
                 'target is an elevated-security session unreachable from a cloud session',
             },
@@ -2044,7 +2084,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           behavior: 'ask' as const,
           message: `Send a message to Remote Control session ${input.to}? It arrives as a user prompt on the receiving Claude (possibly another machine) via Anthropic's servers.`,
           decisionReason: {
-            type: 'safetyCheck',
+            type: 'safetyCheck' as const,
             reason:
               'Cross-machine bridge message requires explicit user consent',
             classifierApprovable: false,
@@ -2056,14 +2096,14 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           behavior: 'ask' as const,
           message: `Send a message to LAN peer ${input.to}? This connects directly over TCP to a machine on your local network.`,
           decisionReason: {
-            type: 'safetyCheck',
+            type: 'safetyCheck' as const,
             reason: 'Cross-machine LAN message requires explicit user consent',
             classifierApprovable: false,
           },
         }
       }
       // densable Pjs(mode): auto || (plan && isAutoModeActive) → classifier passthrough
-      const mode = context.getAppState().toolPermissionContext.mode
+      const mode = deps.permissions().mode
       if (mode === 'auto' || (mode === 'plan' && isAutoModeActive())) {
         return {
           behavior: 'passthrough' as const,
@@ -2073,11 +2113,11 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
       return { behavior: 'allow' as const, updatedInput: input }
     },
 
-    async validateInput(input, context) {
+    async validateInput(input: Input) {
       // densable 2.1.289: e.to==="*" refuse — broadcast is gone.
       if (input.to === '*') {
         return {
-          result: false,
+          result: false as const,
           message:
             'broadcast (to: "*") is no longer supported — send a message per recipient',
           errorCode: 9,
@@ -2087,7 +2127,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
       const qei = validateSendMessageTo(input.to, LIST_AGENTS_TOOL_NAME)
       if (qei !== undefined) {
         return {
-          result: false,
+          result: false as const,
           message: qei,
           errorCode: 9,
         }
@@ -2098,11 +2138,11 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         const ownOrFake = refuseOwnOrImpersonatedSocket(
           input.to,
           addr.target,
-          context,
+          deps,
         )
         if (ownOrFake) {
           return {
-            result: false,
+            result: false as const,
             message: ownOrFake.message,
             errorCode: 9,
           }
@@ -2111,14 +2151,14 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
       // local tcp: empty-target (official xD has did: not tcp:)
       if (addr.scheme === 'tcp' && addr.target.trim().length === 0) {
         return {
-          result: false,
+          result: false as const,
           message: 'address target must not be empty',
           errorCode: 9,
         }
       }
       if (addr.scheme === 'uds' && hasInlineUdsToken(input.to)) {
         return {
-          result: false,
+          result: false as const,
           message:
             'uds addresses must not include inline auth tokens; use the ListAgents address',
           errorCode: 9,
@@ -2126,7 +2166,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
       }
       if (input.to.includes('@')) {
         return {
-          result: false,
+          result: false as const,
           message:
             'to must be a bare teammate name — there is only one team per session',
           errorCode: 9,
@@ -2141,7 +2181,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         !wantsNotifyWhenIdle(input)
       ) {
         return {
-          result: false,
+          result: false as const,
           message: 'message must not be empty',
           errorCode: 9,
         }
@@ -2155,7 +2195,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         const pureNotify = plain.trim().length === 0
         if (pureNotify && (addr.scheme === 'bridge' || addr.scheme === 'tcp')) {
           return {
-            result: false,
+            result: false as const,
             message:
               'notify_when_idle is only supported for Claude sessions on this machine in this release (not teammates, subagents, Remote Control or cloud sessions).',
             errorCode: 9,
@@ -2163,11 +2203,11 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         }
         if (pureNotify) {
           // Pure subscribe — summary not required.
-          return { result: true }
+          return { result: true as const }
         }
         if (typeof input.message !== 'string') {
           return {
-            result: false,
+            result: false as const,
             message:
               'structured messages cannot be sent with notify_when_idle — only plain text (or omit message)',
             errorCode: 9,
@@ -2181,7 +2221,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         // hit this error on retry.
         if (typeof input.message !== 'string') {
           return {
-            result: false,
+            result: false as const,
             message:
               'structured messages cannot be sent cross-session — only plain text',
             errorCode: 9,
@@ -2193,7 +2233,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         const credMismatchError = checkCrossMachineCredentialIsolation()
         if (credMismatchError) {
           return {
-            result: false,
+            result: false as const,
             message: credMismatchError,
             errorCode: 9,
           }
@@ -2205,7 +2245,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         if (rcBlock) {
           const reason = formatRemoteControlSendBlock(rcBlock)
           return {
-            result: false,
+            result: false as const,
             message:
               rcBlock === 'rc-disconnected'
                 ? `${reason} — cannot send to a bridge: target. Reconnect with /remote-control first.`
@@ -2213,27 +2253,27 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             errorCode: 9,
           }
         }
-        return { result: true }
+        return { result: true as const }
       }
       if (
         feature('UDS_INBOX') &&
         parseAddress(input.to).scheme === 'uds' &&
         typeof input.message === 'string'
       ) {
-        return { result: true }
+        return { result: true as const }
       }
       if (
         feature('LAN_PIPES') &&
         parseAddress(input.to).scheme === 'tcp' &&
         typeof input.message === 'string'
       ) {
-        return { result: true }
+        return { result: true as const }
       }
       if (typeof input.message === 'string') {
         // densable Kwe — protocol frames as text (uds/bridge already returned)
         if (isStructuredProtocolMessage(input.message)) {
           return {
-            result: false,
+            result: false as const,
             message:
               'message text must not be a teammate protocol frame (permission/mode/plan/shutdown JSON) — to respond to a plan or shutdown request, use the structured object form ({"message": {"type": ...}}); otherwise send plain text',
             errorCode: 9,
@@ -2241,18 +2281,18 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         }
         if (isTeammateLifecycleFrame(input.message)) {
           return {
-            result: false,
+            result: false as const,
             message:
               'message text must not be a teammate lifecycle/task frame (idle/terminated/task/shutdown JSON) — send plain text instead',
             errorCode: 9,
           }
         }
-        return { result: true }
+        return { result: true as const }
       }
 
       if (!isAgentSwarmsEnabled()) {
         return {
-          result: false,
+          result: false as const,
           message:
             'Structured team-protocol messages are only available with agent teams enabled.',
           errorCode: 9,
@@ -2261,7 +2301,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
 
       if (feature('UDS_INBOX') && parseAddress(input.to).scheme !== 'other') {
         return {
-          result: false,
+          result: false as const,
           message:
             'structured messages cannot be sent cross-session — only plain text',
           errorCode: 9,
@@ -2273,7 +2313,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         input.to !== TEAM_LEAD_NAME
       ) {
         return {
-          result: false,
+          result: false as const,
           message: `shutdown_response must be sent to "${TEAM_LEAD_NAME}"`,
           errorCode: 9,
         }
@@ -2285,7 +2325,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         input.message.reason !== undefined
       ) {
         return {
-          result: false,
+          result: false as const,
           message:
             'reason is only delivered on rejections (approve: false) — approvals are sent as a silent confirmation with no reason text; omit reason or reject instead',
           errorCode: 9,
@@ -2298,40 +2338,31 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         (!input.message.reason || input.message.reason.trim().length === 0)
       ) {
         return {
-          result: false,
+          result: false as const,
           message: 'reason is required when rejecting a shutdown request',
           errorCode: 9,
         }
       }
 
-      return { result: true }
+      return { result: true as const }
     },
 
-    async description() {
-      return DESCRIPTION
-    },
-
-    async prompt() {
-      return getPrompt(isAgentSwarmsEnabled())
-    },
-
-    mapToolResultToToolResultBlockParam(data, toolUseID) {
-      return {
-        tool_use_id: toolUseID,
-        type: 'tool_result' as const,
-        content: [
-          {
-            type: 'text' as const,
-            text: jsonStringify(data),
-          },
-        ],
+    async call(input: Input, callCtx: ToolCallContext) {
+      let cachedContext: ToolUseContext | undefined
+      const getContext = (): ToolUseContext => {
+        if (cachedContext === undefined) {
+          cachedContext = resolveToolUseContext(deps, callCtx)
+        }
+        return cachedContext
       }
-    },
+      const canUseTool = callCtx.canUseTool ?? createDefaultCanUseTool()
+      const assistantMessage = callCtx.parentMessage as Parameters<
+        NonNullable<Tool['call']>
+      >[3]
 
-    async call(input, context, canUseTool, assistantMessage) {
       // Call entry: refuse when sender is an observer task.
       // Covers all routes (UDS/bridge/TCP/mailbox/broadcast/local_agent).
-      if (context.agentId && isObserverTaskId(context.agentId)) {
+      if (deps.agentId && isObserverTaskId(deps.agentId)) {
         return {
           data: {
             success: false,
@@ -2384,7 +2415,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           }
         }
         if (
-          isNotifyWhenIdlePrincipalRefused(context) &&
+          isNotifyWhenIdlePrincipalRefused(deps) &&
           pureIdleSubscribe &&
           addr.scheme !== 'uds'
         ) {
@@ -2405,7 +2436,8 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           const gated = applyUdsBlankMessageGate(
             input,
             typeof input.message === 'string' ? input.message : '',
-            context,
+            deps,
+            callCtx.toolUseId,
             assistantMessage,
           )
           if (gated !== undefined) return gated
@@ -2413,7 +2445,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             to: input.to,
             socketPath: addr.target,
             displayLabel: recipientForDisplay(input.to),
-            context,
+            context: deps,
           })
           return {
             data: {
@@ -2450,7 +2482,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             udsPeers,
             bridgePeers: bridgeList,
           })
-          const pins = context.getAppState().sendMessagePins ?? {}
+          const pins = deps.getAppState().sendMessagePins ?? {}
           const resolved = resolvePeerByName({
             to: input.to,
             pins,
@@ -2469,7 +2501,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                 pinnedIdentityClaimedLocally:
                   resolved.pinnedIdentityClaimedLocally,
               },
-              context,
+              deps,
             )
             if (prefixDee.kind === 'dee') {
               return { data: prefixDee.data }
@@ -2489,7 +2521,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             if (qen !== 'no') {
               message += formatOwnNameAlsoNote(
                 input.to,
-                callerIsSubagentForSend(context),
+                callerIsSubagentForSend(deps),
               )
             }
             return {
@@ -2513,7 +2545,8 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             const gated = applyUdsBlankMessageGate(
               input,
               typeof input.message === 'string' ? input.message : '',
-              context,
+              deps,
+              callCtx.toolUseId,
               assistantMessage,
             )
             if (gated !== undefined) return gated
@@ -2521,7 +2554,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               to: cand.name,
               socketPath: cand.id,
               displayLabel: cand.name,
-              context,
+              context: deps,
             })
             return {
               data: {
@@ -2542,7 +2575,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                 closest: findClosestPeerCandidates(input.to, candidates),
                 searchTruncated: resolved.searchTruncated,
               },
-              context,
+              deps,
             )
             if (miss.kind === 'dee') {
               return { data: miss.data }
@@ -2615,7 +2648,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           const { permissionModeClassOf, shouldHonorPeerFromMode } =
             require('src/utils/crossSessionInbound.js') as typeof import('src/utils/crossSessionInbound.js')
           /* eslint-enable @typescript-eslint/no-require-imports */
-          const perm = context.getAppState().toolPermissionContext
+          const perm = deps.permissions()
           const senderModeClass = permissionModeClassOf({
             mode: perm.mode,
             isBypassPermissionsModeAvailable:
@@ -2625,7 +2658,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             ? senderModeClass
             : undefined
           const inboundHopChain = resolveForwardedPeerHopChain(
-            context.messages,
+            deps.messages(),
             false,
           )
           const result = await postInterClaudeMessage(
@@ -2634,8 +2667,8 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             {
               ...(fromMode !== undefined ? { fromMode } : {}),
               ...(inboundHopChain !== undefined ? { inboundHopChain } : {}),
-              ...(context.hookCaller !== undefined
-                ? { fromPlugin: context.hookCaller }
+              ...(deps.hookCaller !== undefined
+                ? { fromPlugin: deps.hookCaller }
                 : {}),
             },
           )
@@ -2683,7 +2716,8 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             const gated = applyUdsBlankMessageGate(
               input,
               input.message,
-              context,
+              deps,
+              callCtx.toolUseId,
               assistantMessage,
             )
             if (gated !== undefined) return gated
@@ -2691,7 +2725,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           const ownOrFake = refuseOwnOrImpersonatedSocket(
             input.to,
             addr.target,
-            context,
+            deps,
           )
           if (ownOrFake) {
             return {
@@ -2714,7 +2748,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           /* eslint-enable @typescript-eslint/no-require-imports */
           try {
             // densable Wei: stamp fromMode only when harbor_kite_mode_emit is on.
-            const perm = context.getAppState().toolPermissionContext
+            const perm = deps.permissions()
             const fromMode = shouldHonorPeerFromMode()
               ? permissionModeClassOf({
                   mode: perm.mode,
@@ -2723,21 +2757,21 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                 })
               : undefined
             const inboundHopChain = resolveForwardedPeerHopChain(
-              context.messages,
+              deps.messages(),
               true,
             )
             await sendToUdsSocket(addr.target, input.message, {
               ...(fromMode !== undefined ? { fromMode } : {}),
               ...(inboundHopChain !== undefined ? { inboundHopChain } : {}),
-              ...(context.hookCaller !== undefined
-                ? { fromPlugin: context.hookCaller }
+              ...(deps.hookCaller !== undefined
+                ? { fromPlugin: deps.hookCaller }
                 : {}),
             })
             const preview = input.summary || truncate(input.message, 50)
             // densable: no NKp on explicit uds: scheme (see bridge branch above).
             // Idle subscribe only after message delivery succeeds.
             if (notifyIdle) {
-              if (isNotifyWhenIdlePrincipalRefused(context)) {
+              if (isNotifyWhenIdlePrincipalRefused(deps)) {
                 /* eslint-disable @typescript-eslint/no-require-imports */
                 const idle =
                   require('src/utils/udsIdleNotify.js') as typeof import('src/utils/udsIdleNotify.js')
@@ -2754,7 +2788,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                 socketPath: addr.target,
                 displayLabel: recipient,
                 fromMode,
-                context,
+                context: deps,
               })
               return {
                 data: {
@@ -2772,7 +2806,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               isNotifyWhenIdleStrippedByHandler(
                 input,
                 assistantMessage,
-                context.toolUseId,
+                callCtx.toolUseId,
               )
             ) {
               delivered = appendHandlerStrippedIdleNote(delivered)
@@ -2892,7 +2926,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
       // Subagent → main: IT({mode:"prompt", agentId:mi(), origin:peer, …}).
       // Main → main: refuse (you already are the main conversation).
       if (typeof input.message === 'string' && input.to === MAIN_RECIPIENT) {
-        if (!context.agentId) {
+        if (!deps.agentId) {
           return {
             data: {
               success: false,
@@ -2901,7 +2935,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           }
         }
         const { origin: sendOrigin, body: sendBody } =
-          resolveSendMessageOriginAndBody(context, input.message)
+          resolveSendMessageOriginAndBody(getContext(), input.message)
         enqueuePendingNotification({
           mode: 'prompt',
           value: sendBody,
@@ -2922,8 +2956,8 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
 
       // Official 2.1.331 @349705500: non-teammate background subagents
       // (`local_agent`) must not send structured team-protocol frames.
-      if (typeof input.message !== 'string' && context.agentId) {
-        const senderTask = context.getAppState().tasks[context.agentId]
+      if (typeof input.message !== 'string' && deps.agentId) {
+        const senderTask = deps.tasks()[deps.agentId]
         if (
           isLocalAgentTask(senderTask) ||
           getAgentContext()?.agentType !== 'teammate'
@@ -2973,7 +3007,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           const local = await tryDeliverToLocalAgent(
             input.to,
             localText,
-            context,
+            getContext(),
             canUseTool,
             assistantMessage,
           )
@@ -2992,7 +3026,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         input.to !== MAIN_RECIPIENT &&
         parseAddress(input.to).scheme === 'other'
       ) {
-        const appStateNow = context.getAppState()
+        const appStateNow = deps.getAppState()
         const teamName = getTeamName(appStateNow.teamContext)
         const teamFile = teamName ? await readTeamFileAsync(teamName) : null
 
@@ -3008,7 +3042,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             bareMailboxTarget.recipientName,
             input.message,
             input.summary,
-            context,
+            getContext(),
           )
           if (notifyIdle) {
             /* eslint-disable @typescript-eslint/no-require-imports */
@@ -3060,7 +3094,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           seenTeammates.add(member.agentId)
           listingUniqueness.push({ kind: 'teammate', id: member.agentId })
         }
-        for (const [name, id] of appStateNow.agentNameRegistry) {
+        for (const [name, id] of appStateNow.agentNameRegistry ?? []) {
           if (name) listingUniqueness.push({ kind: 'subagent', id })
         }
         for (const row of cloudList.sessions) {
@@ -3072,7 +3106,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           accountBridgePeers: accountBridge,
           listingUniqueness,
         })
-        const pins = context.getAppState().sendMessagePins ?? {}
+        const pins = deps.getAppState().sendMessagePins ?? {}
         const resolved = resolvePeerByName({
           to: input.to,
           pins,
@@ -3093,7 +3127,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               pinnedIdentityClaimedLocally:
                 resolved.pinnedIdentityClaimedLocally,
             },
-            context,
+            deps,
           )
           if (prefixDee.kind === 'dee') {
             return { data: prefixDee.data }
@@ -3109,7 +3143,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           if (qen !== 'no') {
             message += formatOwnNameAlsoNote(
               input.to,
-              callerIsSubagentForSend(context),
+              callerIsSubagentForSend(deps),
             )
           }
           return {
@@ -3167,7 +3201,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             }
             const { permissionModeClassOf, shouldHonorPeerFromMode } =
               require('src/utils/crossSessionInbound.js') as typeof import('src/utils/crossSessionInbound.js')
-            const perm = context.getAppState().toolPermissionContext
+            const perm = deps.permissions()
             const senderModeClass = permissionModeClassOf({
               mode: perm.mode,
               isBypassPermissionsModeAvailable:
@@ -3177,7 +3211,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               ? senderModeClass
               : undefined
             const inboundHopChain = resolveForwardedPeerHopChain(
-              context.messages,
+              deps.messages(),
               false,
             )
             const result = await bridgePeers.postInterClaudeMessage(
@@ -3186,8 +3220,8 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               {
                 ...(fromMode !== undefined ? { fromMode } : {}),
                 ...(inboundHopChain !== undefined ? { inboundHopChain } : {}),
-                ...(context.hookCaller !== undefined
-                  ? { fromPlugin: context.hookCaller }
+                ...(deps.hookCaller !== undefined
+                  ? { fromPlugin: deps.hookCaller }
                   : {}),
               },
             )
@@ -3210,7 +3244,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               }
             }
             setSendMessagePinOnAppState(
-              context.setAppState as unknown as Parameters<
+              deps.setAppState as unknown as Parameters<
                 typeof setSendMessagePinOnAppState
               >[0],
               cand.name,
@@ -3252,7 +3286,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           const ownOrFake = refuseOwnOrImpersonatedSocket(
             input.to,
             cand.id,
-            context,
+            deps,
           )
           if (ownOrFake) {
             return {
@@ -3270,13 +3304,14 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             const gated = applyUdsBlankMessageGate(
               input,
               input.message,
-              context,
+              deps,
+              callCtx.toolUseId,
               assistantMessage,
             )
             if (gated !== undefined) return gated
           }
           try {
-            const perm = context.getAppState().toolPermissionContext
+            const perm = deps.permissions()
             const fromMode = shouldHonorPeerFromMode()
               ? permissionModeClassOf({
                   mode: perm.mode,
@@ -3285,18 +3320,18 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                 })
               : undefined
             const inboundHopChain = resolveForwardedPeerHopChain(
-              context.messages,
+              deps.messages(),
               true,
             )
             await udsClient.sendToUdsSocket(cand.id, input.message, {
               ...(fromMode !== undefined ? { fromMode } : {}),
               ...(inboundHopChain !== undefined ? { inboundHopChain } : {}),
-              ...(context.hookCaller !== undefined
-                ? { fromPlugin: context.hookCaller }
+              ...(deps.hookCaller !== undefined
+                ? { fromPlugin: deps.hookCaller }
                 : {}),
             })
             setSendMessagePinOnAppState(
-              context.setAppState as unknown as Parameters<
+              deps.setAppState as unknown as Parameters<
                 typeof setSendMessagePinOnAppState
               >[0],
               cand.name,
@@ -3311,7 +3346,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               resolved.searchTruncated,
             )
             if (notifyIdle) {
-              if (isNotifyWhenIdlePrincipalRefused(context)) {
+              if (isNotifyWhenIdlePrincipalRefused(deps)) {
                 /* eslint-disable @typescript-eslint/no-require-imports */
                 const idle =
                   require('src/utils/udsIdleNotify.js') as typeof import('src/utils/udsIdleNotify.js')
@@ -3328,7 +3363,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                 socketPath: cand.id,
                 displayLabel: cand.name,
                 fromMode,
-                context,
+                context: deps,
               })
               return {
                 data: {
@@ -3346,7 +3381,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               isNotifyWhenIdleStrippedByHandler(
                 input,
                 assistantMessage,
-                context.toolUseId,
+                callCtx.toolUseId,
               )
             ) {
               delivered = appendHandlerStrippedIdleNote(delivered)
@@ -3386,7 +3421,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               searchTruncated,
               pinnedIdentityClaimedLocally: undefined,
             },
-            context,
+            deps,
           )
           // Official 2.1.328 (#658): when Remote Control is off, explain that
           // cloud sessions / other computers are not listed until RC is on.
@@ -3452,7 +3487,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             input.to,
             input.message,
             input.summary,
-            context,
+            getContext(),
           )
           const base =
             typeof delivered.data.message === 'string'
@@ -3475,7 +3510,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
       }
 
       if (typeof input.message === 'string') {
-        const appStateNow = context.getAppState()
+        const appStateNow = deps.getAppState()
         const teamName = getTeamName(appStateNow.teamContext)
         const teamFile = teamName ? await readTeamFileAsync(teamName) : null
         const resolvedTeammate = resolveTeammateByBareName({
@@ -3489,16 +3524,23 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           resolvedTeammate?.recipientName ?? input.to,
           input.message,
           input.summary,
-          context,
+          getContext(),
         )
       }
 
       switch (input.message.type) {
         case 'shutdown_request':
-          return handleShutdownRequest(input.to, input.message.reason, context)
+          return handleShutdownRequest(
+            input.to,
+            input.message.reason,
+            getContext(),
+          )
         case 'shutdown_response':
           if (input.message.approve) {
-            return handleShutdownApproval(input.message.request_id, context)
+            return handleShutdownApproval(
+              input.message.request_id,
+              getContext(),
+            )
           }
           return handleShutdownRejection(
             input.message.request_id,
@@ -3509,7 +3551,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             return handlePlanApproval(
               input.to,
               input.message.request_id,
-              context,
+              getContext(),
               input.message.feedback,
             )
           }
@@ -3517,14 +3559,12 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             input.to,
             input.message.request_id,
             input.message.feedback ?? 'Plan needs revision',
-            context,
+            getContext(),
           )
       }
     },
-
-    renderToolUseMessage,
-    renderToolResultMessage,
-  } satisfies ToolDef<InputSchema, SendMessageToolOutput>)
+  }
+}
 
 /**
  * Official 2.1.328 (#543): warn when a session running in bypass/skip-permissions

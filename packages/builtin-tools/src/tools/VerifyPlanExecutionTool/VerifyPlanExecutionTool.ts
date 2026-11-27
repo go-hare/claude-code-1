@@ -1,5 +1,5 @@
 import { z } from 'zod/v4'
-import type { ToolResultBlockParam } from 'src/Tool.js'
+import type { ToolDef, ToolResultBlockParam } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { VERIFY_PLAN_EXECUTION_TOOL_NAME } from './constants.js'
@@ -82,12 +82,16 @@ Guidelines:
     }
   },
 
-  async call(input: VerifyInput) {
+  create() {
     return {
-      data: {
-        verified: input.all_steps_completed,
-        summary: input.plan_summary,
+      async call(input: VerifyInput) {
+        return {
+          data: {
+            verified: input.all_steps_completed,
+            summary: input.plan_summary,
+          },
+        }
       },
     }
   },
-})
+} satisfies ToolDef<InputSchema, VerifyOutput>)

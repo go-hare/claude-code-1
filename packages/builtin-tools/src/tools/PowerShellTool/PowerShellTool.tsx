@@ -2,7 +2,6 @@ import { feature } from 'bun:bundle';
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import { copyFile, stat as fsStat, truncate as fsTruncate, link } from 'fs/promises';
 import * as React from 'react';
-import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js';
 import type { AppState } from 'src/state/AppState.js';
 import { z } from 'zod/v4';
 import { getKairosActive } from 'src/bootstrap/state.js';
@@ -12,8 +11,8 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js';
-import type { SetToolJSXFn, Tool, ToolCallProgress, ValidationResult } from 'src/Tool.js';
-import { buildTool, type ToolDef } from 'src/Tool.js';
+import type { SetToolJSXFn, ToolCallContext, ToolDef, ToolDeps, ValidationResult } from 'src/Tool.js';
+import { buildTool, isNativeToolDisabledInThisProcess, resolveToolUseContext } from 'src/Tool.js';
 import {
   backgroundExistingForegroundTask,
   markTaskNotified,
@@ -28,7 +27,6 @@ import {
 } from 'src/tasks/LocalShellTask/guards.js';
 import { getAgentContext } from 'src/utils/agentContext.js';
 import type { AgentId } from 'src/types/ids.js';
-import type { AssistantMessage } from 'src/types/message.js';
 import { extractClaudeCodeHints } from 'src/utils/claudeCodeHints.js';
 import { clampTimeoutForAutoBackground } from 'src/utils/autoBackgroundTimeout.js';
 import { isEnvTruthy } from 'src/utils/envUtils.js';
@@ -421,6 +419,9 @@ export const PowerShellTool = buildTool({
   },
 
   isReadOnly(input: PowerShellToolInput): boolean {
+    if (isNativeToolDisabledInThisProcess(POWERSHELL_TOOL_NAME)) {
+      return false;
+    }
     // Check sync security heuristics before declaring read-only.
     // The full AST parse is async and unavailable here, so we use
     // regex-based detection of subexpressions, splatting, member
@@ -474,65 +475,6 @@ export const PowerShellTool = buildTool({
 
   isEnabled(): boolean {
     return true;
-  },
-
-  async validateInput(input: PowerShellToolInput): Promise<ValidationResult> {
-    // densable BT() && xd(n) — named host is not forwarded (errorCode 12)
-    const hostRefusal = remoteHostForwardRefusal(input, POWERSHELL_TOOL_NAME);
-    if (hostRefusal) return { ...hostRefusal, errorCode: 12 };
-    // Defense-in-depth: also guarded in call() for direct callers.
-    // densable I0d(vxo(e), e.command)
-    {
-      const useSandbox = shouldUseSandbox({
-        command: input.command,
-        dangerouslyDisableSandbox: input.dangerouslyDisableSandbox,
-        shellType: 'powershell',
-      });
-      const policyRefusal = getSandboxPolicyRefusal(useSandbox, input.command, false, 'powershell');
-      if (policyRefusal !== null) {
-        return {
-          result: false,
-          message: policyRefusal,
-          errorCode: 11,
-        };
-      }
-    }
-    if (feature('MONITOR_TOOL') && !isBackgroundTasksDisabled && !input.run_in_background) {
-      const sleepPattern = detectBlockedSleepPattern(input.command);
-      if (sleepPattern !== null) {
-        return {
-          result: false,
-          message: `Blocked: ${sleepPattern}. Run blocking commands in the background with run_in_background: true — you'll get a completion notification when done. For streaming events (watching logs, polling APIs), use the Monitor tool. If you genuinely need a delay (rate limiting, deliberate pacing), keep it under 2 seconds.`,
-          errorCode: 10,
-        };
-      }
-    }
-    return { result: true };
-  },
-
-  async checkPermissions(
-    input: PowerShellToolInput,
-    context: Parameters<Tool['checkPermissions']>[1],
-  ): Promise<PermissionResult> {
-    const sandboxAtStart = shouldUseSandbox({
-      command: input.command,
-      dangerouslyDisableSandbox: input.dangerouslyDisableSandbox,
-      shellType: 'powershell',
-    });
-    try {
-      return await powershellToolHasPermission(input, context);
-    } finally {
-      recordSandboxStateAtCheck(
-        context.toolUseId,
-        input,
-        sandboxAtStart ||
-          shouldUseSandbox({
-            command: input.command,
-            dangerouslyDisableSandbox: input.dangerouslyDisableSandbox,
-            shellType: 'powershell',
-          }),
-      );
-    }
   },
 
   renderToolUseMessage,
@@ -637,280 +579,347 @@ export const PowerShellTool = buildTool({
     };
   },
 
-  async call(
-    input: PowerShellToolInput,
-    toolUseContext: Parameters<Tool['call']>[1],
-    _canUseTool?: CanUseToolFn,
-    _parentMessage?: AssistantMessage,
-    onProgress?: ToolCallProgress<PowerShellProgress>,
-  ): Promise<{ data: Out }> {
-    const keepInSandboxSinceCheck = shouldKeepRewrittenCommandInSandbox(toolUseContext.toolUseId, input);
-    clearSandboxStateAtCheck(toolUseContext.toolUseId);
-    let keptInSandboxNote: string | undefined;
-    // densable I0d — load-bearing for direct call() callers
-    {
-      const useSandbox = shouldUseSandbox(
+  create(deps: ToolDeps) {
+    return {
+      async validateInput(
+        input: PowerShellToolInput,
+        _callCtx: ToolCallContext<PowerShellProgress>,
+      ): Promise<ValidationResult> {
+        // densable BT() && xd(n) — named host is not forwarded (errorCode 12)
+        const hostRefusal = remoteHostForwardRefusal(input, POWERSHELL_TOOL_NAME);
+        if (hostRefusal) return { ...hostRefusal, errorCode: 12 };
+        // Defense-in-depth: also guarded in call() for direct callers.
+        // densable I0d(vxo(e), e.command)
         {
-          command: input.command,
-          dangerouslyDisableSandbox: input.dangerouslyDisableSandbox,
-          shellType: 'powershell',
-        },
-        { disableUnsandboxedCommands: keepInSandboxSinceCheck },
-      );
-      if (keepInSandboxSinceCheck && !useSandbox) {
-        throw new SandboxPolicyRefusalError(SANDBOX_GONE_SINCE_CHECK_MESSAGE);
-      }
-      if (
-        keepInSandboxSinceCheck &&
-        useSandbox &&
-        !shouldUseSandbox({
-          command: input.command,
-          dangerouslyDisableSandbox: input.dangerouslyDisableSandbox,
-          shellType: 'powershell',
-        }) &&
-        toolUseContext.innerCall !== true
-      ) {
-        keptInSandboxNote = KEPT_IN_SANDBOX_SINCE_CHECK_NOTE;
-      }
-      const policyRefusal = getSandboxPolicyRefusal(useSandbox, input.command, false, 'powershell');
-      if (policyRefusal !== null) {
-        throw new SandboxPolicyRefusalError(policyRefusal);
-      }
-    }
-
-    const { abortController, getAppState, setAppState, setToolJSX } = toolUseContext;
-    const outputCleanup = createOutputFileCleanup({ get: id => getAppState().tasks[id] });
-
-    const isMainThread = !toolUseContext.agentId;
-
-    let progressCounter = 0;
-
-    try {
-      const commandGenerator = runPowerShellCommand({
-        input,
-        abortController,
-        // Use the always-shared task channel so async agents' background
-        // shell tasks are actually registered (and killable on agent exit).
-        setAppState: toolUseContext.setAppStateForTasks ?? setAppState,
-        getAppState,
-        setToolJSX,
-        preventCwdChanges: !isMainThread,
-        isMainThread,
-        toolUseId: toolUseContext.toolUseId,
-        agentId: toolUseContext.agentId,
-        innerCall: toolUseContext.innerCall,
-        // densable 2.1.217 VRu — pin isolation worktree into shell gates
-        agentWorktree: toolUseContext.agentWorktree,
-        keepInSandboxSinceCheck,
-        immediateProgress: (toolUseContext as { immediateProgress?: boolean }).immediateProgress === true,
-      });
-
-      let generatorResult;
-      do {
-        generatorResult = await commandGenerator.next();
-        if (!generatorResult.done && onProgress) {
-          const progress = generatorResult.value;
-          onProgress({
-            toolUseID: `ps-progress-${progressCounter++}`,
-            data: {
-              type: 'powershell_progress',
-              output: progress.output,
-              fullOutput: progress.fullOutput,
-              elapsedTimeSeconds: progress.elapsedTimeSeconds,
-              totalLines: progress.totalLines,
-              totalBytes: progress.totalBytes,
-              timeoutMs: progress.timeoutMs,
-              taskId: progress.taskId,
-            },
+          const useSandbox = shouldUseSandbox({
+            command: input.command,
+            dangerouslyDisableSandbox: input.dangerouslyDisableSandbox,
+            shellType: 'powershell',
           });
+          const policyRefusal = getSandboxPolicyRefusal(useSandbox, input.command, false, 'powershell');
+          if (policyRefusal !== null) {
+            return {
+              result: false,
+              message: policyRefusal,
+              errorCode: 11,
+            };
+          }
         }
-      } while (!generatorResult.done);
-
-      const result = generatorResult.value;
-
-      // Feed git/PR usage metrics (same counters as BashTool). PS invokes
-      // git/gh/glab/curl as external binaries with identical syntax, so the
-      // shell-agnostic regex detection in trackGitOperations works as-is.
-      // Called before the backgroundTaskId early-return so backgrounded
-      // commands are counted too (matches BashTool.tsx:912).
-      //
-      // Pre-flight sentinel guard: the two PS pre-flight paths (pwsh-not-found,
-      // exec-spawn-catch) return code: 0 + empty stdout + stderr so call() can
-      // surface stderr gracefully instead of throwing ShellError. But
-      // gitOperationTracking.ts:48 treats code 0 as success and would
-      // regex-match the command, mis-counting a command that never ran.
-      // BashTool is safe — its pre-flight goes through createFailedCommand
-      // (code: 1) so tracking early-returns. Skip tracking on this sentinel.
-      const isPreFlightSentinel = result.code === 0 && !result.stdout && result.stderr && !result.backgroundTaskId;
-      outputCleanup.track(result);
-      if (!isPreFlightSentinel) {
-        trackGitOperations(input.command, result.code, result.stdout);
-      }
-
-      // Distinguish user-driven interrupt (new message submitted) from other
-      // interrupted states. Only user-interrupt should suppress ShellError —
-      // timeout-kill or process-kill with isError should still throw.
-      // Matches BashTool's isInterrupt.
-      const isInterrupt = result.interrupted && abortController.signal.reason === 'interrupt';
-
-      // Only the main thread tracks/resets cwd; agents have their own cwd
-      // isolation. Matches BashTool's !preventCwdChanges guard.
-      // Runs before the backgroundTaskId early-return: a command may change
-      // CWD before being backgrounded (e.g. `Set-Location C:\temp;
-      // Start-Sleep 60`), and BashTool has no such early return — its
-      // backgrounded results flow through resetCwdIfOutsideProject at :945.
-      let stderrForShellReset = '';
-      if (isMainThread) {
-        const appState = toolUseContext.getAppState();
-        if (resetCwdIfOutsideProject(appState.toolPermissionContext)) {
-          stderrForShellReset = stdErrAppendShellResetMessage('');
+        if (feature('MONITOR_TOOL') && !isBackgroundTasksDisabled && !input.run_in_background) {
+          const sleepPattern = detectBlockedSleepPattern(input.command);
+          if (sleepPattern !== null) {
+            return {
+              result: false,
+              message: `Blocked: ${sleepPattern}. Run blocking commands in the background with run_in_background: true — you'll get a completion notification when done. For streaming events (watching logs, polling APIs), use the Monitor tool. If you genuinely need a delay (rate limiting, deliberate pacing), keep it under 2 seconds.`,
+              errorCode: 10,
+            };
+          }
         }
-      }
-      stderrForShellReset = [isPreFlightSentinel ? undefined : keptInSandboxNote, stderrForShellReset]
-        .filter(Boolean)
-        .join('\n');
+        return { result: true };
+      },
 
-      // If backgrounded, return immediately with task ID. Strip hints first
-      // so interrupt-backgrounded fullOutput doesn't leak the tag to the
-      // model (BashTool has no early return, so all paths flow through its
-      // single extraction site).
-      if (result.backgroundTaskId) {
-        const backgroundEndsWithFinalResponse = backgroundShellReapedAtFinalResponse(
-          result.backgroundTaskId,
-          getAgentContext(),
-        )
-          ? (true as const)
-          : undefined;
-        const backgroundCwdHint =
-          /(?:^|[;|&\r\n])\s*(?:(?:cd|chdir|sl|set-location|pushd|push-location|popd|pop-location)(?=$|[\s.:\\/+[\]",;=])|[a-z]:\s*(?:$|[;|&\r\n]))/i.test(
+      async checkPermissions(
+        input: PowerShellToolInput,
+        callCtx: ToolCallContext<PowerShellProgress>,
+      ): Promise<PermissionResult> {
+        const sandboxAtStart = shouldUseSandbox({
+          command: input.command,
+          dangerouslyDisableSandbox: input.dangerouslyDisableSandbox,
+          shellType: 'powershell',
+        });
+        try {
+          return await powershellToolHasPermission(input, resolveToolUseContext(deps, callCtx));
+        } finally {
+          recordSandboxStateAtCheck(
+            callCtx.toolUseId,
+            input,
+            sandboxAtStart ||
+              shouldUseSandbox({
+                command: input.command,
+                dangerouslyDisableSandbox: input.dangerouslyDisableSandbox,
+                shellType: 'powershell',
+              }),
+          );
+        }
+      },
+
+      async call(input: PowerShellToolInput, callCtx: ToolCallContext<PowerShellProgress>): Promise<{ data: Out }> {
+        const toolUseContext = resolveToolUseContext(deps, callCtx);
+        const innerCall = callCtx.innerCall ?? deps.innerCall;
+        const keepInSandboxSinceCheck = shouldKeepRewrittenCommandInSandbox(callCtx.toolUseId, input);
+        clearSandboxStateAtCheck(callCtx.toolUseId);
+        let keptInSandboxNote: string | undefined;
+        // densable I0d — load-bearing for direct call() callers
+        {
+          const useSandbox = shouldUseSandbox(
+            {
+              command: input.command,
+              dangerouslyDisableSandbox: input.dangerouslyDisableSandbox,
+              shellType: 'powershell',
+            },
+            { disableUnsandboxedCommands: keepInSandboxSinceCheck },
+          );
+          if (keepInSandboxSinceCheck && !useSandbox) {
+            throw new SandboxPolicyRefusalError(SANDBOX_GONE_SINCE_CHECK_MESSAGE);
+          }
+          if (
+            keepInSandboxSinceCheck &&
+            useSandbox &&
+            !shouldUseSandbox({
+              command: input.command,
+              dangerouslyDisableSandbox: input.dangerouslyDisableSandbox,
+              shellType: 'powershell',
+            }) &&
+            innerCall !== true
+          ) {
+            keptInSandboxNote = KEPT_IN_SANDBOX_SINCE_CHECK_NOTE;
+          }
+          const policyRefusal = getSandboxPolicyRefusal(useSandbox, input.command, false, 'powershell');
+          if (policyRefusal !== null) {
+            throw new SandboxPolicyRefusalError(policyRefusal);
+          }
+        }
+
+        const { abortController, onProgress } = callCtx;
+        const { getAppState, setAppState, setToolJSX } = deps;
+        const outputCleanup = createOutputFileCleanup({ get: id => deps.tasks()[id] });
+
+        const isMainThread = !deps.agentId;
+
+        let progressCounter = 0;
+
+        try {
+          const commandGenerator = runPowerShellCommand({
+            input,
+            abortController,
+            // Use the always-shared task channel so async agents' background
+            // shell tasks are actually registered (and killable on agent exit).
+            setAppState: deps.setAppStateForTasks ?? setAppState,
+            getAppState,
+            setToolJSX,
+            preventCwdChanges: !isMainThread,
+            isMainThread,
+            toolUseId: callCtx.toolUseId,
+            agentId: deps.agentId,
+            innerCall,
+            // densable 2.1.217 VRu — pin isolation worktree into shell gates
+            agentWorktree: toolUseContext.agentWorktree,
+            keepInSandboxSinceCheck,
+            immediateProgress: (toolUseContext as { immediateProgress?: boolean }).immediateProgress === true,
+          });
+
+          let generatorResult;
+          do {
+            generatorResult = await commandGenerator.next();
+            if (!generatorResult.done && onProgress) {
+              const progress = generatorResult.value;
+              onProgress({
+                toolUseID: `ps-progress-${progressCounter++}`,
+                data: {
+                  type: 'powershell_progress',
+                  output: progress.output,
+                  fullOutput: progress.fullOutput,
+                  elapsedTimeSeconds: progress.elapsedTimeSeconds,
+                  totalLines: progress.totalLines,
+                  totalBytes: progress.totalBytes,
+                  timeoutMs: progress.timeoutMs,
+                  taskId: progress.taskId,
+                },
+              });
+            }
+          } while (!generatorResult.done);
+
+          const result = generatorResult.value;
+
+          // Feed git/PR usage metrics (same counters as BashTool). PS invokes
+          // git/gh/glab/curl as external binaries with identical syntax, so the
+          // shell-agnostic regex detection in trackGitOperations works as-is.
+          // Called before the backgroundTaskId early-return so backgrounded
+          // commands are counted too (matches BashTool.tsx:912).
+          //
+          // Pre-flight sentinel guard: the two PS pre-flight paths (pwsh-not-found,
+          // exec-spawn-catch) return code: 0 + empty stdout + stderr so call() can
+          // surface stderr gracefully instead of throwing ShellError. But
+          // gitOperationTracking.ts:48 treats code 0 as success and would
+          // regex-match the command, mis-counting a command that never ran.
+          // BashTool is safe — its pre-flight goes through createFailedCommand
+          // (code: 1) so tracking early-returns. Skip tracking on this sentinel.
+          const isPreFlightSentinel = result.code === 0 && !result.stdout && result.stderr && !result.backgroundTaskId;
+          outputCleanup.track(result);
+          if (!isPreFlightSentinel) {
+            trackGitOperations(input.command, result.code, result.stdout);
+          }
+
+          // Distinguish user-driven interrupt (new message submitted) from other
+          // interrupted states. Only user-interrupt should suppress ShellError —
+          // timeout-kill or process-kill with isError should still throw.
+          // Matches BashTool's isInterrupt.
+          const isInterrupt = result.interrupted && callCtx.signal.reason === 'interrupt';
+
+          // Only the main thread tracks/resets cwd; agents have their own cwd
+          // isolation. Matches BashTool's !preventCwdChanges guard.
+          // Runs before the backgroundTaskId early-return: a command may change
+          // CWD before being backgrounded (e.g. `Set-Location C:\temp;
+          // Start-Sleep 60`), and BashTool has no such early return — its
+          // backgrounded results flow through resetCwdIfOutsideProject at :945.
+          let stderrForShellReset = '';
+          if (isMainThread) {
+            if (resetCwdIfOutsideProject(deps.permissions())) {
+              stderrForShellReset = stdErrAppendShellResetMessage('');
+            }
+          }
+          stderrForShellReset = [isPreFlightSentinel ? undefined : keptInSandboxNote, stderrForShellReset]
+            .filter(Boolean)
+            .join('\n');
+
+          // If backgrounded, return immediately with task ID. Strip hints first
+          // so interrupt-backgrounded fullOutput doesn't leak the tag to the
+          // model (BashTool has no early return, so all paths flow through its
+          // single extraction site).
+          if (result.backgroundTaskId) {
+            const backgroundEndsWithFinalResponse = backgroundShellReapedAtFinalResponse(
+              result.backgroundTaskId,
+              getAgentContext(),
+            )
+              ? (true as const)
+              : undefined;
+            const backgroundCwdHint =
+              /(?:^|[;|&\r\n])\s*(?:(?:cd|chdir|sl|set-location|pushd|push-location|popd|pop-location)(?=$|[\s.:\\/+[\]",;=])|[a-z]:\s*(?:$|[;|&\r\n]))/i.test(
+                input.command,
+              )
+                ? `Session cwd remains ${getCwd()}; directory changes made by the backgrounded command do not apply to subsequent commands.`
+                : undefined;
+            const bgExtracted = extractClaudeCodeHints(result.stdout || '', input.command);
+            if (isMainThread && bgExtracted.hints.length > 0) {
+              for (const hint of bgExtracted.hints) maybeRecordPluginHint(hint);
+            }
+            return {
+              data: {
+                stdout: bgExtracted.stripped,
+                stderr: [result.stderr || '', stderrForShellReset].filter(Boolean).join('\n'),
+                interrupted: false,
+                backgroundTaskId: result.backgroundTaskId,
+                backgroundedByUser: result.backgroundedByUser,
+                assistantAutoBackgrounded: result.assistantAutoBackgrounded,
+                backgroundedToDeliverMessage: result.backgroundedToDeliverMessage,
+                backgroundedByTurnAbort: result.backgroundedByTurnAbort,
+                timedOutAfterMs: result.timedOutAfterMs,
+                backgroundCwdHint,
+                backgroundEndsWithFinalResponse,
+              },
+            };
+          }
+
+          const stdoutAccumulator = new EndTruncatingAccumulator();
+          const processedStdout = (result.stdout || '').trimEnd();
+
+          stdoutAccumulator.append(processedStdout + EOL);
+
+          // Interpret exit code using semantic rules. PS-native cmdlets (Select-String,
+          // Compare-Object, Test-Path) exit 0 on no-match so they always hit the default
+          // here. This primarily handles external .exe's (grep, rg, findstr, fc, robocopy)
+          // where non-zero can mean "no match" / "files copied" rather than failure.
+          const interpretation = interpretCommandResult(
             input.command,
-          )
-            ? `Session cwd remains ${getCwd()}; directory changes made by the backgrounded command do not apply to subsequent commands.`
-            : undefined;
-        const bgExtracted = extractClaudeCodeHints(result.stdout || '', input.command);
-        if (isMainThread && bgExtracted.hints.length > 0) {
-          for (const hint of bgExtracted.hints) maybeRecordPluginHint(hint);
+            result.code,
+            processedStdout,
+            result.stderr || '',
+          );
+
+          // getErrorParts() in toolErrors.ts already prepends 'Exit code N'
+          // from error.code when building the ShellError message. Do not
+          // duplicate it into stdout here (BashTool's append at :939 is dead
+          // code — it throws before stdoutAccumulator.toString() is read).
+
+          let stdout = stripEmptyLines(stdoutAccumulator.toString());
+
+          // Claude Code hints protocol: CLIs/SDKs gated on CLAUDECODE=1 emit a
+          // `<claude-code-hint />` tag to stderr (merged into stdout here). Scan,
+          // record for useClaudeCodeHintRecommendation to surface, then strip
+          // so the model never sees the tag — a zero-token side channel.
+          // Stripping runs unconditionally (subagent output must stay clean too);
+          // only the dialog recording is main-thread-only.
+          const extracted = extractClaudeCodeHints(stdout, input.command);
+          stdout = extracted.stripped;
+          if (isMainThread && extracted.hints.length > 0) {
+            for (const hint of extracted.hints) maybeRecordPluginHint(hint);
+          }
+
+          // preSpawnError means exec() succeeded but the inner shell failed before
+          // the command ran (e.g. CWD deleted). createFailedCommand sets code=1,
+          // which interpretCommandResult can mistake for grep-no-match / findstr
+          // string-not-found. Throw it directly. Matches BashTool.tsx:957.
+          if (result.preSpawnError) {
+            throw new Error(result.preSpawnError);
+          }
+          if (interpretation.isError && !isInterrupt) {
+            const errStderr = [result.stderr || '', isPreFlightSentinel ? undefined : keptInSandboxNote]
+              .filter(Boolean)
+              .join('\n');
+            throw new ShellError(stdout, errStderr, result.code, result.interrupted);
+          }
+
+          // Large output: file on disk has more than getMaxOutputLength() bytes.
+          // stdout already contains the first chunk. Copy the output file to the
+          // tool-results dir so the model can read it via FileRead. If > 64 MB,
+          // truncate after copying. Matches BashTool.tsx:983-1005.
+          //
+          // Placed AFTER the preSpawnError/ShellError throws (matches BashTool's
+          // ordering, where persistence is post-try/finally): a failing command
+          // that also produced >maxOutputLength bytes would otherwise do 3-4 disk
+          // syscalls, store to tool-results/, then throw — orphaning the file.
+          const { persistedOutputPath, persistedOutputSize } = await persistLargeOutputFile(result, outputCleanup);
+
+          // Cap image dimensions + size if present (CC-304 — see
+          // resizeShellImageOutput). Scope the decoded buffer so it can be
+          // reclaimed before we build the output object.
+          let isImage = isImageOutput(stdout);
+          let compressedStdout = stdout;
+          if (isImage) {
+            const resized = await resizeShellImageOutput(stdout, result.outputFilePath, persistedOutputSize);
+            if (resized) {
+              compressedStdout = resized;
+            } else {
+              // Parse failed (e.g. multi-line stdout after the data URL). Keep
+              // isImage in sync with what we actually send so the UI label stays
+              // accurate — mapToolResultToToolResultBlockParam's defensive
+              // fallthrough will send text, not an image block.
+              isImage = false;
+            }
+          }
+
+          const finalStderr = [result.stderr || '', stderrForShellReset].filter(Boolean).join('\n');
+
+          logEvent('tengu_powershell_tool_command_executed', {
+            command_type: getCommandTypeForLogging(input.command),
+            stdout_length: compressedStdout.length,
+            stderr_length: finalStderr.length,
+            exit_code: result.code,
+            interrupted: result.interrupted,
+          });
+
+          return {
+            data: {
+              stdout: compressedStdout,
+              stderr: finalStderr,
+              interrupted: result.interrupted,
+              returnCodeInterpretation: interpretation.message,
+              isImage,
+              persistedOutputPath,
+              persistedOutputSize,
+            },
+          };
+        } finally {
+          if (setToolJSX) setToolJSX(null);
+          await outputCleanup.dispose();
         }
-        return {
-          data: {
-            stdout: bgExtracted.stripped,
-            stderr: [result.stderr || '', stderrForShellReset].filter(Boolean).join('\n'),
-            interrupted: false,
-            backgroundTaskId: result.backgroundTaskId,
-            backgroundedByUser: result.backgroundedByUser,
-            assistantAutoBackgrounded: result.assistantAutoBackgrounded,
-            backgroundedToDeliverMessage: result.backgroundedToDeliverMessage,
-            backgroundedByTurnAbort: result.backgroundedByTurnAbort,
-            timedOutAfterMs: result.timedOutAfterMs,
-            backgroundCwdHint,
-            backgroundEndsWithFinalResponse,
-          },
-        };
-      }
-
-      const stdoutAccumulator = new EndTruncatingAccumulator();
-      const processedStdout = (result.stdout || '').trimEnd();
-
-      stdoutAccumulator.append(processedStdout + EOL);
-
-      // Interpret exit code using semantic rules. PS-native cmdlets (Select-String,
-      // Compare-Object, Test-Path) exit 0 on no-match so they always hit the default
-      // here. This primarily handles external .exe's (grep, rg, findstr, fc, robocopy)
-      // where non-zero can mean "no match" / "files copied" rather than failure.
-      const interpretation = interpretCommandResult(input.command, result.code, processedStdout, result.stderr || '');
-
-      // getErrorParts() in toolErrors.ts already prepends 'Exit code N'
-      // from error.code when building the ShellError message. Do not
-      // duplicate it into stdout here (BashTool's append at :939 is dead
-      // code — it throws before stdoutAccumulator.toString() is read).
-
-      let stdout = stripEmptyLines(stdoutAccumulator.toString());
-
-      // Claude Code hints protocol: CLIs/SDKs gated on CLAUDECODE=1 emit a
-      // `<claude-code-hint />` tag to stderr (merged into stdout here). Scan,
-      // record for useClaudeCodeHintRecommendation to surface, then strip
-      // so the model never sees the tag — a zero-token side channel.
-      // Stripping runs unconditionally (subagent output must stay clean too);
-      // only the dialog recording is main-thread-only.
-      const extracted = extractClaudeCodeHints(stdout, input.command);
-      stdout = extracted.stripped;
-      if (isMainThread && extracted.hints.length > 0) {
-        for (const hint of extracted.hints) maybeRecordPluginHint(hint);
-      }
-
-      // preSpawnError means exec() succeeded but the inner shell failed before
-      // the command ran (e.g. CWD deleted). createFailedCommand sets code=1,
-      // which interpretCommandResult can mistake for grep-no-match / findstr
-      // string-not-found. Throw it directly. Matches BashTool.tsx:957.
-      if (result.preSpawnError) {
-        throw new Error(result.preSpawnError);
-      }
-      if (interpretation.isError && !isInterrupt) {
-        const errStderr = [result.stderr || '', isPreFlightSentinel ? undefined : keptInSandboxNote]
-          .filter(Boolean)
-          .join('\n');
-        throw new ShellError(stdout, errStderr, result.code, result.interrupted);
-      }
-
-      // Large output: file on disk has more than getMaxOutputLength() bytes.
-      // stdout already contains the first chunk. Copy the output file to the
-      // tool-results dir so the model can read it via FileRead. If > 64 MB,
-      // truncate after copying. Matches BashTool.tsx:983-1005.
-      //
-      // Placed AFTER the preSpawnError/ShellError throws (matches BashTool's
-      // ordering, where persistence is post-try/finally): a failing command
-      // that also produced >maxOutputLength bytes would otherwise do 3-4 disk
-      // syscalls, store to tool-results/, then throw — orphaning the file.
-      const { persistedOutputPath, persistedOutputSize } = await persistLargeOutputFile(result, outputCleanup);
-
-      // Cap image dimensions + size if present (CC-304 — see
-      // resizeShellImageOutput). Scope the decoded buffer so it can be
-      // reclaimed before we build the output object.
-      let isImage = isImageOutput(stdout);
-      let compressedStdout = stdout;
-      if (isImage) {
-        const resized = await resizeShellImageOutput(stdout, result.outputFilePath, persistedOutputSize);
-        if (resized) {
-          compressedStdout = resized;
-        } else {
-          // Parse failed (e.g. multi-line stdout after the data URL). Keep
-          // isImage in sync with what we actually send so the UI label stays
-          // accurate — mapToolResultToToolResultBlockParam's defensive
-          // fallthrough will send text, not an image block.
-          isImage = false;
-        }
-      }
-
-      const finalStderr = [result.stderr || '', stderrForShellReset].filter(Boolean).join('\n');
-
-      logEvent('tengu_powershell_tool_command_executed', {
-        command_type: getCommandTypeForLogging(input.command),
-        stdout_length: compressedStdout.length,
-        stderr_length: finalStderr.length,
-        exit_code: result.code,
-        interrupted: result.interrupted,
-      });
-
-      return {
-        data: {
-          stdout: compressedStdout,
-          stderr: finalStderr,
-          interrupted: result.interrupted,
-          returnCodeInterpretation: interpretation.message,
-          isImage,
-          persistedOutputPath,
-          persistedOutputSize,
-        },
-      };
-    } finally {
-      if (setToolJSX) setToolJSX(null);
-      await outputCleanup.dispose();
-    }
+      },
+    };
   },
   isResultTruncated(output: Out): boolean {
     return isOutputLineTruncated(output.stdout) || isOutputLineTruncated(output.stderr);
   },
-} satisfies ToolDef<InputSchema, Out>);
+} satisfies ToolDef<InputSchema, Out, PowerShellProgress>);
 
 async function* runPowerShellCommand({
   input,

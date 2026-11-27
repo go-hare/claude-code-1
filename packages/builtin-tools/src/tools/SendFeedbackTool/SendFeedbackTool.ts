@@ -4,7 +4,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
-import type { ToolResultBlockParam } from 'src/Tool.js'
+import type { ToolDef, ToolDeps, ToolResultBlockParam } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
@@ -170,9 +170,6 @@ export const SendFeedbackTool = buildTool({
   isEnabled() {
     return isSendFeedbackEnabled()
   },
-  async checkPermissions(input) {
-    return { behavior: 'allow' as const, updatedInput: input }
-  },
   mapToolResultToToolResultBlockParam(
     output: Output,
     toolUseID: string,
@@ -189,165 +186,174 @@ export const SendFeedbackTool = buildTool({
       ? truncateGraphemes(input.title, MAX_TITLE_CHARS)
       : ''
   },
-  async call(input, context) {
-    if (!isSendFeedbackEnabled()) {
-      return {
-        data: {
-          success: false,
-          message: 'SendFeedback is not enabled in this session.',
-        },
-      }
-    }
-    if (!tryConsumeSendFeedbackCall()) {
-      const cap = getMaxToolCallsPerSession()
-      logEvent('tengu_feedback_draft_call_capped', {
-        cap: cap as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      })
-      return {
-        data: {
-          success: false,
-          message: `SendFeedback has reached its limit of ${cap} calls per session. Do not call it again this session; drafts already queued are unaffected and the user can review them with /feedback.`,
-        },
-      }
-    }
-
-    const sessionId = getSessionId()
-    const lastRequestId = getLastMainRequestId()
-    const messages = context.messages ?? []
-    const requestIds: string[] = []
-    for (const message of messages) {
-      if (
-        message.type === 'assistant' &&
-        typeof message.requestId === 'string'
-      ) {
-        requestIds.push(message.requestId)
-      }
-    }
-    const withCurrent = lastRequestId
-      ? [...requestIds, lastRequestId]
-      : requestIds
-    const unique = uniqueStrings(withCurrent)
-    const keptRequestIds = unique.slice(-TOOL_CALL_REQUEST_ID_WINDOW)
-    const fallbackTurns =
-      requestIds.length === 0
-        ? new Set(
-            messages.flatMap(message => {
-              if (message.type !== 'assistant' || message.isVirtual) return []
-              const payload = message.message
-              if (!payload || payload.model === undefined) return []
-              return typeof payload.id === 'string' ? [payload.id] : []
-            }),
-          ).size
-        : 0
-    const assistantTurnCount = Math.max(
-      unique.length,
-      fallbackTurns + (lastRequestId ? 1 : 0),
-    )
-    const permissionMode = context.getAppState().toolPermissionContext.mode
-    const model = getRuntimeMainLoopModel({
-      permissionMode,
-      mainLoopModel: context.options.mainLoopModel,
-      exceeds200kTokens:
-        permissionMode === 'plan' &&
-        doesMostRecentAssistantMessageExceed200k(messages),
-    })
-    const effort = resolveAppliedEffort(
-      model,
-      pdSessionEffort(context.getAppState(), model),
-    )
-    const thinking = context.options.thinkingConfig
-    const draft = createFeedbackDraft({
-      type: input.type,
-      title: input.title,
-      details: input.details,
-      area: input.area,
-      failureMode: input.failure_mode,
-      taskCategory: input.task_category,
-      trigger: 'model_judgment',
-      requestIds: keptRequestIds,
-      sessionId,
-      cwd: getCwd(),
-      model,
-      cliVersion: MACRO.VERSION,
-      os: `${process.platform} x64`,
-      effort: effortToString(effort),
-      thinkingType: thinking.type,
-      thinkingBudget:
-        thinking.type === 'enabled' ? thinking.budgetTokens : undefined,
-      messageCount: messages.length,
-      assistantTurnCount,
-      subagentCount: countSubagentSpawns(messages),
-      transcriptFile: getTranscriptPathForSession(sessionId),
-    })
-    const written = await writeFeedbackDraft(
-      draft,
-      new Date(),
-      context.storageV5,
-    )
-    if (!written.success) {
-      logForDebugging(`feedback_drafts ${written.reason}`)
-      return {
-        data: {
-          success: false,
-          message:
-            written.reason === 'too_large'
-              ? 'Draft too large. Shorten the details and try once more.'
-              : 'Could not write the feedback draft to disk.',
-        },
-      }
-    }
-    const evictedHere = written.evicted.filter(
-      item => item.source_session_id === sessionId,
-    ).length
-    if (evictedHere > 0) decrementSessionDraftCount(evictedHere)
-    const presentation = queueFeedbackDraftNotice({
-      draftId: draft.draft_id,
-      title: draft.title,
-      type: draft.type,
-      detailsPreview: detailsPreview(draft.details),
-    })
-    logEvent('tengu_feedback_draft_created', {
-      type: draft.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      trigger:
-        draft.trigger as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      presentation:
-        presentation as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      request_id_count: draft.request_ids
-        .length as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      evicted_count: written.evicted
-        .length as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      failure_mode:
-        draft.failure_mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      task_category:
-        draft.task_category as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      effort: (typeof effort === 'number'
-        ? effort
-        : effort) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      thinking_type:
-        draft.thinking_type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      thinking_budget:
-        draft.thinking_budget as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      message_count:
-        draft.message_count as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      assistant_turn_count:
-        draft.assistant_turn_count as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      subagent_count:
-        draft.subagent_count as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-    })
-    logForDebugging('feedback_drafts')
-    context.appendSystemMessage?.({
-      type: 'system',
-      subtype: 'feedback_draft_queued',
-      draft_id: draft.draft_id,
-      draft_type: draft.type,
-      title: draft.title,
-      details_preview: truncateGraphemes(draft.details, 200),
-    } as never)
+  create(deps: ToolDeps) {
     return {
-      data: {
-        success: true,
-        message: `Feedback draft queued locally (max ${MAX_KEPT_FEEDBACK_DRAFTS} kept). The user can review and send it with /feedback; nothing is sent without their approval. Do not announce this or ask the user about it.`,
+      async checkPermissions(input: Input) {
+        return { behavior: 'allow' as const, updatedInput: input }
+      },
+      async call(input: Input) {
+        if (!isSendFeedbackEnabled()) {
+          return {
+            data: {
+              success: false,
+              message: 'SendFeedback is not enabled in this session.',
+            },
+          }
+        }
+        if (!tryConsumeSendFeedbackCall()) {
+          const cap = getMaxToolCallsPerSession()
+          logEvent('tengu_feedback_draft_call_capped', {
+            cap: cap as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+          return {
+            data: {
+              success: false,
+              message: `SendFeedback has reached its limit of ${cap} calls per session. Do not call it again this session; drafts already queued are unaffected and the user can review them with /feedback.`,
+            },
+          }
+        }
+
+        const sessionId = getSessionId()
+        const lastRequestId = getLastMainRequestId()
+        const messages = deps.messages()
+        const requestIds: string[] = []
+        for (const message of messages) {
+          if (
+            message.type === 'assistant' &&
+            typeof message.requestId === 'string'
+          ) {
+            requestIds.push(message.requestId)
+          }
+        }
+        const withCurrent = lastRequestId
+          ? [...requestIds, lastRequestId]
+          : requestIds
+        const unique = uniqueStrings(withCurrent)
+        const keptRequestIds = unique.slice(-TOOL_CALL_REQUEST_ID_WINDOW)
+        const fallbackTurns =
+          requestIds.length === 0
+            ? new Set(
+                messages.flatMap(message => {
+                  if (message.type !== 'assistant' || message.isVirtual)
+                    return []
+                  const payload = message.message
+                  if (!payload || payload.model === undefined) return []
+                  return typeof payload.id === 'string' ? [payload.id] : []
+                }),
+              ).size
+            : 0
+        const assistantTurnCount = Math.max(
+          unique.length,
+          fallbackTurns + (lastRequestId ? 1 : 0),
+        )
+        const appState = deps.getAppState()
+        const permissionMode = deps.permissions().mode
+        const model = getRuntimeMainLoopModel({
+          permissionMode,
+          mainLoopModel: deps.loopModel(),
+          exceeds200kTokens:
+            permissionMode === 'plan' &&
+            doesMostRecentAssistantMessageExceed200k(messages),
+        })
+        const effort = resolveAppliedEffort(
+          model,
+          pdSessionEffort(appState, model),
+        )
+        const thinking = deps.thinkingConfig()
+        const draft = createFeedbackDraft({
+          type: input.type,
+          title: input.title,
+          details: input.details,
+          area: input.area,
+          failureMode: input.failure_mode,
+          taskCategory: input.task_category,
+          trigger: 'model_judgment',
+          requestIds: keptRequestIds,
+          sessionId,
+          cwd: getCwd(),
+          model,
+          cliVersion: MACRO.VERSION,
+          os: `${process.platform} x64`,
+          effort: effortToString(effort),
+          thinkingType: thinking.type,
+          thinkingBudget:
+            thinking.type === 'enabled' ? thinking.budgetTokens : undefined,
+          messageCount: messages.length,
+          assistantTurnCount,
+          subagentCount: countSubagentSpawns(messages),
+          transcriptFile: getTranscriptPathForSession(sessionId),
+        })
+        const written = await writeFeedbackDraft(
+          draft,
+          new Date(),
+          deps.storageV5,
+        )
+        if (!written.success) {
+          logForDebugging(`feedback_drafts ${written.reason}`)
+          return {
+            data: {
+              success: false,
+              message:
+                written.reason === 'too_large'
+                  ? 'Draft too large. Shorten the details and try once more.'
+                  : 'Could not write the feedback draft to disk.',
+            },
+          }
+        }
+        const evictedHere = written.evicted.filter(
+          item => item.source_session_id === sessionId,
+        ).length
+        if (evictedHere > 0) decrementSessionDraftCount(evictedHere)
+        const presentation = queueFeedbackDraftNotice({
+          draftId: draft.draft_id,
+          title: draft.title,
+          type: draft.type,
+          detailsPreview: detailsPreview(draft.details),
+        })
+        logEvent('tengu_feedback_draft_created', {
+          type: draft.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          trigger:
+            draft.trigger as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          presentation:
+            presentation as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          request_id_count: draft.request_ids
+            .length as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          evicted_count: written.evicted
+            .length as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          failure_mode:
+            draft.failure_mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          task_category:
+            draft.task_category as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          effort: (typeof effort === 'number'
+            ? effort
+            : effort) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          thinking_type:
+            draft.thinking_type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          thinking_budget:
+            draft.thinking_budget as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          message_count:
+            draft.message_count as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          assistant_turn_count:
+            draft.assistant_turn_count as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          subagent_count:
+            draft.subagent_count as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        logForDebugging('feedback_drafts')
+        deps.appendSystemMessage?.({
+          type: 'system',
+          subtype: 'feedback_draft_queued',
+          draft_id: draft.draft_id,
+          draft_type: draft.type,
+          title: draft.title,
+          details_preview: truncateGraphemes(draft.details, 200),
+        } as never)
+        return {
+          data: {
+            success: true,
+            message: `Feedback draft queued locally (max ${MAX_KEPT_FEEDBACK_DRAFTS} kept). The user can review and send it with /feedback; nothing is sent without their approval. Do not announce this or ask the user about it.`,
+          },
+        }
       },
     }
   },
-})
+} satisfies ToolDef<InputSchema, Output>)

@@ -1,6 +1,6 @@
 import { feature } from 'bun:bundle'
 import { z } from 'zod/v4'
-import type { ToolResultBlockParam } from 'src/Tool.js'
+import type { ToolDef, ToolResultBlockParam } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { notifyAutomationStateChanged } from 'src/utils/sessionState.js'
@@ -96,111 +96,115 @@ export const SleepTool = buildTool({
     }
   },
 
-  async call(input: SleepInput, context) {
-    // Don't enter sleep if proactive was disabled or new work arrived while
-    // the model was deciding to wait.
-    if (shouldInterruptSleep()) {
-      return {
-        data: {
-          slept_seconds: 0,
-          interrupted: true,
-        },
-      }
-    }
-
-    const { duration_seconds } = input
-    const startTime = Date.now()
-    const sleepUntil = startTime + duration_seconds * 1000
-
-    if (isProactiveAutomationEnabled()) {
-      notifyAutomationStateChanged({
-        enabled: true,
-        phase: 'sleeping',
-        next_tick_at: null,
-        sleep_until: sleepUntil,
-      })
-    }
-
-    try {
-      await new Promise<void>((resolve, reject) => {
-        let timer: ReturnType<typeof setTimeout> | null = null
-        let wakeCheck: ReturnType<typeof setInterval> | null = null
-        let settled = false
-
-        const cleanup = () => {
-          if (timer !== null) {
-            clearTimeout(timer)
-            timer = null
+  create() {
+    return {
+      async call(input: SleepInput, callCtx) {
+        // Don't enter sleep if proactive was disabled or new work arrived while
+        // the model was deciding to wait.
+        if (shouldInterruptSleep()) {
+          return {
+            data: {
+              slept_seconds: 0,
+              interrupted: true,
+            },
           }
-          if (wakeCheck !== null) {
-            clearInterval(wakeCheck)
-            wakeCheck = null
-          }
-          context.abortController.signal.removeEventListener('abort', onAbort)
         }
 
-        const finish = () => {
-          if (settled) return
-          settled = true
-          cleanup()
-          resolve()
+        const { duration_seconds } = input
+        const startTime = Date.now()
+        const sleepUntil = startTime + duration_seconds * 1000
+
+        if (isProactiveAutomationEnabled()) {
+          notifyAutomationStateChanged({
+            enabled: true,
+            phase: 'sleeping',
+            next_tick_at: null,
+            sleep_until: sleepUntil,
+          })
         }
 
-        const interrupt = () => {
-          if (settled) return
-          settled = true
-          cleanup()
-          reject(new Error('interrupted'))
-        }
+        try {
+          await new Promise<void>((resolve, reject) => {
+            let timer: ReturnType<typeof setTimeout> | null = null
+            let wakeCheck: ReturnType<typeof setInterval> | null = null
+            let settled = false
 
-        const onAbort = () => {
-          interrupt()
-        }
-
-        timer = setTimeout(finish, duration_seconds * 1000)
-
-        // Abort via user interrupt
-        if (context.abortController.signal.aborted) {
-          interrupt()
-          return
-        }
-        context.abortController.signal.addEventListener('abort', onAbort, {
-          once: true,
-        })
-
-        // Poll proactive state and the shared command queue so new work can
-        // wake Sleep without waiting for the full duration.
-        wakeCheck = setInterval(() => {
-          if (shouldInterruptSleep()) {
-            interrupt()
-          }
-        }, SLEEP_WAKE_CHECK_INTERVAL_MS)
-      })
-      return {
-        data: {
-          slept_seconds: duration_seconds,
-          interrupted: false,
-        },
-      }
-    } catch {
-      const elapsed = Math.round((Date.now() - startTime) / 1000)
-      return {
-        data: {
-          slept_seconds: elapsed,
-          interrupted: true,
-        },
-      }
-    } finally {
-      notifyAutomationStateChanged(
-        isProactiveAutomationEnabled()
-          ? {
-              enabled: true,
-              phase: null,
-              next_tick_at: null,
-              sleep_until: null,
+            const cleanup = () => {
+              if (timer !== null) {
+                clearTimeout(timer)
+                timer = null
+              }
+              if (wakeCheck !== null) {
+                clearInterval(wakeCheck)
+                wakeCheck = null
+              }
+              callCtx.signal.removeEventListener('abort', onAbort)
             }
-          : null,
-      )
+
+            const finish = () => {
+              if (settled) return
+              settled = true
+              cleanup()
+              resolve()
+            }
+
+            const interrupt = () => {
+              if (settled) return
+              settled = true
+              cleanup()
+              reject(new Error('interrupted'))
+            }
+
+            const onAbort = () => {
+              interrupt()
+            }
+
+            timer = setTimeout(finish, duration_seconds * 1000)
+
+            // Abort via user interrupt
+            if (callCtx.signal.aborted) {
+              interrupt()
+              return
+            }
+            callCtx.signal.addEventListener('abort', onAbort, {
+              once: true,
+            })
+
+            // Poll proactive state and the shared command queue so new work can
+            // wake Sleep without waiting for the full duration.
+            wakeCheck = setInterval(() => {
+              if (shouldInterruptSleep()) {
+                interrupt()
+              }
+            }, SLEEP_WAKE_CHECK_INTERVAL_MS)
+          })
+          return {
+            data: {
+              slept_seconds: duration_seconds,
+              interrupted: false,
+            },
+          }
+        } catch {
+          const elapsed = Math.round((Date.now() - startTime) / 1000)
+          return {
+            data: {
+              slept_seconds: elapsed,
+              interrupted: true,
+            },
+          }
+        } finally {
+          notifyAutomationStateChanged(
+            isProactiveAutomationEnabled()
+              ? {
+                  enabled: true,
+                  phase: null,
+                  next_tick_at: null,
+                  sleep_until: null,
+                }
+              : null,
+          )
+        }
+      },
     }
   },
-})
+} satisfies ToolDef<InputSchema, SleepOutput>)

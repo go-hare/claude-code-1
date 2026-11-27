@@ -129,13 +129,17 @@ export const ReviewArtifactTool = buildTool({
       `Review complete: ${output.annotationCount} annotation(s)`,
     )
   },
-  async call({ artifact, title, annotations, summary }, _context) {
-    const output: Output = {
-      artifact,
-      title,
-      annotationCount: annotations.length,
-      summary,
+  create() {
+    return {
+      async call({ artifact, title, annotations, summary }) {
+        const output: Output = {
+          artifact,
+          title,
+          annotationCount: annotations.length,
+          summary,
+        }
+        return { data: output }
+      },
     }
-    return { data: output }
   },
 } satisfies ToolDef<InputSchema, Output>)

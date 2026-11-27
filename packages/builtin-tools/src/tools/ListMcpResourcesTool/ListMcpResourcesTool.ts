@@ -142,48 +142,74 @@ export const ListMcpResourcesTool = buildTool({
   get outputSchema(): OutputSchema {
     return outputSchema()
   },
-  async call(input, { options: { mcpClients } }) {
-    const { server: targetServer } = input
-
-    const clientsToProcess = targetServer
-      ? mcpClients.filter(client => client.name === targetServer)
-      : mcpClients
-
-    if (targetServer && clientsToProcess.length === 0) {
-      throw new Error(
-        `Server "${targetServer}" not found. Available servers: ${mcpClients.map(c => c.name).join(', ')}`,
-      )
-    }
-
-    // fetchResourcesForClient is LRU-cached (by server name) and already
-    // warm from startup prefetch. Cache is invalidated on onclose and on
-    // resources/list_changed notifications, so results are never stale.
-    // ensureConnectedClient is a no-op when healthy (memoize hit), but after
-    // onclose it returns a fresh connection so the re-fetch succeeds.
-    const results = await Promise.all(
-      clientsToProcess.map(async client => {
-        if (client.type !== 'connected') return []
-        try {
-          const fresh = await ensureConnectedClient(client)
-          return await fetchResourcesForClient(fresh)
-        } catch (error) {
-          // One server's reconnect failure shouldn't sink the whole result.
-          logMCPError(client.name, errorMessage(error))
-          return []
-        }
-      }),
-    )
-
-    const flat = results.flat()
-    const { items, skippedCount } = capMcpResourceListing(flat)
-    if (skippedCount > 0) {
-      logForDebugging(
-        `Skipped the last ${skippedCount} of ${flat.length} resources: the listing is too large. Only about the first 16 MB of a listing is used (less if it has many small values), and only about 1 million characters that are costly to normalize. The server must list fewer or shorter resources to get them back.`,
-        { level: 'warn' },
-      )
-    }
+  create(deps) {
     return {
-      data: items,
+      async call(input) {
+        const { server: targetServer } = input
+        const mcpClients = deps.mcpClients()
+        const preloadedResources = deps.mcpResources
+
+        const clientsToProcess = targetServer
+          ? mcpClients.filter(client => client.name === targetServer)
+          : mcpClients
+
+        let flat: Output
+        if (clientsToProcess.length > 0) {
+          // fetchResourcesForClient is LRU-cached (by server name) and already
+          // warm from startup prefetch. Cache is invalidated on onclose and on
+          // resources/list_changed notifications, so results are never stale.
+          // ensureConnectedClient is a no-op when healthy (memoize hit), but after
+          // onclose it returns a fresh connection so the re-fetch succeeds.
+          const results = await Promise.all(
+            clientsToProcess.map(async client => {
+              if (client.type !== 'connected') return []
+              try {
+                const fresh = await ensureConnectedClient(client)
+                return await fetchResourcesForClient(fresh)
+              } catch (error) {
+                // One server's reconnect failure shouldn't sink the whole result.
+                logMCPError(client.name, errorMessage(error))
+                return []
+              }
+            }),
+          )
+          flat = results.flat()
+        } else if (
+          targetServer &&
+          preloadedResources !== undefined &&
+          Object.hasOwn(preloadedResources, targetServer)
+        ) {
+          flat = preloadedResources[targetServer] ?? []
+        } else if (targetServer) {
+          const available = [
+            ...new Set([
+              ...mcpClients.map(c => c.name),
+              ...Object.keys(preloadedResources ?? {}),
+            ]),
+          ]
+          throw new Error(
+            `Server "${targetServer}" not found. Available servers: ${available.join(', ')}`,
+          )
+        } else if (
+          preloadedResources !== undefined &&
+          Object.keys(preloadedResources).length > 0
+        ) {
+          flat = Object.values(preloadedResources).flat()
+        } else {
+          flat = []
+        }
+
+        const { items, skippedCount } = capMcpResourceListing(flat)
+        if (skippedCount > 0) {
+          logForDebugging(
+            `Skipped the last ${skippedCount} of ${flat.length} resources: the listing is too large. Only about the first 16 MB of a listing is used (less if it has many small values), and only about 1 million characters that are costly to normalize. The server must list fewer or shorter resources to get them back.`,
+            { level: 'warn' },
+          )
+        }
+        return {
+          data: items,
+        }
+      },
     }
   },
   renderToolUseMessage,

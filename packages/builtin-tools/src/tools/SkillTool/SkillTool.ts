@@ -13,14 +13,19 @@ import {
   getCommands,
   type PromptCommand,
 } from 'src/commands.js'
-import type {
-  Tool,
-  ToolCallProgress,
-  ToolResult,
-  ToolUseContext,
-  ValidationResult,
+import {
+  buildTool,
+  createDefaultCanUseTool,
+  resolveToolUseContext,
+  type Tool,
+  type ToolCallContext,
+  type ToolCallProgress,
+  type ToolDef,
+  type ToolDeps,
+  type ToolResult,
+  type ToolUseContext,
+  type ValidationResult,
 } from 'src/Tool.js'
-import { buildTool, type ToolDef } from 'src/Tool.js'
 import type { Command } from 'src/types/command.js'
 import type {
   AssistantMessage,
@@ -122,16 +127,16 @@ import {
  * Gets all commands including MCP skills/prompts from AppState.
  * SkillTool needs this because getCommands() only returns local/bundled skills.
  */
-async function getAllCommands(context: ToolUseContext): Promise<Command[]> {
+async function getAllCommands(
+  deps: Pick<ToolDeps, 'getAppState'>,
+): Promise<Command[]> {
   // Only include MCP skills (loadedFrom === 'mcp'), not plain MCP prompts.
   // Before this filter, the model could invoke MCP prompts via SkillTool
   // if it guessed the mcp__server__prompt name — they weren't discoverable
   // but were technically reachable.
-  const mcpSkills = context
-    .getAppState()
-    .mcp.commands.filter(
-      cmd => cmd.type === 'prompt' && cmd.loadedFrom === 'mcp',
-    )
+  const mcpSkills = (deps.getAppState()?.mcp?.commands ?? []).filter(
+    cmd => cmd.type === 'prompt' && cmd.loadedFrom === 'mcp',
+  )
   if (mcpSkills.length === 0) return getCommands(getProjectRoot())
   const localCommands = await getCommands(getProjectRoot())
   return uniqBy([...localCommands, ...mcpSkills], 'name')
@@ -520,7 +525,7 @@ async function executeForkedSkill(
   args: string | undefined,
   context: ToolUseContext,
   canUseTool: CanUseToolFn,
-  parentMessage: AssistantMessage,
+  parentMessage: AssistantMessage | undefined,
   onProgress?: ToolCallProgress<Progress>,
 ): Promise<ToolResult<Output>> {
   const startTime = Date.now()
@@ -737,7 +742,7 @@ async function executeForkedSkill(
               )
             if (hasToolContent) {
               onProgress({
-                toolUseID: `skill_${parentMessage.message.id}`,
+                toolUseID: `skill_${parentMessage?.message?.id ?? context.toolUseId ?? 'fork'}`,
                 data: {
                   message: m,
                   type: 'skill_progress',
@@ -840,7 +845,341 @@ type OutputSchema = ReturnType<typeof outputSchema>
 
 export type Output = z.input<OutputSchema>
 
-export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
+async function executeSkillCall(
+  { skill, args }: z.infer<InputSchema>,
+  deps: ToolDeps,
+  callCtx: ToolCallContext<Progress>,
+): Promise<ToolResult<Output>> {
+  // At this point, validateInput has already confirmed:
+  // - Skill format is valid
+  // - Skill exists
+  // - Skill can be loaded
+  // - Skill doesn't have disableModelInvocation
+  // - Skill is a prompt-based skill
+  const context = resolveToolUseContext(deps, callCtx)
+  const canUseTool = callCtx.canUseTool ?? createDefaultCanUseTool()
+  const parentMessage = callCtx.parentMessage
+  const onProgress = callCtx.onProgress
+
+  // Skills are just names, with optional arguments
+  const trimmed = skill.trim()
+
+  // Remove leading slash if present (for compatibility)
+  const commandName = trimmed.startsWith('/') ? trimmed.substring(1) : trimmed
+
+  // Remote canonical skill execution (ant-only experimental). Intercepts
+  // `_canonical_<slug>` before local command lookup — loads SKILL.md from
+  // AKI/GCS (with local cache), injects content directly as a user message.
+  // Remote skills are declarative markdown so no slash-command expansion
+  // (no !command substitution, no $ARGUMENTS interpolation) is needed.
+  if (feature('EXPERIMENTAL_SKILL_SEARCH') && process.env.USER_TYPE === 'ant') {
+    const slug = remoteSkillModules!.stripCanonicalPrefix(commandName)
+    if (slug !== null) {
+      return executeRemoteSkill(slug, commandName, parentMessage, context)
+    }
+  }
+
+  // densable Skill call: save → set activeSkill → IQ → fork only when !IQ.
+  const previousActiveSkill = context.options.activeSkill
+  context.options.activeSkill = commandName
+  const coordinatorMain = isCoordinatorMainThread(context.agentId)
+  let dispatched = false
+  try {
+    const commands = await getAllCommands(deps)
+    const command = findCommand(commandName, commands)
+    if (command) {
+      context.options.activeSkill =
+        command.type === 'prompt' && command.unqualifiedName != null
+          ? command.unqualifiedName
+          : command.name
+    }
+
+    // Track skill usage for ranking (gold skips this on coordinator main)
+    if (!coordinatorMain) {
+      recordSkillUsage(commandName)
+    }
+
+    // Official 2.1.309 #1145 (`m0n`): before running `/verify` or `/code-review`,
+    // discover nested package skills for shell-modified files in git status.
+    if (command?.type === 'prompt' && command.unqualifiedName == null) {
+      const { discoverNestedSkillsForChangedFiles, isVerifyOrReviewSkillName } =
+        await import('src/skills/loadSkillsDir.js')
+      if (isVerifyOrReviewSkillName(command.name)) {
+        await discoverNestedSkillsForChangedFiles(getCwd()).catch(err => {
+          logForDebugging(
+            `[skills] Changed files not searched for nested skills: ${err}`,
+          )
+        })
+      }
+    }
+
+    // densable `k_n(g,n||"",s)==="fork"&&!k`
+    if (
+      command?.type === 'prompt' &&
+      resolveSkillExecutionContext(command, args || '', context) === 'fork' &&
+      !coordinatorMain
+    ) {
+      try {
+        return await executeForkedSkill(
+          command,
+          commandName,
+          args,
+          context,
+          canUseTool,
+          parentMessage,
+          onProgress,
+        )
+      } finally {
+        context.options.activeSkill = previousActiveSkill
+      }
+    }
+
+    // Snapshot prior invoke content before processPromptSlashCommand records.
+    const skillAgentId = getAgentContext()?.agentId ?? null
+    const priorContent = getInvokedSkillsForAgent(skillAgentId).get(
+      `${skillAgentId ?? ''}:${commandName}`,
+    )?.content
+
+    // Process the skill with optional args
+    const { processPromptSlashCommand } = await import(
+      'src/utils/processUserInput/processSlashCommand.js'
+    )
+    const processedCommand = await processPromptSlashCommand(
+      commandName,
+      args || '', // Pass args if provided
+      commands,
+      context,
+      [],
+      coordinatorMain,
+    )
+
+    if (!processedCommand.shouldQuery) {
+      throw new Error('Command processing failed')
+    }
+
+    // Extract metadata from the command
+    const allowedTools = coordinatorMain
+      ? []
+      : processedCommand.allowedTools || []
+    const model = coordinatorMain ? undefined : processedCommand.model
+    const effort = coordinatorMain ? undefined : processedCommand.effort
+
+    const isBuiltIn = builtInCommandNames().has(commandName)
+    const isBundled = command?.type === 'prompt' && command.source === 'bundled'
+    const isOfficialSkill =
+      command?.type === 'prompt' && isOfficialMarketplaceSkill(command)
+    const sanitizedCommandName =
+      isBuiltIn || isBundled || isOfficialSkill ? commandName : 'custom'
+
+    const wasDiscoveredField =
+      feature('EXPERIMENTAL_SKILL_SEARCH') &&
+      remoteSkillModules!.isSkillSearchEnabled()
+        ? {
+            was_discovered:
+              deps.discoveredSkillNames?.has(commandName) ?? false,
+          }
+        : {}
+    const pluginMarketplace =
+      command?.type === 'prompt' && command.pluginInfo
+        ? parsePluginIdentifier(command.pluginInfo.repository).marketplace
+        : undefined
+    const queryDepth = deps.queryTracking?.depth ?? 0
+    const parentAgentId = getAgentContext()?.agentId
+    logEvent('tengu_skill_tool_invocation', {
+      command_name:
+        sanitizedCommandName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      // _PROTO_skill_name routes to the privileged skill_name BQ column
+      // (unredacted, all users); command_name stays in additional_metadata as
+      // the redacted variant for general-access dashboards.
+      _PROTO_skill_name:
+        commandName as AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
+      execution_context: (coordinatorMain
+        ? 'read-only'
+        : 'inline') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      invocation_trigger: (queryDepth > 0
+        ? 'nested-skill'
+        : 'claude-proactive') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      query_depth: queryDepth,
+      ...(parentAgentId && {
+        parent_agent_id:
+          parentAgentId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      }),
+      ...wasDiscoveredField,
+      skill_name:
+        commandName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      ...(command?.type === 'prompt' && {
+        skill_source:
+          command.source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      }),
+      ...(command?.loadedFrom && {
+        skill_loaded_from:
+          command.loadedFrom as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      }),
+      ...(command?.kind && {
+        skill_kind:
+          command.kind as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      }),
+      ...(command?.type === 'prompt' &&
+        command.pluginInfo && {
+          _PROTO_plugin_name: command.pluginInfo.pluginManifest
+            .name as AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
+          ...(pluginMarketplace && {
+            _PROTO_marketplace_name:
+              pluginMarketplace as AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
+          }),
+          plugin_name: (isOfficialSkill
+            ? command.pluginInfo.pluginManifest.name
+            : 'third-party') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          plugin_repository: (isOfficialSkill
+            ? command.pluginInfo.repository
+            : 'third-party') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          ...buildPluginCommandTelemetryFields(command.pluginInfo),
+        }),
+    })
+
+    // Get the tool use ID from the parent message for linking newMessages
+    const toolUseID =
+      parentMessage !== undefined
+        ? getToolUseIDFromParentMessage(parentMessage, SKILL_TOOL_NAME)
+        : callCtx.toolUseId
+
+    // Tag user messages with sourceToolUseID so they stay transient until this tool resolves
+    const filteredMessages = processedCommand.messages.filter(
+      (m): m is UserMessage | AttachmentMessage | SystemMessage => {
+        if (m.type === 'progress') {
+          return false
+        }
+        // Filter out command-message since SkillTool handles display
+        if (m.type === 'user' && 'message' in m) {
+          const content = m.message.content
+          if (
+            typeof content === 'string' &&
+            content.includes(`<${COMMAND_MESSAGE_TAG}>`)
+          ) {
+            return false
+          }
+        }
+        return true
+      },
+    )
+    const renderedContent = getInvokedSkillsForAgent(skillAgentId).get(
+      `${skillAgentId ?? ''}:${commandName}`,
+    )?.content
+    const newMessages = tagMessagesWithToolUseID(
+      elideByteIdenticalSkillReinvocation({
+        messages: filteredMessages,
+        contextMessages: context.messages,
+        commandName,
+        args,
+        priorContent,
+        renderedContent,
+      }),
+      toolUseID,
+    )
+
+    logForDebugging(
+      `SkillTool returning ${newMessages.length} newMessages for skill ${commandName}`,
+    )
+
+    // Note: addInvokedSkill and registerSkillHooks are called inside
+    // processPromptSlashCommand (via getMessagesForPromptSlashCommand), so
+    // calling them again here would double-register hooks and rebuild
+    // skillContent redundantly.
+
+    // Return success with newMessages and contextModifier
+    dispatched = true
+    return {
+      data: {
+        success: true,
+        commandName,
+        allowedTools: allowedTools.length > 0 ? allowedTools : undefined,
+        model,
+        ...(coordinatorMain && { readOnly: true }),
+      },
+      newMessages,
+      contextModifier(ctx) {
+        let modifiedContext = ctx
+        const inlineLayers: HostPermissionLayer[] = []
+
+        // Update allowed tools if specified
+        if (allowedTools.length > 0) {
+          inlineLayers.push({ kind: 'allowed_tools', allowedTools })
+          // Capture the current getAppState to chain modifications properly
+          const previousGetAppState = modifiedContext.getAppState
+          modifiedContext = {
+            ...modifiedContext,
+            getAppState() {
+              // Use the previous getAppState, not the closure's context.getAppState,
+              // to properly chain context modifications
+              const appState = previousGetAppState()
+              return {
+                ...appState,
+                toolPermissionContext: {
+                  ...appState.toolPermissionContext,
+                  alwaysAllowRules: {
+                    ...appState.toolPermissionContext.alwaysAllowRules,
+                    command: [
+                      ...new Set([
+                        ...(appState.toolPermissionContext.alwaysAllowRules
+                          .command || []),
+                        ...allowedTools,
+                      ]),
+                    ],
+                  },
+                },
+              }
+            },
+          }
+        }
+
+        // Carry [1m] suffix over — otherwise a skill with `model: opus` on an
+        // opus[1m] session drops the effective window to 200K and trips autocompact.
+        if (model) {
+          const resolvedModel = resolveSkillModelOverride(
+            model,
+            ctx.options.mainLoopModel,
+          )
+          inlineLayers.push({ kind: 'model', mainLoopModel: resolvedModel })
+          modifiedContext = {
+            ...modifiedContext,
+            options: {
+              ...modifiedContext.options,
+              mainLoopModel: resolvedModel,
+            },
+          }
+        }
+
+        // Override effort level if skill specifies one (densable 289: contextLayers + sessionEffort)
+        if (effort !== undefined) {
+          inlineLayers.push({ kind: 'effort', effort })
+          const previousGetAppState = modifiedContext.getAppState
+          modifiedContext = {
+            ...modifiedContext,
+            getAppState() {
+              const appState = previousGetAppState()
+              return {
+                ...appState,
+                sessionEffort: levelSessionEffort(effort),
+              }
+            },
+          }
+        }
+
+        if (inlineLayers.length > 0) {
+          modifiedContext = applyContextLayers(modifiedContext, inlineLayers)
+        }
+
+        return modifiedContext
+      },
+    }
+  } finally {
+    if (coordinatorMain || !dispatched) {
+      context.options.activeSkill = previousActiveSkill
+    }
+  }
+}
+
+export const SkillTool = buildTool({
   name: SKILL_TOOL_NAME,
   searchHint: 'invoke a slash-command skill',
   maxResultSizeChars: 100_000,
@@ -853,7 +1192,8 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
 
   description: async ({ skill }) => `Execute skill: ${skill}`,
 
-  prompt: async () => getPrompt(getProjectRoot()),
+  prompt: async (_options?: Parameters<Tool['prompt']>[0]) =>
+    getPrompt(getProjectRoot()),
 
   // Only one skill/command should run at a time, since the tool expands the
   // command into a full prompt that Claude must process before continuing.
@@ -863,326 +1203,410 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
   // name alone is sufficient — it just records that the skill fired.
   toAutoClassifierInput: ({ skill }) => skill ?? '',
 
-  async validateInput({ skill }, context): Promise<ValidationResult> {
-    // Skills are just skill names, no arguments
-    const trimmed = skill.trim()
-    if (!trimmed) {
-      return {
-        result: false,
-        message: `Invalid skill format: ${skill}`,
-        errorCode: 1,
-      }
-    }
-
-    // Remove leading slash if present (for compatibility)
-    const hasLeadingSlash = trimmed.startsWith('/')
-    if (hasLeadingSlash) {
-      logEvent('tengu_skill_tool_slash_prefix', {})
-    }
-    const normalizedCommandName = hasLeadingSlash
-      ? trimmed.substring(1)
-      : trimmed
-
-    // Remote canonical skill handling (ant-only experimental). Intercept
-    // `_canonical_<slug>` names before local command lookup since remote
-    // skills are not in the local command registry.
-    // Official Dsd producer: when SYNC_SKILLS is on, start materialization
-    // before the wait so concurrent SkillTool waits can race the load.
-    if (
-      feature('EXPERIMENTAL_SKILL_SEARCH') &&
-      process.env.USER_TYPE === 'ant'
-    ) {
-      const slug = remoteSkillModules!.stripCanonicalPrefix(
-        normalizedCommandName,
-      )
-      if (slug !== null) {
-        const meta = remoteSkillModules!.getDiscoveredRemoteSkill(slug)
-        if (!meta) {
+  create(deps) {
+    return {
+      async validateInput({ skill }, callCtx): Promise<ValidationResult> {
+        // Skills are just skill names, no arguments
+        const trimmed = skill.trim()
+        if (!trimmed) {
           return {
             result: false,
-            message: `Remote skill ${slug} was not discovered in this session. Use DiscoverSkills to find remote skills first.`,
-            errorCode: 6,
+            message: `Invalid skill format: ${skill}`,
+            errorCode: 1,
           }
         }
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const { isSyncSkillsEnabled } =
-            require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const { runSyncSkillMaterialization } =
-            require('src/utils/syncSkillsMaterialization.js') as typeof import('src/utils/syncSkillsMaterialization.js')
-          if (isSyncSkillsEnabled()) {
-            void runSyncSkillMaterialization(
+
+        // Remove leading slash if present (for compatibility)
+        const hasLeadingSlash = trimmed.startsWith('/')
+        if (hasLeadingSlash) {
+          logEvent('tengu_skill_tool_slash_prefix', {})
+        }
+        const normalizedCommandName = hasLeadingSlash
+          ? trimmed.substring(1)
+          : trimmed
+
+        // Remote canonical skill handling (ant-only experimental). Intercept
+        // `_canonical_<slug>` names before local command lookup since remote
+        // skills are not in the local command registry.
+        // Official Dsd producer: when SYNC_SKILLS is on, start materialization
+        // before the wait so concurrent SkillTool waits can race the load.
+        if (
+          feature('EXPERIMENTAL_SKILL_SEARCH') &&
+          process.env.USER_TYPE === 'ant'
+        ) {
+          const slug = remoteSkillModules!.stripCanonicalPrefix(
+            normalizedCommandName,
+          )
+          if (slug !== null) {
+            const meta = remoteSkillModules!.getDiscoveredRemoteSkill(slug)
+            if (!meta) {
+              return {
+                result: false,
+                message: `Remote skill ${slug} was not discovered in this session. Use DiscoverSkills to find remote skills first.`,
+                errorCode: 6,
+              }
+            }
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              const { isSyncSkillsEnabled } =
+                require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              const { runSyncSkillMaterialization } =
+                require('src/utils/syncSkillsMaterialization.js') as typeof import('src/utils/syncSkillsMaterialization.js')
+              if (isSyncSkillsEnabled()) {
+                void runSyncSkillMaterialization(
+                  normalizedCommandName,
+                  async () => {
+                    try {
+                      await remoteSkillModules!.loadRemoteSkill(slug, meta.url)
+                      return { ok: true as const }
+                    } catch (e) {
+                      return {
+                        ok: false as const,
+                        reason: errorMessage(e),
+                      }
+                    }
+                  },
+                )
+              }
+            } catch {
+              // densable optional
+            }
+            // Official Nit/gpo: wait for denser/producer materialization of this skill.
+            const materialization = await waitForSyncSkillMaterialization(
               normalizedCommandName,
-              async () => {
-                try {
-                  await remoteSkillModules!.loadRemoteSkill(slug, meta.url)
-                  return { ok: true as const }
-                } catch (e) {
-                  return {
-                    ok: false as const,
-                    reason: errorMessage(e),
-                  }
-                }
-              },
             )
+            if (!materialization.ok) {
+              logEvent('skill_invoke_not_materialized', {})
+              return {
+                result: false,
+                message: formatSyncSkillNotMaterializedMessage(
+                  normalizedCommandName,
+                  materialization.reason,
+                ),
+                errorCode: 7,
+              }
+            }
+            // Discovered remote skill — valid. Loading happens in call().
+            return { result: true }
           }
-        } catch {
-          // densable optional
         }
-        // Official Nit/gpo: wait for denser/producer materialization of this skill.
+
+        // Official Nit/gpo: when SYNC_SKILLS is on, wait for denser materialization
+        // of this skill name (if a producer registered a pending promise).
         const materialization = await waitForSyncSkillMaterialization(
           normalizedCommandName,
         )
-        if (!materialization.ok) {
+        const materializationFailReason = materialization.ok
+          ? undefined
+          : materialization.reason
+
+        // Get available commands (including MCP skills)
+        const commands = await getAllCommands(deps)
+
+        // Check if command exists
+        const foundCommand = findCommand(normalizedCommandName, commands)
+        // Official: materialization fail + (missing | incomplete) → not_materialized.
+        if (materializationFailReason !== undefined && !foundCommand) {
           logEvent('skill_invoke_not_materialized', {})
           return {
             result: false,
             message: formatSyncSkillNotMaterializedMessage(
               normalizedCommandName,
-              materialization.reason,
+              materializationFailReason,
             ),
             errorCode: 7,
           }
         }
-        // Discovered remote skill — valid. Loading happens in call().
+        if (!foundCommand) {
+          // densable Mv: strip spurious `anthropic-skills:` prefix and suggest listed name
+          const stripped = normalizedCommandName.startsWith('anthropic-skills:')
+            ? normalizedCommandName.slice('anthropic-skills:'.length)
+            : normalizedCommandName
+          const unprefixed =
+            stripped !== normalizedCommandName
+              ? findCommand(stripped, commands)
+              : undefined
+          if (
+            unprefixed &&
+            unprefixed.name === stripped &&
+            unprefixed.type === 'prompt' &&
+            !unprefixed.disableModelInvocation &&
+            unprefixed.loadedFrom !== 'mcp'
+          ) {
+            logEvent('tengu_skill_tool_unprefixed_match', {})
+            return {
+              result: false,
+              message: `Unknown skill: ${normalizedCommandName}. Did you mean ${unprefixed.name}?`,
+              errorCode: 2,
+            }
+          }
+          return {
+            result: false,
+            message: `Unknown skill: ${normalizedCommandName}`,
+            errorCode: 2,
+          }
+        }
+
+        const context = resolveToolUseContext(deps, callCtx)
+
+        // Official 2.1.328 `we(C, o)` (`chunk@303609827.js@21600`):
+        // prevent a forked skill subagent from recursively re-invoking itself or an
+        // active ancestor forked skill via SkillTool.
+        if (isForkedSkillRecursiveInvocation(foundCommand, context)) {
+          logEvent('tengu_skill_tool_fork_recursion_blocked', {})
+          return {
+            result: false,
+            message: `Skill ${normalizedCommandName} is already executing in this forked context — you are the subagent running it. Execute the instructions in the skill body directly instead of re-invoking the ${SKILL_TOOL_NAME} tool.`,
+            errorCode: 9,
+          }
+        }
+
+        // densable mvn: disableModelInvocation && !userTypedThisTurn
+        // Skill tool validateInput is model-invoked (userTypedThisTurn=false).
+        if (foundCommand.disableModelInvocation) {
+          return {
+            result: false,
+            message: formatDisableModelInvocationMessage(normalizedCommandName),
+            errorCode: 4,
+          }
+        }
+
+        // Check if command is a prompt-based command
+        if (foundCommand.type !== 'prompt') {
+          return {
+            result: false,
+            message: `Skill ${normalizedCommandName} is not a prompt-based skill`,
+            errorCode: 5,
+          }
+        }
+
         return { result: true }
-      }
-    }
+      },
 
-    // Official Nit/gpo: when SYNC_SKILLS is on, wait for denser materialization
-    // of this skill name (if a producer registered a pending promise).
-    const materialization = await waitForSyncSkillMaterialization(
-      normalizedCommandName,
-    )
-    const materializationFailReason = materialization.ok
-      ? undefined
-      : materialization.reason
+      async checkPermissions(
+        { skill, args },
+        callCtx,
+      ): Promise<PermissionDecision> {
+        // Skills are just skill names, no arguments
+        const trimmed = skill.trim()
 
-    // Get available commands (including MCP skills)
-    const commands = await getAllCommands(context)
+        // Remove leading slash if present (for compatibility)
+        const commandName = trimmed.startsWith('/')
+          ? trimmed.substring(1)
+          : trimmed
 
-    // Check if command exists
-    const foundCommand = findCommand(normalizedCommandName, commands)
-    // Official: materialization fail + (missing | incomplete) → not_materialized.
-    if (materializationFailReason !== undefined && !foundCommand) {
-      logEvent('skill_invoke_not_materialized', {})
-      return {
-        result: false,
-        message: formatSyncSkillNotMaterializedMessage(
-          normalizedCommandName,
-          materializationFailReason,
-        ),
-        errorCode: 7,
-      }
-    }
-    if (!foundCommand) {
-      // densable Mv: strip spurious `anthropic-skills:` prefix and suggest listed name
-      const stripped = normalizedCommandName.startsWith('anthropic-skills:')
-        ? normalizedCommandName.slice('anthropic-skills:'.length)
-        : normalizedCommandName
-      const unprefixed =
-        stripped !== normalizedCommandName
-          ? findCommand(stripped, commands)
-          : undefined
-      if (
-        unprefixed &&
-        unprefixed.name === stripped &&
-        unprefixed.type === 'prompt' &&
-        !unprefixed.disableModelInvocation &&
-        unprefixed.loadedFrom !== 'mcp'
-      ) {
-        logEvent('tengu_skill_tool_unprefixed_match', {})
-        return {
-          result: false,
-          message: `Unknown skill: ${normalizedCommandName}. Did you mean ${unprefixed.name}?`,
-          errorCode: 2,
+        const permissionContext = deps.permissions()
+
+        // Look up the command object to pass as metadata
+        const commands = await getAllCommands(deps)
+        const commandObj = findCommand(commandName, commands)
+
+        // Helper function to check if a deny/ask rule matches the skill
+        // Normalizes both inputs by stripping leading slashes for consistent matching
+        const ruleMatches = (ruleContent: string): boolean => {
+          if (rawSkillRuleMatchesCandidate(ruleContent, commandName)) {
+            return true
+          }
+          if (
+            commandObj &&
+            rawSkillRuleMatchesCandidate(ruleContent, commandObj.name)
+          ) {
+            return true
+          }
+          return false
         }
-      }
-      return {
-        result: false,
-        message: `Unknown skill: ${normalizedCommandName}`,
-        errorCode: 2,
-      }
-    }
 
-    // Official 2.1.328 `we(C, o)` (`chunk@303609827.js@21600`):
-    // prevent a forked skill subagent from recursively re-invoking itself or an
-    // active ancestor forked skill via SkillTool.
-    if (isForkedSkillRecursiveInvocation(foundCommand, context)) {
-      logEvent('tengu_skill_tool_fork_recursion_blocked', {})
-      return {
-        result: false,
-        message: `Skill ${normalizedCommandName} is already executing in this forked context — you are the subagent running it. Execute the instructions in the skill body directly instead of re-invoking the ${SKILL_TOOL_NAME} tool.`,
-        errorCode: 9,
-      }
-    }
+        const isNonholderReservedName = (): boolean =>
+          isReservedNamespaceGuardEnabled() &&
+          isReservedSyncedSkillName(commandName) &&
+          !isAccountSyncedSkillCommand(commandObj)
 
-    // densable mvn: disableModelInvocation && !userTypedThisTurn
-    // Skill tool validateInput is model-invoked (userTypedThisTurn=false).
-    if (foundCommand.disableModelInvocation) {
-      return {
-        result: false,
-        message: formatDisableModelInvocationMessage(normalizedCommandName),
-        errorCode: 4,
-      }
-    }
-
-    // Check if command is a prompt-based command
-    if (foundCommand.type !== 'prompt') {
-      return {
-        result: false,
-        message: `Skill ${normalizedCommandName} is not a prompt-based skill`,
-        errorCode: 5,
-      }
-    }
-
-    return { result: true }
-  },
-
-  async checkPermissions(
-    { skill, args },
-    context,
-  ): Promise<PermissionDecision> {
-    // Skills are just skill names, no arguments
-    const trimmed = skill.trim()
-
-    // Remove leading slash if present (for compatibility)
-    const commandName = trimmed.startsWith('/') ? trimmed.substring(1) : trimmed
-
-    const appState = context.getAppState()
-    const permissionContext = appState.toolPermissionContext
-
-    // Look up the command object to pass as metadata
-    const commands = await getAllCommands(context)
-    const commandObj = findCommand(commandName, commands)
-
-    // Helper function to check if a deny/ask rule matches the skill
-    // Normalizes both inputs by stripping leading slashes for consistent matching
-    const ruleMatches = (ruleContent: string): boolean => {
-      if (rawSkillRuleMatchesCandidate(ruleContent, commandName)) {
-        return true
-      }
-      if (
-        commandObj &&
-        rawSkillRuleMatchesCandidate(ruleContent, commandObj.name)
-      ) {
-        return true
-      }
-      return false
-    }
-
-    const isNonholderReservedName = (): boolean =>
-      isReservedNamespaceGuardEnabled() &&
-      isReservedSyncedSkillName(commandName) &&
-      !isAccountSyncedSkillCommand(commandObj)
-
-    // Check for deny rules
-    const denyRules = getRuleByContentsForTool(
-      permissionContext,
-      SkillTool as Tool,
-      'deny',
-    )
-    for (const [ruleContent, rule] of denyRules.entries()) {
-      if (ruleMatches(ruleContent)) {
-        return {
-          behavior: 'deny',
-          message: `Skill execution blocked by permission rules`,
-          decisionReason: {
-            type: 'rule',
-            rule,
-          },
+        // Check for deny rules
+        const denyRules = getRuleByContentsForTool(
+          permissionContext,
+          SkillTool as Tool,
+          'deny',
+        )
+        for (const [ruleContent, rule] of denyRules.entries()) {
+          if (ruleMatches(ruleContent)) {
+            return {
+              behavior: 'deny',
+              message: `Skill execution blocked by permission rules`,
+              decisionReason: {
+                type: 'rule',
+                rule,
+              },
+            }
+          }
         }
-      }
-    }
 
-    // Remote canonical skills are ant-only experimental — auto-grant.
-    // Placed AFTER the deny loop so a user-configured Skill(_canonical_:*)
-    // deny rule is honored (same pattern as safe-properties auto-allow below).
-    // The skill content itself is canonical/curated, not user-authored.
-    if (
-      feature('EXPERIMENTAL_SKILL_SEARCH') &&
-      process.env.USER_TYPE === 'ant'
-    ) {
-      const slug = remoteSkillModules!.stripCanonicalPrefix(commandName)
-      if (slug !== null) {
-        return {
-          behavior: 'allow',
-          updatedInput: { skill, args },
-          decisionReason: undefined,
+        // Remote canonical skills are ant-only experimental — auto-grant.
+        // Placed AFTER the deny loop so a user-configured Skill(_canonical_:*)
+        // deny rule is honored (same pattern as safe-properties auto-allow below).
+        // The skill content itself is canonical/curated, not user-authored.
+        if (
+          feature('EXPERIMENTAL_SKILL_SEARCH') &&
+          process.env.USER_TYPE === 'ant'
+        ) {
+          const slug = remoteSkillModules!.stripCanonicalPrefix(commandName)
+          if (slug !== null) {
+            return {
+              behavior: 'allow',
+              updatedInput: { skill, args },
+              decisionReason: undefined,
+            }
+          }
         }
-      }
-    }
 
-    // Check for explicit ask rules (official `chunk@303609827.js@25150`)
-    const askRules = getRuleByContentsForTool(
-      permissionContext,
-      SkillTool as Tool,
-      'ask',
-    )
-    for (const [ruleContent, rule] of askRules.entries()) {
-      if (ruleMatches(ruleContent)) {
-        const suppressAlwaysAllow =
-          isNonholderReservedName() || isSha256PinnedSkillRule(commandName)
-        return {
-          behavior: 'ask',
-          message: `Execute skill: ${commandName}`,
-          decisionReason: {
-            type: 'rule',
-            rule,
-          },
-          ...(suppressAlwaysAllow ? { suppressAlwaysAllowRule: true } : {}),
-          updatedInput: { skill, args },
-          metadata: commandObj ? { command: commandObj } : undefined,
+        // Check for explicit ask rules (official `chunk@303609827.js@25150`)
+        const askRules = getRuleByContentsForTool(
+          permissionContext,
+          SkillTool as Tool,
+          'ask',
+        )
+        for (const [ruleContent, rule] of askRules.entries()) {
+          if (ruleMatches(ruleContent)) {
+            const suppressAlwaysAllow =
+              isNonholderReservedName() || isSha256PinnedSkillRule(commandName)
+            return {
+              behavior: 'ask',
+              message: `Execute skill: ${commandName}`,
+              decisionReason: {
+                type: 'rule',
+                rule,
+              },
+              ...(suppressAlwaysAllow ? { suppressAlwaysAllowRule: true } : {}),
+              updatedInput: { skill, args },
+              metadata: commandObj ? { command: commandObj } : undefined,
+            }
+          }
         }
-      }
-    }
 
-    // Check for allow rules with official 2.1.328 reserved-namespace boundary
-    // enforcement (`DVr` / `held-back-nonholder` / `held-back-boundary`).
-    const allowRules = getRuleByContentsForTool(
-      permissionContext,
-      SkillTool as Tool,
-      'allow',
-    )
-    let heldBack: { rule: string; kind: 'nonholder' | 'boundary' } | undefined
-    for (const [ruleContent, rule] of allowRules.entries()) {
-      if (isSha256PinnedSkillRule(ruleContent)) continue
-      const verdict = evaluateSkillAllowRule(
-        ruleContent,
-        commandName,
-        commandObj,
-      )
-      if (verdict === 'allow') {
-        return {
-          behavior: 'allow',
-          updatedInput: { skill, args },
-          decisionReason: {
-            type: 'rule',
-            rule,
-          },
+        // Check for allow rules with official 2.1.328 reserved-namespace boundary
+        // enforcement (`DVr` / `held-back-nonholder` / `held-back-boundary`).
+        const allowRules = getRuleByContentsForTool(
+          permissionContext,
+          SkillTool as Tool,
+          'allow',
+        )
+        let heldBack:
+          | { rule: string; kind: 'nonholder' | 'boundary' }
+          | undefined
+        for (const [ruleContent, rule] of allowRules.entries()) {
+          if (isSha256PinnedSkillRule(ruleContent)) continue
+          const verdict = evaluateSkillAllowRule(
+            ruleContent,
+            commandName,
+            commandObj,
+          )
+          if (verdict === 'allow') {
+            return {
+              behavior: 'allow',
+              updatedInput: { skill, args },
+              decisionReason: {
+                type: 'rule',
+                rule,
+              },
+            }
+          }
+          if (verdict === 'held-back-nonholder') {
+            heldBack = { rule: ruleContent, kind: 'nonholder' }
+          } else if (verdict === 'held-back-boundary') {
+            heldBack ??= { rule: ruleContent, kind: 'boundary' }
+          }
         }
-      }
-      if (verdict === 'held-back-nonholder') {
-        heldBack = { rule: ruleContent, kind: 'nonholder' }
-      } else if (verdict === 'held-back-boundary') {
-        heldBack ??= { rule: ruleContent, kind: 'boundary' }
-      }
-    }
 
-    // Official 2.1.325 #2356: scheduled tasks and `/loop` MUST ask before
-    // running a skill that declares `allowed-tools` or `hooks` unless an
-    // explicit `Skill(name)` rule in `permissions.allow` matched above.
-    if (
-      commandObj?.type === 'prompt' &&
-      isScheduledOrLoopSkillExecution(context) &&
-      skillDeclaresAllowedToolsOrHooks(commandObj)
-    ) {
-      return {
-        behavior: 'ask',
-        message: `Scheduled task or /loop wants to run skill "${commandName}", which declares allowed-tools or hooks. Add Skill(${commandName}) to permissions.allow to run it unattended.`,
-        decisionReason: undefined,
-        suggestions: [
+        // Official 2.1.325 #2356: scheduled tasks and `/loop` MUST ask before
+        // running a skill that declares `allowed-tools` or `hooks` unless an
+        // explicit `Skill(name)` rule in `permissions.allow` matched above.
+        const context = resolveToolUseContext(deps, callCtx)
+        if (
+          commandObj?.type === 'prompt' &&
+          isScheduledOrLoopSkillExecution(context) &&
+          skillDeclaresAllowedToolsOrHooks(commandObj)
+        ) {
+          return {
+            behavior: 'ask',
+            message: `Scheduled task or /loop wants to run skill "${commandName}", which declares allowed-tools or hooks. Add Skill(${commandName}) to permissions.allow to run it unattended.`,
+            decisionReason: undefined,
+            suggestions: [
+              {
+                type: 'addRules' as const,
+                rules: [
+                  {
+                    toolName: SKILL_TOOL_NAME,
+                    ruleContent: commandName,
+                  },
+                ],
+                behavior: 'allow' as const,
+                destination: 'localSettings' as const,
+              },
+            ],
+            updatedInput: { skill, args },
+            metadata: { command: commandObj },
+          }
+        }
+
+        // Auto-allow skills that only use safe properties.
+        // This is an allowlist: if a skill has any property NOT in this set with a
+        // meaningful value, it requires permission. This ensures new properties added
+        // in the future default to requiring permission.
+        if (
+          commandObj?.type === 'prompt' &&
+          skillHasOnlySafeProperties(commandObj)
+        ) {
+          return {
+            behavior: 'allow',
+            updatedInput: { skill, args },
+            decisionReason: undefined,
+          }
+        }
+
+        const pluginName =
+          commandObj?.type === 'prompt' && commandObj.source === 'plugin'
+            ? commandObj.pluginInfo?.pluginManifest.name
+            : undefined
+        const isNonholder = isNonholderReservedName()
+        const effectiveHeldBackKind =
+          heldBack === undefined
+            ? undefined
+            : isNonholder
+              ? 'nonholder'
+              : heldBack.kind
+        const heldBackMessage =
+          heldBack === undefined || effectiveHeldBackKind === undefined
+            ? undefined
+            : formatSkillAllowRuleHeldBackReason(
+                heldBack.rule,
+                commandObj?.name ?? commandName,
+                effectiveHeldBackKind === 'nonholder'
+                  ? { kind: 'nonholder', pluginName }
+                  : { kind: 'boundary' },
+              )
+        const decisionReason =
+          heldBackMessage === undefined
+            ? undefined
+            : ({ type: 'other', reason: heldBackMessage } as const)
+
+        // Official 2.1.328 `chunk@303609827.js@25680`: nonholder reserved-namespace
+        // skills and `@sha256:` pinned skill invocations must ask every time with
+        // `suppressAlwaysAllowRule: true` and no persistent allow-rule suggestions.
+        if (isNonholder || isSha256PinnedSkillRule(commandName)) {
+          return {
+            behavior: 'ask',
+            message: `Execute skill: ${commandName}${heldBackMessage ? ` — ${heldBackMessage}` : ''}`,
+            decisionReason,
+            suppressAlwaysAllowRule: true,
+            updatedInput: { skill, args },
+            metadata: commandObj ? { command: commandObj } : undefined,
+          }
+        }
+
+        // Prepare suggestions for exact skill and prefix
+        // Use normalized commandName (without leading slash) for consistent rules
+        const suggestions = [
+          // Exact skill suggestion
           {
             type: 'addRules' as const,
             rules: [
@@ -1194,442 +1618,34 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
             behavior: 'allow' as const,
             destination: 'localSettings' as const,
           },
-        ],
-        updatedInput: { skill, args },
-        metadata: { command: commandObj },
-      }
-    }
-
-    // Auto-allow skills that only use safe properties.
-    // This is an allowlist: if a skill has any property NOT in this set with a
-    // meaningful value, it requires permission. This ensures new properties added
-    // in the future default to requiring permission.
-    if (
-      commandObj?.type === 'prompt' &&
-      skillHasOnlySafeProperties(commandObj)
-    ) {
-      return {
-        behavior: 'allow',
-        updatedInput: { skill, args },
-        decisionReason: undefined,
-      }
-    }
-
-    const pluginName =
-      commandObj?.type === 'prompt' && commandObj.source === 'plugin'
-        ? commandObj.pluginInfo?.pluginManifest.name
-        : undefined
-    const isNonholder = isNonholderReservedName()
-    const effectiveHeldBackKind =
-      heldBack === undefined
-        ? undefined
-        : isNonholder
-          ? 'nonholder'
-          : heldBack.kind
-    const heldBackMessage =
-      heldBack === undefined || effectiveHeldBackKind === undefined
-        ? undefined
-        : formatSkillAllowRuleHeldBackReason(
-            heldBack.rule,
-            commandObj?.name ?? commandName,
-            effectiveHeldBackKind === 'nonholder'
-              ? { kind: 'nonholder', pluginName }
-              : { kind: 'boundary' },
-          )
-    const decisionReason =
-      heldBackMessage === undefined
-        ? undefined
-        : ({ type: 'other', reason: heldBackMessage } as const)
-
-    // Official 2.1.328 `chunk@303609827.js@25680`: nonholder reserved-namespace
-    // skills and `@sha256:` pinned skill invocations must ask every time with
-    // `suppressAlwaysAllowRule: true` and no persistent allow-rule suggestions.
-    if (isNonholder || isSha256PinnedSkillRule(commandName)) {
-      return {
-        behavior: 'ask',
-        message: `Execute skill: ${commandName}${heldBackMessage ? ` — ${heldBackMessage}` : ''}`,
-        decisionReason,
-        suppressAlwaysAllowRule: true,
-        updatedInput: { skill, args },
-        metadata: commandObj ? { command: commandObj } : undefined,
-      }
-    }
-
-    // Prepare suggestions for exact skill and prefix
-    // Use normalized commandName (without leading slash) for consistent rules
-    const suggestions = [
-      // Exact skill suggestion
-      {
-        type: 'addRules' as const,
-        rules: [
+          // Prefix suggestion to allow any args
           {
-            toolName: SKILL_TOOL_NAME,
-            ruleContent: commandName,
+            type: 'addRules' as const,
+            rules: [
+              {
+                toolName: SKILL_TOOL_NAME,
+                ruleContent: `${commandName}:*`,
+              },
+            ],
+            behavior: 'allow' as const,
+            destination: 'localSettings' as const,
           },
-        ],
-        behavior: 'allow' as const,
-        destination: 'localSettings' as const,
-      },
-      // Prefix suggestion to allow any args
-      {
-        type: 'addRules' as const,
-        rules: [
-          {
-            toolName: SKILL_TOOL_NAME,
-            ruleContent: `${commandName}:*`,
-          },
-        ],
-        behavior: 'allow' as const,
-        destination: 'localSettings' as const,
-      },
-    ]
+        ]
 
-    // Default behavior: ask user for permission
-    return {
-      behavior: 'ask',
-      message: `Execute skill: ${commandName}${heldBackMessage ? ` — ${heldBackMessage}` : ''}`,
-      decisionReason,
-      suggestions,
-      updatedInput: { skill, args },
-      metadata: commandObj ? { command: commandObj } : undefined,
-    }
-  },
-
-  async call(
-    { skill, args },
-    context,
-    canUseTool,
-    parentMessage,
-    onProgress?,
-  ): Promise<ToolResult<Output>> {
-    // At this point, validateInput has already confirmed:
-    // - Skill format is valid
-    // - Skill exists
-    // - Skill can be loaded
-    // - Skill doesn't have disableModelInvocation
-    // - Skill is a prompt-based skill
-
-    // Skills are just names, with optional arguments
-    const trimmed = skill.trim()
-
-    // Remove leading slash if present (for compatibility)
-    const commandName = trimmed.startsWith('/') ? trimmed.substring(1) : trimmed
-
-    // Remote canonical skill execution (ant-only experimental). Intercepts
-    // `_canonical_<slug>` before local command lookup — loads SKILL.md from
-    // AKI/GCS (with local cache), injects content directly as a user message.
-    // Remote skills are declarative markdown so no slash-command expansion
-    // (no !command substitution, no $ARGUMENTS interpolation) is needed.
-    if (
-      feature('EXPERIMENTAL_SKILL_SEARCH') &&
-      process.env.USER_TYPE === 'ant'
-    ) {
-      const slug = remoteSkillModules!.stripCanonicalPrefix(commandName)
-      if (slug !== null) {
-        return executeRemoteSkill(slug, commandName, parentMessage, context)
-      }
-    }
-
-    // densable Skill call: save → set activeSkill → IQ → fork only when !IQ.
-    const previousActiveSkill = context.options.activeSkill
-    context.options.activeSkill = commandName
-    const coordinatorMain = isCoordinatorMainThread(context.agentId)
-    let dispatched = false
-    try {
-      const commands = await getAllCommands(context)
-      const command = findCommand(commandName, commands)
-      if (command) {
-        context.options.activeSkill =
-          command.type === 'prompt' && command.unqualifiedName != null
-            ? command.unqualifiedName
-            : command.name
-      }
-
-      // Track skill usage for ranking (gold skips this on coordinator main)
-      if (!coordinatorMain) {
-        recordSkillUsage(commandName)
-      }
-
-      // Official 2.1.309 #1145 (`m0n`): before running `/verify` or `/code-review`,
-      // discover nested package skills for shell-modified files in git status.
-      if (command?.type === 'prompt' && command.unqualifiedName == null) {
-        const {
-          discoverNestedSkillsForChangedFiles,
-          isVerifyOrReviewSkillName,
-        } = await import('src/skills/loadSkillsDir.js')
-        if (isVerifyOrReviewSkillName(command.name)) {
-          await discoverNestedSkillsForChangedFiles(getCwd()).catch(err => {
-            logForDebugging(
-              `[skills] Changed files not searched for nested skills: ${err}`,
-            )
-          })
+        // Default behavior: ask user for permission
+        return {
+          behavior: 'ask',
+          message: `Execute skill: ${commandName}${heldBackMessage ? ` — ${heldBackMessage}` : ''}`,
+          decisionReason,
+          suggestions,
+          updatedInput: { skill, args },
+          metadata: commandObj ? { command: commandObj } : undefined,
         }
-      }
+      },
 
-      // densable `k_n(g,n||"",s)==="fork"&&!k`
-      if (
-        command?.type === 'prompt' &&
-        resolveSkillExecutionContext(command, args || '', context) === 'fork' &&
-        !coordinatorMain
-      ) {
-        try {
-          return await executeForkedSkill(
-            command,
-            commandName,
-            args,
-            context,
-            canUseTool,
-            parentMessage,
-            onProgress,
-          )
-        } finally {
-          context.options.activeSkill = previousActiveSkill
-        }
-      }
-
-      // Snapshot prior invoke content before processPromptSlashCommand records.
-      const skillAgentId = getAgentContext()?.agentId ?? null
-      const priorContent = getInvokedSkillsForAgent(skillAgentId).get(
-        `${skillAgentId ?? ''}:${commandName}`,
-      )?.content
-
-      // Process the skill with optional args
-      const { processPromptSlashCommand } = await import(
-        'src/utils/processUserInput/processSlashCommand.js'
-      )
-      const processedCommand = await processPromptSlashCommand(
-        commandName,
-        args || '', // Pass args if provided
-        commands,
-        context,
-        [],
-        coordinatorMain,
-      )
-
-      if (!processedCommand.shouldQuery) {
-        throw new Error('Command processing failed')
-      }
-
-      // Extract metadata from the command
-      const allowedTools = coordinatorMain
-        ? []
-        : processedCommand.allowedTools || []
-      const model = coordinatorMain ? undefined : processedCommand.model
-      const effort = coordinatorMain ? undefined : processedCommand.effort
-
-      const isBuiltIn = builtInCommandNames().has(commandName)
-      const isBundled =
-        command?.type === 'prompt' && command.source === 'bundled'
-      const isOfficialSkill =
-        command?.type === 'prompt' && isOfficialMarketplaceSkill(command)
-      const sanitizedCommandName =
-        isBuiltIn || isBundled || isOfficialSkill ? commandName : 'custom'
-
-      const wasDiscoveredField =
-        feature('EXPERIMENTAL_SKILL_SEARCH') &&
-        remoteSkillModules!.isSkillSearchEnabled()
-          ? {
-              was_discovered:
-                context.discoveredSkillNames?.has(commandName) ?? false,
-            }
-          : {}
-      const pluginMarketplace =
-        command?.type === 'prompt' && command.pluginInfo
-          ? parsePluginIdentifier(command.pluginInfo.repository).marketplace
-          : undefined
-      const queryDepth = context.queryTracking?.depth ?? 0
-      const parentAgentId = getAgentContext()?.agentId
-      logEvent('tengu_skill_tool_invocation', {
-        command_name:
-          sanitizedCommandName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        // _PROTO_skill_name routes to the privileged skill_name BQ column
-        // (unredacted, all users); command_name stays in additional_metadata as
-        // the redacted variant for general-access dashboards.
-        _PROTO_skill_name:
-          commandName as AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
-        execution_context: (coordinatorMain
-          ? 'read-only'
-          : 'inline') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        invocation_trigger: (queryDepth > 0
-          ? 'nested-skill'
-          : 'claude-proactive') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        query_depth: queryDepth,
-        ...(parentAgentId && {
-          parent_agent_id:
-            parentAgentId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        }),
-        ...wasDiscoveredField,
-        skill_name:
-          commandName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        ...(command?.type === 'prompt' && {
-          skill_source:
-            command.source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        }),
-        ...(command?.loadedFrom && {
-          skill_loaded_from:
-            command.loadedFrom as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        }),
-        ...(command?.kind && {
-          skill_kind:
-            command.kind as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        }),
-        ...(command?.type === 'prompt' &&
-          command.pluginInfo && {
-            _PROTO_plugin_name: command.pluginInfo.pluginManifest
-              .name as AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
-            ...(pluginMarketplace && {
-              _PROTO_marketplace_name:
-                pluginMarketplace as AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
-            }),
-            plugin_name: (isOfficialSkill
-              ? command.pluginInfo.pluginManifest.name
-              : 'third-party') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-            plugin_repository: (isOfficialSkill
-              ? command.pluginInfo.repository
-              : 'third-party') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-            ...buildPluginCommandTelemetryFields(command.pluginInfo),
-          }),
-      })
-
-      // Get the tool use ID from the parent message for linking newMessages
-      const toolUseID = getToolUseIDFromParentMessage(
-        parentMessage,
-        SKILL_TOOL_NAME,
-      )
-
-      // Tag user messages with sourceToolUseID so they stay transient until this tool resolves
-      const filteredMessages = processedCommand.messages.filter(
-        (m): m is UserMessage | AttachmentMessage | SystemMessage => {
-          if (m.type === 'progress') {
-            return false
-          }
-          // Filter out command-message since SkillTool handles display
-          if (m.type === 'user' && 'message' in m) {
-            const content = m.message.content
-            if (
-              typeof content === 'string' &&
-              content.includes(`<${COMMAND_MESSAGE_TAG}>`)
-            ) {
-              return false
-            }
-          }
-          return true
-        },
-      )
-      const renderedContent = getInvokedSkillsForAgent(skillAgentId).get(
-        `${skillAgentId ?? ''}:${commandName}`,
-      )?.content
-      const newMessages = tagMessagesWithToolUseID(
-        elideByteIdenticalSkillReinvocation({
-          messages: filteredMessages,
-          contextMessages: context.messages,
-          commandName,
-          args,
-          priorContent,
-          renderedContent,
-        }),
-        toolUseID,
-      )
-
-      logForDebugging(
-        `SkillTool returning ${newMessages.length} newMessages for skill ${commandName}`,
-      )
-
-      // Note: addInvokedSkill and registerSkillHooks are called inside
-      // processPromptSlashCommand (via getMessagesForPromptSlashCommand), so
-      // calling them again here would double-register hooks and rebuild
-      // skillContent redundantly.
-
-      // Return success with newMessages and contextModifier
-      dispatched = true
-      return {
-        data: {
-          success: true,
-          commandName,
-          allowedTools: allowedTools.length > 0 ? allowedTools : undefined,
-          model,
-          ...(coordinatorMain && { readOnly: true }),
-        },
-        newMessages,
-        contextModifier(ctx) {
-          let modifiedContext = ctx
-          const inlineLayers: HostPermissionLayer[] = []
-
-          // Update allowed tools if specified
-          if (allowedTools.length > 0) {
-            inlineLayers.push({ kind: 'allowed_tools', allowedTools })
-            // Capture the current getAppState to chain modifications properly
-            const previousGetAppState = modifiedContext.getAppState
-            modifiedContext = {
-              ...modifiedContext,
-              getAppState() {
-                // Use the previous getAppState, not the closure's context.getAppState,
-                // to properly chain context modifications
-                const appState = previousGetAppState()
-                return {
-                  ...appState,
-                  toolPermissionContext: {
-                    ...appState.toolPermissionContext,
-                    alwaysAllowRules: {
-                      ...appState.toolPermissionContext.alwaysAllowRules,
-                      command: [
-                        ...new Set([
-                          ...(appState.toolPermissionContext.alwaysAllowRules
-                            .command || []),
-                          ...allowedTools,
-                        ]),
-                      ],
-                    },
-                  },
-                }
-              },
-            }
-          }
-
-          // Carry [1m] suffix over — otherwise a skill with `model: opus` on an
-          // opus[1m] session drops the effective window to 200K and trips autocompact.
-          if (model) {
-            const resolvedModel = resolveSkillModelOverride(
-              model,
-              ctx.options.mainLoopModel,
-            )
-            inlineLayers.push({ kind: 'model', mainLoopModel: resolvedModel })
-            modifiedContext = {
-              ...modifiedContext,
-              options: {
-                ...modifiedContext.options,
-                mainLoopModel: resolvedModel,
-              },
-            }
-          }
-
-          // Override effort level if skill specifies one (densable 289: contextLayers + sessionEffort)
-          if (effort !== undefined) {
-            inlineLayers.push({ kind: 'effort', effort })
-            const previousGetAppState = modifiedContext.getAppState
-            modifiedContext = {
-              ...modifiedContext,
-              getAppState() {
-                const appState = previousGetAppState()
-                return {
-                  ...appState,
-                  sessionEffort: levelSessionEffort(effort),
-                }
-              },
-            }
-          }
-
-          if (inlineLayers.length > 0) {
-            modifiedContext = applyContextLayers(modifiedContext, inlineLayers)
-          }
-
-          return modifiedContext
-        },
-      }
-    } finally {
-      if (coordinatorMain || !dispatched) {
-        context.options.activeSkill = previousActiveSkill
-      }
+      async call(input, callCtx): Promise<ToolResult<Output>> {
+        return executeSkillCall(input, deps, callCtx)
+      },
     }
   },
 
@@ -1864,7 +1880,7 @@ function extractUrlScheme(url: string): 'gs' | 'http' | 'https' | 's3' {
 async function executeRemoteSkill(
   slug: string,
   commandName: string,
-  parentMessage: AssistantMessage,
+  parentMessage: AssistantMessage | undefined,
   context: ToolUseContext,
 ): Promise<ToolResult<Output>> {
   const { getDiscoveredRemoteSkill, loadRemoteSkill, logRemoteSkillLoaded } =
@@ -2007,10 +2023,10 @@ async function executeRemoteSkill(
 
   // Direct injection — wrap SKILL.md content in a meta user message. Matches
   // the shape of what processPromptSlashCommand produces for simple skills.
-  const toolUseID = getToolUseIDFromParentMessage(
-    parentMessage,
-    SKILL_TOOL_NAME,
-  )
+  const toolUseID =
+    parentMessage !== undefined
+      ? getToolUseIDFromParentMessage(parentMessage, SKILL_TOOL_NAME)
+      : context.toolUseId
   return {
     data: { success: true, commandName, status: 'inline' },
     newMessages: tagMessagesWithToolUseID(

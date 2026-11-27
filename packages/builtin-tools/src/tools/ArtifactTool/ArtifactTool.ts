@@ -8,8 +8,14 @@ import { createHash } from 'crypto'
 import { constants as fsConstants } from 'fs'
 import { lstat, open, readFile, stat } from 'fs/promises'
 import { z } from 'zod/v4'
-import type { Tool, ToolResultBlockParam, ToolUseContext } from 'src/Tool.js'
-import { buildTool } from 'src/Tool.js'
+import type {
+  Tool,
+  ToolDef,
+  ToolDeps,
+  ToolResultBlockParam,
+  ToolUseContext,
+} from 'src/Tool.js'
+import { buildTool, resolveToolUseContext } from 'src/Tool.js'
 import { detectLineEndingsForString } from 'src/utils/fileRead.js'
 import {
   isArtifactEnvForceEnabled,
@@ -937,77 +943,6 @@ export const ArtifactTool = buildTool({
     return 'Artifact'
   },
 
-  async validateInput(input: ArtifactInput) {
-    // Official 2.1.327 (#516): refuse Artifact calls once settings turn Artifacts
-    // off, even in sessions already running.
-    if (isArtifactToolDisabled()) {
-      return {
-        result: false as const,
-        message: ARTIFACTS_SWITCHED_OFF_MESSAGE,
-        errorCode: 25,
-      }
-    }
-    if (input && 'action' in input && input.action === 'quickstart') {
-      return validateQuickstartInput(input)
-    }
-    // Official 2.1.327 (#492): read_file with `_blob/...` uploaded asset address
-    // fails with guidance to read uploads one per call, by id.
-    if (input && 'action' in input && input.action === 'read_file') {
-      const candidatePaths: string[] = []
-      if (typeof input.path === 'string') candidatePaths.push(input.path)
-      if (Array.isArray(input.paths)) {
-        for (const p of input.paths) {
-          if (typeof p === 'string') candidatePaths.push(p)
-        }
-      }
-      const blobPath = candidatePaths.find(p => ARTIFACT_BLOB_PREFIX_RE.test(p))
-      if (blobPath !== undefined) {
-        return {
-          result: false as const,
-          message: `path ${JSON.stringify(blobPath)} is the address of an uploaded asset, not a published file. An asset is read one per call by its 32-character id, the part after "_blob/": action "read_asset" with the id as \`asset_id\``,
-          errorCode: 1,
-        }
-      }
-    }
-    if (input && typeof input.url === 'string') {
-      const parsed = parseArtifactUrlInput(input.url)
-      if (parsed !== null) {
-        const targetEnv = getTargetArtifactEnv()
-        if (parsed.env !== targetEnv) {
-          return {
-            result: false as const,
-            message: `that artifact URL is for ${parsed.env}, but this session targets ${targetEnv} claude.ai — republish it here to mint a ${targetEnv} URL, or switch environments`,
-            errorCode: 5,
-          }
-        }
-      }
-    }
-    const rawCaps = (input as Record<string, unknown> | undefined)?.capabilities
-    if (
-      rawCaps !== null &&
-      typeof rawCaps === 'object' &&
-      !Array.isArray(rawCaps)
-    ) {
-      const dbCap = (rawCaps as Record<string, unknown>).db
-      if (
-        dbCap !== null &&
-        typeof dbCap === 'object' &&
-        !Array.isArray(dbCap) &&
-        Object.hasOwn(dbCap, 'rules')
-      ) {
-        const rules = (dbCap as Record<string, unknown>).rules
-        if (!areValidArtifactDbAccessRules(rules)) {
-          return {
-            result: false as const,
-            message: `capabilities.db.rules must contain valid rules with paths matching ${ARTIFACT_DB_RULE_PATH_RE.source} (or "") and read/write tiers in ${Array.from(ARTIFACT_DB_ACCESS_TIERS).join(', ')}`,
-            errorCode: 6,
-          }
-        }
-      }
-    }
-    return { result: true as const }
-  },
-
   toAutoClassifierInput(input: ArtifactInput) {
     if (input && 'action' in input && input.action === 'quickstart') {
       return classifyQuickstartInput(input)
@@ -1036,95 +971,6 @@ export const ArtifactTool = buildTool({
       return summarizeQuickstartUse(input)
     }
     return null
-  },
-
-  async checkPermissions(input: ArtifactInput, context) {
-    // Official 2.1.327 (#516): refuse calls immediately once settings turn
-    // Artifacts off, even in already-running sessions.
-    if (isArtifactToolDisabled()) {
-      return {
-        behavior: 'deny' as const,
-        message: ARTIFACTS_SWITCHED_OFF_MESSAGE,
-        decisionReason: {
-          type: 'other' as const,
-          reason: 'switched_off',
-        },
-      }
-    }
-    if (!isUploadInput(input) && !isArtifactToolRegistered()) {
-      return {
-        behavior: 'deny' as const,
-        message:
-          'Official Artifact actions are not available in this build (cobalt registration is closed). Use tip upload without `action` to publish a local HTML/Markdown file.',
-        decisionReason: {
-          type: 'other' as const,
-          reason: 'ASe closed',
-        },
-      }
-    }
-    if (
-      isUploadInput(input) &&
-      (input as { edits?: unknown }).edits !== undefined &&
-      hasEditOrWritePreToolUseHook(
-        context as unknown as PreToolUseHookContext | undefined,
-      )
-    ) {
-      const target = String(
-        (input as { file_path?: string }).file_path ?? 'file',
-      )
-      return {
-        behavior: 'deny' as const,
-        message: `Refusing to apply edits to ${target}: a hook is configured for file edits in this session, so a publish can't apply edits here. Edit the file, then publish it without edits.`,
-        decisionReason: {
-          type: 'other' as const,
-          reason: 'PreToolUse hook for file edits',
-        },
-      }
-    }
-    const permResult = await checkArtifactActionPermissions(
-      input as Record<string, unknown>,
-      context,
-    )
-    // #1546 + 2.1.325 #2331: In auto mode, exempt private/in-org cloud outputs
-    // from interactive ask blocks, but NEVER bypass asks for artifacts visible
-    // outside your organization (or whose audience cannot be confirmed) — auto
-    // mode's classifier must judge every single change individually.
-    const mode = context.getAppState().toolPermissionContext.mode
-    const actionName =
-      input && typeof input === 'object' && 'action' in input
-        ? (input as { action?: string }).action
-        : undefined
-    const targetUrl =
-      input && typeof input === 'object' && typeof input.url === 'string'
-        ? input.url
-        : undefined
-    const targetParsed = targetUrl ? parsedInputUrl(targetUrl) : null
-    const targetOutsideOrgOrUnknown =
-      targetParsed !== null
-        ? isArtifactOutsideOrgOrUnknown(targetParsed.slug)
-        : targetUrl !== undefined && targetUrl.length > 0
-    const suppressAlwaysAllow =
-      'suppressAlwaysAllowRule' in permResult &&
-      (permResult as { suppressAlwaysAllowRule?: boolean })
-        .suppressAlwaysAllowRule === true
-    if (
-      mode === 'auto' &&
-      permResult.behavior === 'ask' &&
-      !suppressAlwaysAllow &&
-      !(
-        permResult.decisionReason?.type === 'safetyCheck' &&
-        permResult.decisionReason.classifierApprovable === false
-      ) &&
-      !targetOutsideOrgOrUnknown &&
-      (isUploadInput(input) ||
-        actionName === 'write_db' ||
-        actionName === 'db_write' ||
-        actionName === 'db_str_replace' ||
-        actionName === 'upload_asset')
-    ) {
-      return { behavior: 'allow' as const, updatedInput: input }
-    }
-    return permResult
   },
 
   renderToolUseMessage(input: Partial<ArtifactInput>) {
@@ -1456,188 +1302,350 @@ export const ArtifactTool = buildTool({
   },
   renderToolResultMessage,
 
-  async call(
-    input: ArtifactInput,
-    context?: Partial<ToolUseContext>,
-    _canUseTool?,
-    _parentMessage?,
-  ) {
-    void _canUseTool
-    void _parentMessage
-    // Official 2.1.327 (#516): refuse calls once settings turn Artifacts off,
-    // including in sessions already running.
-    if (isArtifactToolDisabled()) {
-      return {
-        data: {
-          id: '',
-          url: '',
-          expiresAt: '',
-          error: ARTIFACTS_SWITCHED_OFF_MESSAGE,
-        },
-      }
-    }
-    const signal = context?.abortController?.signal
-    if (!isUploadInput(input)) {
-      if (!isArtifactToolRegistered()) {
-        return {
-          data: {
-            id: '',
-            url: '',
-            expiresAt: '',
-            error:
-              'Official Artifact actions are not available in this build (cobalt registration is closed). Use tip upload without `action` to publish a local HTML/Markdown file.',
-          },
+  create(deps: ToolDeps) {
+    return {
+      async validateInput(input: ArtifactInput) {
+        // Official 2.1.327 (#516): refuse Artifact calls once settings turn Artifacts
+        // off, even in sessions already running.
+        if (isArtifactToolDisabled()) {
+          return {
+            result: false as const,
+            message: ARTIFACTS_SWITCHED_OFF_MESSAGE,
+            errorCode: 25,
+          }
         }
-      }
-      if (context?.getAppState !== undefined && md()) {
-        PAr({
-          getAppState: context.getAppState,
-          toolUseId: context.toolUseId,
-          toolDecisions: context.toolDecisions,
-        })
-      }
-      switch (input.action) {
-        case 'list':
-          return callList(input, signal)
-        case 'read':
-          return callRead(input, signal, context)
-        case 'comments':
-          return callComments(input, signal, context)
-        case 'reply':
-          return callReply(input, signal)
-        case 'resolve':
-          return callResolve(input, signal)
-        case 'live-edit': {
-          const { getArtifactLiveEditVf } = await import(
-            'src/services/artifactAutoReact/liveEditPermissions.js'
+        if (input && 'action' in input && input.action === 'quickstart') {
+          return validateQuickstartInput(input)
+        }
+        // Official 2.1.327 (#492): read_file with `_blob/...` uploaded asset address
+        // fails with guidance to read uploads one per call, by id.
+        if (input && 'action' in input && input.action === 'read_file') {
+          const candidatePaths: string[] = []
+          if (typeof input.path === 'string') candidatePaths.push(input.path)
+          if (Array.isArray(input.paths)) {
+            for (const p of input.paths) {
+              if (typeof p === 'string') candidatePaths.push(p)
+            }
+          }
+          const blobPath = candidatePaths.find(p =>
+            ARTIFACT_BLOB_PREFIX_RE.test(p),
           )
-          const vf = getArtifactLiveEditVf()
-          if (!vf) {
+          if (blobPath !== undefined) {
+            return {
+              result: false as const,
+              message: `path ${JSON.stringify(blobPath)} is the address of an uploaded asset, not a published file. An asset is read one per call by its 32-character id, the part after "_blob/": action "read_asset" with the id as \`asset_id\``,
+              errorCode: 1,
+            }
+          }
+        }
+        if (input && typeof input.url === 'string') {
+          const parsed = parseArtifactUrlInput(input.url)
+          if (parsed !== null) {
+            const targetEnv = getTargetArtifactEnv()
+            if (parsed.env !== targetEnv) {
+              return {
+                result: false as const,
+                message: `that artifact URL is for ${parsed.env}, but this session targets ${targetEnv} claude.ai — republish it here to mint a ${targetEnv} URL, or switch environments`,
+                errorCode: 5,
+              }
+            }
+          }
+        }
+        const rawCaps = (input as Record<string, unknown> | undefined)
+          ?.capabilities
+        if (
+          rawCaps !== null &&
+          typeof rawCaps === 'object' &&
+          !Array.isArray(rawCaps)
+        ) {
+          const dbCap = (rawCaps as Record<string, unknown>).db
+          if (
+            dbCap !== null &&
+            typeof dbCap === 'object' &&
+            !Array.isArray(dbCap) &&
+            Object.hasOwn(dbCap, 'rules')
+          ) {
+            const rules = (dbCap as Record<string, unknown>).rules
+            if (!areValidArtifactDbAccessRules(rules)) {
+              return {
+                result: false as const,
+                message: `capabilities.db.rules must contain valid rules with paths matching ${ARTIFACT_DB_RULE_PATH_RE.source} (or "") and read/write tiers in ${Array.from(ARTIFACT_DB_ACCESS_TIERS).join(', ')}`,
+                errorCode: 6,
+              }
+            }
+          }
+        }
+        return { result: true as const }
+      },
+
+      async checkPermissions(input: ArtifactInput, callCtx) {
+        // Official 2.1.327 (#516): refuse calls immediately once settings turn
+        // Artifacts off, even in already-running sessions.
+        if (isArtifactToolDisabled()) {
+          return {
+            behavior: 'deny' as const,
+            message: ARTIFACTS_SWITCHED_OFF_MESSAGE,
+            decisionReason: {
+              type: 'other' as const,
+              reason: 'switched_off',
+            },
+          }
+        }
+        if (!isUploadInput(input) && !isArtifactToolRegistered()) {
+          return {
+            behavior: 'deny' as const,
+            message:
+              'Official Artifact actions are not available in this build (cobalt registration is closed). Use tip upload without `action` to publish a local HTML/Markdown file.',
+            decisionReason: {
+              type: 'other' as const,
+              reason: 'ASe closed',
+            },
+          }
+        }
+        const ctx = resolveToolUseContext(deps, callCtx)
+        if (
+          isUploadInput(input) &&
+          (input as { edits?: unknown }).edits !== undefined &&
+          hasEditOrWritePreToolUseHook(
+            ctx as unknown as PreToolUseHookContext | undefined,
+          )
+        ) {
+          const target = String(
+            (input as { file_path?: string }).file_path ?? 'file',
+          )
+          return {
+            behavior: 'deny' as const,
+            message: `Refusing to apply edits to ${target}: a hook is configured for file edits in this session, so a publish can't apply edits here. Edit the file, then publish it without edits.`,
+            decisionReason: {
+              type: 'other' as const,
+              reason: 'PreToolUse hook for file edits',
+            },
+          }
+        }
+        const permResult = await checkArtifactActionPermissions(
+          input as Record<string, unknown>,
+          ctx,
+        )
+        // #1546 + 2.1.325 #2331: In auto mode, exempt private/in-org cloud outputs
+        // from interactive ask blocks, but NEVER bypass asks for artifacts visible
+        // outside your organization (or whose audience cannot be confirmed) — auto
+        // mode's classifier must judge every single change individually.
+        const mode = deps.permissions().mode
+        const actionName =
+          input && typeof input === 'object' && 'action' in input
+            ? (input as { action?: string }).action
+            : undefined
+        const targetUrl =
+          input && typeof input === 'object' && typeof input.url === 'string'
+            ? input.url
+            : undefined
+        const targetParsed = targetUrl ? parsedInputUrl(targetUrl) : null
+        const targetOutsideOrgOrUnknown =
+          targetParsed !== null
+            ? isArtifactOutsideOrgOrUnknown(targetParsed.slug)
+            : targetUrl !== undefined && targetUrl.length > 0
+        const suppressAlwaysAllow =
+          'suppressAlwaysAllowRule' in permResult &&
+          (permResult as { suppressAlwaysAllowRule?: boolean })
+            .suppressAlwaysAllowRule === true
+        if (
+          mode === 'auto' &&
+          permResult.behavior === 'ask' &&
+          !suppressAlwaysAllow &&
+          !(
+            permResult.decisionReason?.type === 'safetyCheck' &&
+            permResult.decisionReason.classifierApprovable === false
+          ) &&
+          !targetOutsideOrgOrUnknown &&
+          (isUploadInput(input) ||
+            actionName === 'write_db' ||
+            actionName === 'db_write' ||
+            actionName === 'db_str_replace' ||
+            actionName === 'upload_asset')
+        ) {
+          return { behavior: 'allow' as const, updatedInput: input }
+        }
+        return permResult
+      },
+
+      async call(input: ArtifactInput, callCtx) {
+        // Official 2.1.327 (#516): refuse calls once settings turn Artifacts off,
+        // including in sessions already running.
+        if (isArtifactToolDisabled()) {
+          return {
+            data: {
+              id: '',
+              url: '',
+              expiresAt: '',
+              error: ARTIFACTS_SWITCHED_OFF_MESSAGE,
+            },
+          }
+        }
+        const signal = callCtx.signal
+        const ctx = resolveToolUseContext(deps, callCtx)
+        if (!isUploadInput(input)) {
+          if (!isArtifactToolRegistered()) {
             return {
               data: {
                 id: '',
                 url: '',
                 expiresAt: '',
-                error: 'live-edit is not available in this build',
+                error:
+                  'Official Artifact actions are not available in this build (cobalt registration is closed). Use tip upload without `action` to publish a local HTML/Markdown file.',
               },
             }
           }
-          if (vf.runLiveEditAction) {
-            return vf.runLiveEditAction(
-              {
-                action: 'live-edit',
-                url: input.url ?? '',
-                html: input.html ?? '',
-              },
-              signal,
-            )
+          if (ctx.getAppState !== undefined && md()) {
+            PAr({
+              getAppState: ctx.getAppState,
+              toolUseId: callCtx.toolUseId,
+              toolDecisions: deps.toolDecisions,
+            })
           }
-          return callLiveEdit(input, signal)
-        }
-        case 'watch':
-          return callWatch(input, context)
-        case 'unwatch':
-          return callUnwatch(input, context)
-        case 'status':
-          return callStatus(input)
-        case 'list_assets':
-          return callListAssets(input, signal, context)
-        case 'upload_asset':
-          return callUploadAsset(input, signal, context)
-        case 'delete_asset':
-          return callDeleteAsset(input, signal)
-        case 'list_files':
-          return callListFiles(input, signal, context)
-        case 'read_file':
-          return callReadFile(input, signal, context)
-        case 'read_asset':
-          return callReadAsset(input, signal, context)
-        case 'verify':
-          return callVerify(input, signal)
-        case 'read_page_data':
-          return callReadPageData(input, signal)
-        case 'read_db':
-        case 'write_db': {
-          const url = typeof input.url === 'string' ? input.url : ''
-          if (!url) {
-            return {
-              data: {
-                id: '',
-                url: '',
-                expiresAt: '',
-                error: `action "${input.action}" requires \`url\`.`,
-              },
-            }
-          }
-          const dbResult = await executeArtifactDbAction({
-            action: input.action,
-            url,
-            db_op: input.db_op,
-            collection: input.collection,
-            doc_id: input.doc_id,
-            query: input.query,
-            data: input.data,
-            writes: input.writes,
-            if_version: input.if_version,
-            out_dir: input.out_dir,
-            signal,
-          })
-          return { data: dbResult }
-        }
-        case 'delete':
-          return callDelete(input, signal)
-        case 'room_send':
-          return callRoomSend(input)
-        case 'quickstart':
-          try {
-            const intent = input.intent
-            if (
-              intent !== 'document' &&
-              intent !== 'slides' &&
-              intent !== 'design' &&
-              intent !== 'other'
-            ) {
-              return {
-                data: {
-                  id: '',
-                  url: '',
-                  expiresAt: '',
-                  error:
-                    'action "quickstart" requires `intent`: one of "document", "slides", "design", "other".',
-                },
+          switch (input.action) {
+            case 'list':
+              return callList(input, signal)
+            case 'read':
+              return callRead(input, signal, ctx)
+            case 'comments':
+              return callComments(input, signal, ctx)
+            case 'reply':
+              return callReply(input, signal)
+            case 'resolve':
+              return callResolve(input, signal)
+            case 'live-edit': {
+              const { getArtifactLiveEditVf } = await import(
+                'src/services/artifactAutoReact/liveEditPermissions.js'
+              )
+              const vf = getArtifactLiveEditVf()
+              if (!vf) {
+                return {
+                  data: {
+                    id: '',
+                    url: '',
+                    expiresAt: '',
+                    error: 'live-edit is not available in this build',
+                  },
+                }
               }
-            }
-            return await runGoldQuickstart(
-              {
-                action: 'quickstart',
-                intent,
-                design_systems: input.design_systems,
-              },
-              context,
-            )
-          } catch (error) {
-            if (
-              error instanceof ArtifactQuickstartUnavailableError ||
-              (error instanceof Error &&
-                (error.name === 'ArtifactInputError' ||
-                  ('reasonCode' in error &&
-                    (error as { reasonCode?: string }).reasonCode ===
-                      'quickstart_unavailable')))
-            ) {
-              return {
-                data: {
-                  id: '',
-                  url: '',
-                  expiresAt: '',
-                  error: error.message,
-                },
+              if (vf.runLiveEditAction) {
+                return vf.runLiveEditAction(
+                  {
+                    action: 'live-edit',
+                    url: input.url ?? '',
+                    html: input.html ?? '',
+                  },
+                  signal,
+                )
               }
+              return callLiveEdit(input, signal)
             }
-            throw error
+            case 'watch':
+              return callWatch(input, ctx)
+            case 'unwatch':
+              return callUnwatch(input, ctx)
+            case 'status':
+              return callStatus(input)
+            case 'list_assets':
+              return callListAssets(input, signal, ctx)
+            case 'upload_asset':
+              return callUploadAsset(input, signal, ctx)
+            case 'delete_asset':
+              return callDeleteAsset(input, signal)
+            case 'list_files':
+              return callListFiles(input, signal, ctx)
+            case 'read_file':
+              return callReadFile(input, signal, ctx)
+            case 'read_asset':
+              return callReadAsset(input, signal, ctx)
+            case 'verify':
+              return callVerify(input, signal)
+            case 'read_page_data':
+              return callReadPageData(input, signal)
+            case 'read_db':
+            case 'write_db': {
+              const url = typeof input.url === 'string' ? input.url : ''
+              if (!url) {
+                return {
+                  data: {
+                    id: '',
+                    url: '',
+                    expiresAt: '',
+                    error: `action "${input.action}" requires \`url\`.`,
+                  },
+                }
+              }
+              const dbResult = await executeArtifactDbAction({
+                action: input.action,
+                url,
+                db_op: input.db_op,
+                collection: input.collection,
+                doc_id: input.doc_id,
+                query: input.query,
+                data: input.data,
+                writes: input.writes,
+                if_version: input.if_version,
+                out_dir: input.out_dir,
+                signal,
+              })
+              return { data: dbResult }
+            }
+            case 'delete':
+              return callDelete(input, signal)
+            case 'room_send':
+              return callRoomSend(input)
+            case 'quickstart':
+              try {
+                const intent = input.intent
+                if (
+                  intent !== 'document' &&
+                  intent !== 'slides' &&
+                  intent !== 'design' &&
+                  intent !== 'other'
+                ) {
+                  return {
+                    data: {
+                      id: '',
+                      url: '',
+                      expiresAt: '',
+                      error:
+                        'action "quickstart" requires `intent`: one of "document", "slides", "design", "other".',
+                    },
+                  }
+                }
+                return await runGoldQuickstart(
+                  {
+                    action: 'quickstart',
+                    intent,
+                    design_systems: input.design_systems,
+                  },
+                  ctx,
+                )
+              } catch (error) {
+                if (
+                  error instanceof ArtifactQuickstartUnavailableError ||
+                  (error instanceof Error &&
+                    (error.name === 'ArtifactInputError' ||
+                      ('reasonCode' in error &&
+                        (error as { reasonCode?: string }).reasonCode ===
+                          'quickstart_unavailable')))
+                ) {
+                  return {
+                    data: {
+                      id: '',
+                      url: '',
+                      expiresAt: '',
+                      error: error.message,
+                    },
+                  }
+                }
+                throw error
+              }
           }
-      }
+        }
+        return callUpload(input, ctx)
+      },
     }
-    return callUpload(input, context)
   },
 })
 

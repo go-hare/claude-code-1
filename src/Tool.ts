@@ -762,6 +762,15 @@ export type ToolResult<T> = {
    * (and MCP `_meta["claude/endTurn"]`) ask query not to recurse.
    */
   endsTurn?: boolean
+  /**
+   * Official 2.1.331 cross-process sidecar frame result returned alongside `data`
+   * by a remote native-tool runner.
+   */
+  subagentFrameResult?: unknown
+  /**
+   * Official 2.1.331 structured output payload emitted by SyntheticOutputTool.
+   */
+  structured_output?: unknown
 }
 
 export type ToolCallProgress<P extends ToolProgressData = ToolProgressData> = (
@@ -884,6 +893,10 @@ export type Tool<
    */
   searchHint?: string
   /**
+   * Official 2.1.331 guidance string explaining when to choose this tool over alternatives.
+   */
+  readonly whenToUse?: string
+  /**
    * densable 2.1.248 #1 Unt — official `enablesCodeExecution:!0` on
    * Bash / PowerShell / REPL / Monitor / CronCreate / Workflow / RemoteTrigger.
    */
@@ -899,12 +912,18 @@ export type Tool<
     entries: unknown[]
   }
   reassemble?(inputs: unknown[]): unknown
+  /**
+   * Official 2.1.331 `Tool.create(deps)` — explicit dependency-injected tool
+   * instance factory that runs without ALS or a full host `ToolUseContext`.
+   */
+  create?(deps: ToolDeps): ToolInstance<Input, Output, P>
   call(
     args: z.infer<Input>,
     context: ToolUseContext,
     canUseTool: CanUseToolFn,
     parentMessage: AssistantMessage,
     onProgress?: ToolCallProgress<P>,
+    opts?: ToolCallExecutionOptions,
   ): Promise<ToolResult<Output>>
   description(
     input: z.infer<Input>,
@@ -921,6 +940,25 @@ export type Tool<
   // Optional because TungstenTool doesn't define this. TODO: Make it required.
   // When we do that, we can also go through and make this a bit more type-safe.
   outputSchema?: z.ZodType<unknown>
+  /**
+   * Official 2.1.331 cross-process wire output schema validated by
+   * `dispatchRemoteNativeToolCall` before hydrating with `fromAnotherProcess`.
+   */
+  outputSchemaAcrossProcesses?: z.ZodType<unknown>
+  /**
+   * Official 2.1.331 host-side hydration hook invoked after validating a remote
+   * native tool's cross-process result.
+   */
+  fromAnotherProcess?(
+    data: Output,
+    input: z.infer<Input>,
+    opts?: ToolCallExecutionOptions,
+    model?: string,
+    agentId?: AgentId,
+  ): {
+    data?: Output
+    newMessages?: ToolResult<Output>['newMessages']
+  }
   restoreTransientForRemap?(original: Output, rewritten: Output): Output
   inputsEquivalent?(a: z.infer<Input>, b: z.infer<Input>): boolean
   /**
@@ -1109,6 +1147,23 @@ export type Tool<
     input: z.infer<Input>,
     context: ToolUseContext,
   ): Promise<PermissionResult>
+
+  /**
+   * Official 2.1.331 fail-closed fallback decision when `checkPermissions`
+   * throws or cannot complete (e.g. bashCommandClamp or remote native tool).
+   */
+  permissionCheckFailureDecision?(
+    input: z.infer<Input>,
+    context: ToolUseContext,
+  ): PermissionResult | undefined
+
+  /**
+   * Official 2.1.331 async observable-input derivation hook.
+   */
+  deriveObservableInput?(
+    input: z.infer<Input>,
+    context: ToolUseContext,
+  ): Promise<Record<string, unknown> | undefined>
 
   // Optional method for tools that operate on a file path
   getPath?(input: z.infer<Input>): string
@@ -1349,6 +1404,78 @@ export function resolveMcpClients(
   )
 }
 
+import { applyPendingUiInvalidations } from './utils/plugins/functionHooksModules.js'
+import {
+  assertNativeToolCanRunLocally,
+  attachToolCreateAndRemoteRuntime,
+  clearRemoteNativeToolRunners,
+  consumeRemoteNativeToolLocallyChecked,
+  createDefaultCanUseTool,
+  createExplicitToolDeps,
+  createToolCallContext,
+  createToolDeps,
+  dispatchRemoteNativeToolCall,
+  getRemoteNativeToolCheck,
+  getRemoteNativeToolRunner,
+  hasRemoteNativeToolCheck,
+  isDisklessForSession,
+  isNativeToolDisabledInThisProcess,
+  LOCAL_ONLY_NATIVE_TOOL_NAMES,
+  NativeToolElsewhereError,
+  type NativeToolElsewhereErrorCode,
+  NeverRunsInThisProcessError,
+  recordRemoteNativeToolLocallyChecked,
+  registerRemoteNativeToolRunner,
+  REMOTE_CHECK_DOES_NOT_DECIDE,
+  type RemoteNativeToolCheck,
+  type RemoteNativeToolCheckParams,
+  type RemoteNativeToolResult,
+  type RemoteNativeToolRunner,
+  type RemoteNativeToolSession,
+  resolveToolUseContext,
+  sanitizeRemoteWireText,
+  type ToolCallContext,
+  type ToolCallExecutionOptions,
+  type ToolDeps,
+  type ToolInstance,
+  unregisterRemoteNativeToolRunner,
+} from './utils/toolCreateRuntime.js'
+
+export {
+  assertNativeToolCanRunLocally,
+  clearRemoteNativeToolRunners,
+  consumeRemoteNativeToolLocallyChecked,
+  createDefaultCanUseTool,
+  createExplicitToolDeps,
+  createToolCallContext,
+  createToolDeps,
+  dispatchRemoteNativeToolCall,
+  getRemoteNativeToolCheck,
+  getRemoteNativeToolRunner,
+  hasRemoteNativeToolCheck,
+  isDisklessForSession,
+  isNativeToolDisabledInThisProcess,
+  LOCAL_ONLY_NATIVE_TOOL_NAMES,
+  NativeToolElsewhereError,
+  type NativeToolElsewhereErrorCode,
+  NeverRunsInThisProcessError,
+  recordRemoteNativeToolLocallyChecked,
+  registerRemoteNativeToolRunner,
+  REMOTE_CHECK_DOES_NOT_DECIDE,
+  type RemoteNativeToolCheck,
+  type RemoteNativeToolCheckParams,
+  type RemoteNativeToolResult,
+  type RemoteNativeToolRunner,
+  type RemoteNativeToolSession,
+  resolveToolUseContext,
+  sanitizeRemoteWireText,
+  type ToolCallContext,
+  type ToolCallExecutionOptions,
+  type ToolDeps,
+  type ToolInstance,
+  unregisterRemoteNativeToolRunner,
+}
+
 /**
  * Methods that `buildTool` supplies a default for. A `ToolDef` may omit these;
  * the resulting `Tool` always has them.
@@ -1362,37 +1489,201 @@ type DefaultableToolKeys =
   | 'toAutoClassifierInput'
   | 'userFacingName'
 
+type RuntimeOverrideKeys =
+  | 'create'
+  | 'call'
+  | 'validateInput'
+  | 'checkPermissions'
+  | 'permissionCheckFailureDecision'
+  | 'deriveObservableInput'
+
+type ToolDefBase<
+  Input extends AnyObject = AnyObject,
+  Output = unknown,
+  P extends ToolProgressData = ToolProgressData,
+> = Omit<Tool<Input, Output, P>, DefaultableToolKeys | RuntimeOverrideKeys> &
+  Partial<
+    Pick<
+      Tool<Input, Output, P>,
+      Exclude<DefaultableToolKeys, 'checkPermissions'>
+    >
+  >
+
 /**
- * Tool definition accepted by `buildTool`. Same shape as `Tool` but with the
- * defaultable methods optional — `buildTool` fills them in so callers always
- * see a complete `Tool`.
+ * Official 2.1.331 factory-style `ToolDef`: defines `create(deps) => ToolInstance`
+ * for explicit dependency injection and cross-process execution without ALS.
+ */
+export type FactoryToolDef<
+  Input extends AnyObject = AnyObject,
+  Output = unknown,
+  P extends ToolProgressData = ToolProgressData,
+> = ToolDefBase<Input, Output, P> & {
+  create(deps: ToolDeps): ToolInstance<Input, Output, P>
+  call?: never
+  validateInput?: never
+  checkPermissions?: never
+  permissionCheckFailureDecision?: never
+  deriveObservableInput?: never
+}
+
+/**
+ * Legacy `ToolDef` providing top-level `call`/`validateInput`/`checkPermissions`.
+ * `buildTool` still wraps these with `create(deps)` and cross-process runtime dispatch.
+ */
+export type LegacyToolDef<
+  Input extends AnyObject = AnyObject,
+  Output = unknown,
+  P extends ToolProgressData = ToolProgressData,
+> = ToolDefBase<Input, Output, P> & {
+  create?: never
+  call: Tool<Input, Output, P>['call']
+  validateInput?: Tool<Input, Output, P>['validateInput']
+  checkPermissions?: Tool<Input, Output, P>['checkPermissions']
+  permissionCheckFailureDecision?: Tool<
+    Input,
+    Output,
+    P
+  >['permissionCheckFailureDecision']
+  deriveObservableInput?: Tool<Input, Output, P>['deriveObservableInput']
+}
+
+/**
+ * Tool definition accepted by `buildTool`. Supports both the official 2.1.331
+ * `create(deps)` factory contract and the legacy top-level `call` contract.
  */
 export type ToolDef<
   Input extends AnyObject = AnyObject,
   Output = unknown,
   P extends ToolProgressData = ToolProgressData,
-> = Omit<Tool<Input, Output, P>, DefaultableToolKeys> &
-  Partial<Pick<Tool<Input, Output, P>, DefaultableToolKeys>>
+> = FactoryToolDef<Input, Output, P> | LegacyToolDef<Input, Output, P>
 
-/**
- * Type-level spread mirroring `{ ...TOOL_DEFAULTS, ...def }`. For each
- * defaultable key: if D provides it (required), D's type wins; if D omits
- * it or has it optional (inherited from Partial<> in the constraint), the
- * default fills in. All other keys come from D verbatim — preserving arity,
- * optional presence, and literal types exactly as `satisfies Tool` did.
- */
-type BuiltTool<D> = Omit<D, DefaultableToolKeys> & {
+type AnyFactoryInstance = {
+  call: (...args: never[]) => Promise<ToolResult<unknown>>
+}
+
+type InferToolInput<D> = D extends { inputSchema: infer S extends AnyObject }
+  ? z.infer<S>
+  : Record<string, unknown>
+
+type InferFactoryProgress<D> = D extends {
+  renderToolUseProgressMessage?: (
+    msgs: ProgressMessage<infer P>[],
+    ...rest: never[]
+  ) => unknown
+}
+  ? P
+  : D extends {
+        create: (deps: ToolDeps) => {
+          call: (args: never, callCtx: ToolCallContext<infer P>) => unknown
+        }
+      }
+    ? unknown extends P
+      ? ToolProgressData
+      : P
+    : ToolProgressData
+
+type InferFactoryOutput<D> = D extends {
+  create: (...args: never[]) => {
+    call: (...args: never[]) => Promise<ToolResult<infer O>>
+  }
+}
+  ? O
+  : unknown
+
+type BuiltFactoryTool<
+  D extends { create: (deps: ToolDeps) => AnyFactoryInstance },
+> = Omit<D, DefaultableToolKeys | RuntimeOverrideKeys> & {
+  [K in Exclude<DefaultableToolKeys, 'checkPermissions'>]-?: K extends keyof D
+    ? undefined extends D[K]
+      ? ToolDefaults[K]
+      : D[K]
+    : ToolDefaults[K]
+} & {
+  create: (
+    deps: ToolDeps,
+  ) => ToolInstance<
+    D extends { inputSchema: infer S extends AnyObject } ? S : AnyObject,
+    InferFactoryOutput<D>,
+    InferFactoryProgress<D>
+  >
+  call: (
+    args: InferToolInput<D>,
+    context?: ToolUseContext | Partial<ToolUseContext>,
+    canUseTool?: CanUseToolFn,
+    parentMessage?: AssistantMessage,
+    onProgress?: ToolCallProgress<InferFactoryProgress<D>>,
+    opts?: ToolCallExecutionOptions,
+  ) => Promise<ToolResult<InferFactoryOutput<D>>>
+  validateInput: (
+    input: InferToolInput<D>,
+    context?: ToolUseContext,
+  ) => D extends {
+    create: (...args: never[]) => {
+      validateInput: (...args: never[]) => infer R
+    }
+  }
+    ? R
+    : Promise<ValidationResult>
+  checkPermissions: (
+    input: InferToolInput<D>,
+    context: ToolUseContext,
+  ) => Promise<PermissionResult>
+  permissionCheckFailureDecision: (
+    input: InferToolInput<D> | Record<string, unknown>,
+    context?: ToolUseContext,
+  ) => PermissionResult | undefined
+  deriveObservableInput: (
+    input: InferToolInput<D>,
+    context?: ToolUseContext,
+  ) => Promise<Record<string, unknown> | undefined>
+}
+
+type BuiltLegacyTool<D> = Omit<
+  D,
+  | DefaultableToolKeys
+  | 'create'
+  | 'permissionCheckFailureDecision'
+  | 'deriveObservableInput'
+> & {
   [K in DefaultableToolKeys]-?: K extends keyof D
     ? undefined extends D[K]
       ? ToolDefaults[K]
       : D[K]
     : ToolDefaults[K]
+} & {
+  create: (
+    deps: ToolDeps,
+  ) => ToolInstance<
+    D extends { inputSchema: infer S extends AnyObject } ? S : AnyObject,
+    D extends { call: (...args: never[]) => Promise<ToolResult<infer O>> }
+      ? O
+      : unknown,
+    ToolProgressData
+  >
+  permissionCheckFailureDecision: (
+    input: InferToolInput<D> | Record<string, unknown>,
+    context?: ToolUseContext,
+  ) => PermissionResult | undefined
+  deriveObservableInput: (
+    input: InferToolInput<D>,
+    context?: ToolUseContext,
+  ) => Promise<Record<string, unknown> | undefined>
 }
 
 /**
+ * Type-level spread mirroring `buildTool(def)`. Preserves concrete input/output/
+ * progress inference for both `create(deps)` factory tools and legacy tools.
+ */
+type BuiltTool<D> = D extends {
+  create: (deps: ToolDeps) => AnyFactoryInstance
+}
+  ? BuiltFactoryTool<D>
+  : BuiltLegacyTool<D>
+
+/**
  * Build a complete `Tool` from a partial definition, filling in safe defaults
- * for the commonly-stubbed methods. All tool exports should go through this so
- * that defaults live in one place and callers never need `?.() ?? default`.
+ * for the commonly-stubbed methods and attaching the official 2.1.331
+ * `create(deps)` + cross-process native-tool runtime (`vn(e)`).
  *
  * Defaults (fail-closed where it matters):
  * - `isEnabled` → `true`
@@ -1425,11 +1716,8 @@ type ToolDefaults = typeof TOOL_DEFAULTS
 // D infers the concrete object-literal type from the call site. The
 // constraint provides contextual typing for method parameters; `any` in
 // constraint position is structural and never leaks into the return type.
-// BuiltTool<D> mirrors runtime `{...TOOL_DEFAULTS, ...def}` at the type level.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyToolDef = ToolDef<any, any, any>
-
-import { applyPendingUiInvalidations } from './utils/plugins/functionHooksModules.js'
 
 /**
  * densable `eDr.get()?.flushInvalidations()` / `cxr()` — flush pending
@@ -1450,7 +1738,8 @@ export function buildTool<D extends AnyToolDef>(def: D): BuiltTool<D> {
   const built = {
     ...TOOL_DEFAULTS,
     userFacingName: () => def.name,
-  } as BuiltTool<D>
+  }
   Object.defineProperties(built, Object.getOwnPropertyDescriptors(def))
-  return built
+  attachToolCreateAndRemoteRuntime(def, built)
+  return built as BuiltTool<D>
 }

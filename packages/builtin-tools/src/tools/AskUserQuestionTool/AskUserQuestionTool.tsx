@@ -441,31 +441,6 @@ export const AskUserQuestionTool: Tool<InputSchema, Output> = buildTool({
   requiresUserInteraction() {
     return true;
   },
-  async validateInput({ questions }) {
-    if (getQuestionPreviewFormat() !== 'html') {
-      return { result: true };
-    }
-    for (const q of questions) {
-      for (const opt of q.options) {
-        const err = validateHtmlPreview(opt.preview);
-        if (err) {
-          return {
-            result: false,
-            message: `Option "${opt.label}" in question "${q.question}": ${err}`,
-            errorCode: 1,
-          };
-        }
-      }
-    }
-    return { result: true };
-  },
-  async checkPermissions(input) {
-    return {
-      behavior: 'ask' as const,
-      message: 'Answer questions?',
-      updatedInput: input,
-    };
-  },
   renderToolUseMessage() {
     return null;
   },
@@ -501,24 +476,53 @@ export const AskUserQuestionTool: Tool<InputSchema, Output> = buildTool({
   renderToolUseErrorMessage() {
     return null;
   },
-  async call({ questions, answers = {}, annotations, afkTimeoutMs, response }, _context) {
-    // densable sd_: array-of-strings join ", " if UI ever emits arrays
-    const normalizedAnswers: Record<string, string> = {};
-    for (const [k, v] of Object.entries(answers as Record<string, unknown>)) {
-      if (Array.isArray(v)) {
-        normalizedAnswers[k] = v.map(String).join(', ');
-      } else if (v !== undefined && v !== null) {
-        normalizedAnswers[k] = String(v);
-      }
-    }
-    const freeform = typeof response === 'string' && response.trim() ? response.trim() : undefined;
+  create() {
     return {
-      data: {
-        questions,
-        answers: normalizedAnswers,
-        ...(annotations && { annotations }),
-        ...(freeform ? { response: freeform } : {}),
-        ...(afkTimeoutMs ? { afkTimeoutMs } : {}),
+      async validateInput({ questions }) {
+        if (getQuestionPreviewFormat() !== 'html') {
+          return { result: true };
+        }
+        for (const q of questions) {
+          for (const opt of q.options) {
+            const err = validateHtmlPreview(opt.preview);
+            if (err) {
+              return {
+                result: false,
+                message: `Option "${opt.label}" in question "${q.question}": ${err}`,
+                errorCode: 1,
+              };
+            }
+          }
+        }
+        return { result: true };
+      },
+      async checkPermissions(input) {
+        return {
+          behavior: 'ask' as const,
+          message: 'Answer questions?',
+          updatedInput: input,
+        };
+      },
+      async call({ questions, answers = {}, annotations, afkTimeoutMs, response }) {
+        // densable sd_: array-of-strings join ", " if UI ever emits arrays
+        const normalizedAnswers: Record<string, string> = {};
+        for (const [k, v] of Object.entries(answers as Record<string, unknown>)) {
+          if (Array.isArray(v)) {
+            normalizedAnswers[k] = v.map(String).join(', ');
+          } else if (v !== undefined && v !== null) {
+            normalizedAnswers[k] = String(v);
+          }
+        }
+        const freeform = typeof response === 'string' && response.trim() ? response.trim() : undefined;
+        return {
+          data: {
+            questions,
+            answers: normalizedAnswers,
+            ...(annotations && { annotations }),
+            ...(freeform ? { response: freeform } : {}),
+            ...(afkTimeoutMs ? { afkTimeoutMs } : {}),
+          },
+        };
       },
     };
   },

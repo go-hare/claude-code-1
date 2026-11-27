@@ -123,14 +123,17 @@ export interface CoreTool<
   readonly inputSchema: Input
   readonly inputJSONSchema?: ToolInputJSONSchema
   outputSchema?: z.ZodType<unknown>
+  outputSchemaAcrossProcesses?: z.ZodType<unknown>
 
   // ── Execution ──
+  create?(deps: any): any
   call(
     args: z.infer<Input>,
     context: Context,
     canUseTool: (...args: any[]) => Promise<any>,
     parentMessage: any,
     onProgress?: ToolCallProgress<P>,
+    opts?: unknown,
   ): Promise<ToolResult<Output>>
 
   // ── Description ──

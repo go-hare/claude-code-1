@@ -36,13 +36,6 @@ export const TestingPermissionTool: Tool<InputSchema, string> = buildTool({
   isReadOnly() {
     return true;
   },
-  async checkPermissions() {
-    // This tool always requires permission
-    return {
-      behavior: 'ask' as const,
-      message: `Run test?`,
-    };
-  },
   renderToolUseMessage() {
     return null;
   },
@@ -61,9 +54,20 @@ export const TestingPermissionTool: Tool<InputSchema, string> = buildTool({
   renderToolUseErrorMessage() {
     return null;
   },
-  async call() {
+  create() {
     return {
-      data: `${NAME} executed successfully`,
+      async checkPermissions() {
+        // This tool always requires permission
+        return {
+          behavior: 'ask' as const,
+          message: `Run test?`,
+        };
+      },
+      async call() {
+        return {
+          data: `${NAME} executed successfully`,
+        };
+      },
     };
   },
   mapToolResultToToolResultBlockParam(result, toolUseID) {

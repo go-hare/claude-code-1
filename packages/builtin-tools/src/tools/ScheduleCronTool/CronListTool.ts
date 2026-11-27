@@ -1,5 +1,15 @@
 import { z } from 'zod/v4'
-import { buildTool, type ToolDef } from 'src/Tool.js'
+import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js'
+import {
+  buildTool,
+  type ToolCallExecutionOptions,
+  type ToolCallProgress,
+  type ToolDef,
+  type ToolProgressData,
+  type ToolResult,
+  type ToolUseContext,
+} from 'src/Tool.js'
+import type { AssistantMessage } from 'src/types/message.js'
 import { cronToHuman } from 'src/utils/cron.js'
 import { listAllCronTasks } from 'src/utils/cronTasks.js'
 import { truncate } from 'src/utils/format.js'
@@ -34,7 +44,7 @@ const outputSchema = lazySchema(() =>
 type OutputSchema = ReturnType<typeof outputSchema>
 export type ListOutput = z.infer<OutputSchema>
 
-export const CronListTool = buildTool({
+const builtCronListTool = buildTool({
   name: CRON_LIST_TOOL_NAME,
   searchHint: 'list active cron jobs',
   maxResultSizeChars: 100_000,
@@ -60,22 +70,26 @@ export const CronListTool = buildTool({
   async prompt() {
     return buildCronListPrompt(isDurableCronEnabled())
   },
-  async call() {
-    const allTasks = await listAllCronTasks()
-    // Teammates only see their own crons; team lead (no ctx) sees all.
-    const ctx = getTeammateContext()
-    const tasks = ctx
-      ? allTasks.filter(t => t.agentId === ctx.agentId)
-      : allTasks
-    const jobs = tasks.map(t => ({
-      id: t.id,
-      cron: t.cron,
-      humanSchedule: cronToHuman(t.cron),
-      prompt: t.prompt,
-      ...(t.recurring ? { recurring: true } : {}),
-      ...(t.durable === false ? { durable: false } : {}),
-    }))
-    return { data: { jobs } }
+  create(_deps) {
+    return {
+      async call() {
+        const allTasks = await listAllCronTasks()
+        // Teammates only see their own crons; team lead (no ctx) sees all.
+        const ctx = getTeammateContext()
+        const tasks = ctx
+          ? allTasks.filter(t => t.agentId === ctx.agentId)
+          : allTasks
+        const jobs = tasks.map(t => ({
+          id: t.id,
+          cron: t.cron,
+          humanSchedule: cronToHuman(t.cron),
+          prompt: t.prompt,
+          ...(t.recurring ? { recurring: true } : {}),
+          ...(t.durable === false ? { durable: false } : {}),
+        }))
+        return { data: { jobs } }
+      },
+    }
   },
   mapToolResultToToolResultBlockParam(output, toolUseID) {
     return {
@@ -95,3 +109,23 @@ export const CronListTool = buildTool({
   renderToolUseMessage: renderListToolUseMessage,
   renderToolResultMessage: renderListResultMessage,
 } satisfies ToolDef<InputSchema, ListOutput>)
+
+export const CronListTool: Omit<typeof builtCronListTool, 'call'> & {
+  call(
+    args?: z.infer<InputSchema>,
+    context?: ToolUseContext,
+    canUseTool?: CanUseToolFn,
+    parentMessage?: AssistantMessage,
+    onProgress?: ToolCallProgress<ToolProgressData>,
+    opts?: ToolCallExecutionOptions,
+  ): Promise<ToolResult<ListOutput>>
+} = builtCronListTool as unknown as Omit<typeof builtCronListTool, 'call'> & {
+  call(
+    args?: z.infer<InputSchema>,
+    context?: ToolUseContext,
+    canUseTool?: CanUseToolFn,
+    parentMessage?: AssistantMessage,
+    onProgress?: ToolCallProgress<ToolProgressData>,
+    opts?: ToolCallExecutionOptions,
+  ): Promise<ToolResult<ListOutput>>
+}

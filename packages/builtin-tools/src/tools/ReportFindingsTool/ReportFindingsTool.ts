@@ -149,13 +149,17 @@ export const ReportFindingsTool = buildTool({
     }
   },
 
-  async call(input: Input) {
-    const findings = input.findings ?? []
-    const output: Output = {
-      count: findings.length,
-      level: input.level,
-      findings,
+  create() {
+    return {
+      async call(input: Input) {
+        const findings = input.findings ?? []
+        const output: Output = {
+          count: findings.length,
+          level: input.level,
+          findings,
+        }
+        return { data: output }
+      },
     }
-    return { data: output }
   },
 } satisfies ToolDef<InputSchema, Output>)

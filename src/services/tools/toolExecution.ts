@@ -43,6 +43,12 @@ import {
   getAbortReasonMessage,
 } from '../../utils/abortController.js'
 import { registerForegroundToolCall } from '../../utils/foregroundToolCalls.js'
+import {
+  consumeRemoteNativeToolLocallyChecked,
+  getRemoteNativeToolCheck,
+  getRemoteNativeToolRunner,
+  NativeToolElsewhereError,
+} from '../../utils/toolCreateRuntime.js'
 import { areBackgroundTasksDisabled } from '../../utils/sessionBackgroundGates.js'
 import {
   getBootstrapSession,
@@ -4748,6 +4754,23 @@ async function checkPermissionsAndCallTool(
     tool.backfillObservableInput!(backfilledClone as Record<string, unknown>)
     processedInput = backfilledClone
   }
+  if (
+    tool.deriveObservableInput &&
+    typeof processedInput === 'object' &&
+    processedInput !== null
+  ) {
+    try {
+      const derived = await tool.deriveObservableInput(
+        processedInput as Record<string, unknown>,
+        toolUseContext,
+      )
+      if (derived !== undefined) {
+        processedInput = derived as typeof processedInput
+      }
+    } catch (deriveErr) {
+      logError(deriveErr)
+    }
+  }
 
   // Schema defaults/transforms and observable backfill are core-owned changes.
   // Reuse policy only when the core received the exact approved input; a plugin
@@ -5033,6 +5056,20 @@ async function checkPermissionsAndCallTool(
     require('../../engine/permissionLayerReaders.js') as typeof import('../../engine/permissionLayerReaders.js')
   const permissionMode = bnPermissionContext(toolUseContext).mode
   const permissionStart = Date.now()
+
+  // Official 2.1.331 `is = nM(session, name)`, `Nr = nue(session, name) && is`, `hs = Nr ? undefined : is`
+  const remoteRunnerAtPermissionStart = getRemoteNativeToolRunner(
+    toolUseContext.session,
+    tool.name,
+  )
+  const remotePermissionCheckedFor =
+    getRemoteNativeToolCheck(toolUseContext.session, tool.name) !== undefined
+      ? remoteRunnerAtPermissionStart
+      : undefined
+  const remoteRunnerCheckedHere =
+    remotePermissionCheckedFor !== undefined
+      ? undefined
+      : remoteRunnerAtPermissionStart
 
   toolUseContext.toolDecisions ??= new Map()
   const permissionCheckContext =
@@ -5631,6 +5668,10 @@ async function checkPermissionsAndCallTool(
         }
         return res
       }
+      const runnerLocalCheckDeferred = consumeRemoteNativeToolLocallyChecked(
+        callCtx.session,
+        toolUseID,
+      )
       const invokeToolCall = () =>
         tool.call(
           callInput,
@@ -5669,6 +5710,18 @@ async function checkPermissionsAndCallTool(
               toolUseID: progress.toolUseID,
               data: progress.data,
             })
+          },
+          {
+            userModified: permissionDecision.userModified ?? false,
+            permissionCheckedFor: runnerLocalCheckDeferred
+              ? undefined
+              : (remotePermissionCheckedFor ??
+                (remoteRunnerAtPermissionStart === undefined
+                  ? null
+                  : undefined)),
+            runnerCheckedHere: runnerLocalCheckDeferred
+              ? remoteRunnerAtPermissionStart
+              : remoteRunnerCheckedHere,
           },
         )
       // Fast-path: skip wrapper entirely when skill-learning is disabled to
@@ -6467,6 +6520,19 @@ async function checkPermissionsAndCallTool(
       },
       ...hookMessages,
     ]
+    if (
+      error instanceof NativeToolElsewhereError &&
+      error.noteBehindResult !== undefined &&
+      !isInterrupt &&
+      !toolUseContext.abortController.signal.aborted
+    ) {
+      errorMessages.push({
+        message: createAttachmentMessage({
+          type: 'critical_system_reminder',
+          content: error.noteBehindResult,
+        }),
+      })
+    }
     if (
       shouldPreventContinuation &&
       !isInterrupt &&

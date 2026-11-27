@@ -47,16 +47,20 @@ export const MCPTool = buildTool({
   get outputSchema(): OutputSchema {
     return outputSchema()
   },
-  // Overridden in mcpClient.ts
-  async call() {
+  create(_deps) {
     return {
-      data: '',
-    }
-  },
-  async checkPermissions(): Promise<PermissionResult> {
-    return {
-      behavior: 'passthrough',
-      message: 'MCPTool requires permission.',
+      // Overridden in mcpClient.ts
+      async call() {
+        return {
+          data: '',
+        }
+      },
+      async checkPermissions(): Promise<PermissionResult> {
+        return {
+          behavior: 'passthrough',
+          message: 'MCPTool requires permission.',
+        }
+      },
     }
   },
   renderToolUseMessage,

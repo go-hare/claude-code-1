@@ -3,7 +3,7 @@
  * Gate: CLAUDE_CODE_EXPERIMENTAL_OBSERVER_AGENTS (+ pairing registry).
  */
 import { z } from 'zod/v4'
-import type { ToolResultBlockParam, ToolUseContext } from 'src/Tool.js'
+import type { ToolDeps, ToolResultBlockParam } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import {
   isLocalAgentTask,
@@ -145,73 +145,77 @@ export const ObserverReportTool = buildTool({
     }
   },
 
-  async checkPermissions(input, context) {
-    // Official: only observer agents may invoke; main session has no pairing.
-    if (!isObserverReportCallable(context?.agentId)) {
-      return {
-        behavior: 'deny' as const,
-        message:
-          'ObserverReport is only available to an observer agent; the main session does not have an observed pairing.',
-        decisionReason: {
-          type: 'other' as const,
-          reason: 'not_observer_agent',
-        },
-      }
-    }
-    return { behavior: 'allow' as const, updatedInput: input }
-  },
+  create(deps: ToolDeps) {
+    return {
+      async checkPermissions(input: Input) {
+        // Official: only observer agents may invoke; main session has no pairing.
+        if (!isObserverReportCallable(deps.agentId)) {
+          return {
+            behavior: 'deny' as const,
+            message:
+              'ObserverReport is only available to an observer agent; the main session does not have an observed pairing.',
+            decisionReason: {
+              type: 'other' as const,
+              reason: 'not_observer_agent',
+            },
+          }
+        }
+        return { behavior: 'allow' as const, updatedInput: input }
+      },
 
-  async call(input: Input, context: ToolUseContext) {
-    if (!isObserverReportCallable(context.agentId)) {
-      return {
-        data: {
-          success: false,
-          message:
-            'ObserverReport is only available to an observer agent; the main session does not have an observed pairing.',
-        } satisfies Output,
-      }
-    }
-    const result = deliverObserverReport({
-      observerTaskId: context.agentId,
-      report: input.report,
-      isObservedRunning: observedTaskId => {
-        try {
-          const task = context.getAppState().tasks[observedTaskId]
-          return isLocalAgentTask(task) && task.status === 'running'
-        } catch {
-          return false
+      async call(input: Input) {
+        if (!isObserverReportCallable(deps.agentId)) {
+          return {
+            data: {
+              success: false,
+              message:
+                'ObserverReport is only available to an observer agent; the main session does not have an observed pairing.',
+            } satisfies Output,
+          }
+        }
+        const result = deliverObserverReport({
+          observerTaskId: deps.agentId,
+          report: input.report,
+          isObservedRunning: observedTaskId => {
+            try {
+              const task = deps.tasks()[observedTaskId]
+              return isLocalAgentTask(task) && task.status === 'running'
+            } catch {
+              return false
+            }
+          },
+          enqueueMain: (value, origin) => {
+            // densable IT({mode:"prompt",...,origin:l,skipSlashCommands:!0,isMeta:!0})
+            // origin kind is "observer" (not observer-activity) so Fws can frame.
+            enqueuePendingNotification({
+              mode: 'prompt',
+              value,
+              priority: 'next',
+              isMeta: true,
+              skipSlashCommands: true,
+              skipAttachments: true,
+              origin: origin as never,
+            })
+          },
+          enqueueAgent: (observedTaskId, value, origin) => {
+            // Async observers get a no-op setAppState from forkedAgent
+            // (shareSetAppState: !isAsync). Root task queue writes must use
+            // setAppStateForTasks, same as query/autoDream/observer host.
+            // densable sqe(…,{origin:l, isMeta:!0}) with kind:"observer".
+            const setAppState = deps.setAppStateForTasks ?? deps.setAppState
+            queuePendingMessage(observedTaskId, value, setAppState, {
+              isMeta: true,
+              origin: origin as never,
+            })
+          },
+        })
+        return {
+          data: {
+            success: result.success,
+            message: result.message,
+          } satisfies Output,
         }
       },
-      enqueueMain: (value, origin) => {
-        // densable IT({mode:"prompt",...,origin:l,skipSlashCommands:!0,isMeta:!0})
-        // origin kind is "observer" (not observer-activity) so Fws can frame.
-        enqueuePendingNotification({
-          mode: 'prompt',
-          value,
-          priority: 'next',
-          isMeta: true,
-          skipSlashCommands: true,
-          skipAttachments: true,
-          origin: origin as never,
-        })
-      },
-      enqueueAgent: (observedTaskId, value, origin) => {
-        // Async observers get a no-op setAppState from forkedAgent
-        // (shareSetAppState: !isAsync). Root task queue writes must use
-        // setAppStateForTasks, same as query/autoDream/observer host.
-        // densable sqe(…,{origin:l, isMeta:!0}) with kind:"observer".
-        const setAppState = context.setAppStateForTasks ?? context.setAppState
-        queuePendingMessage(observedTaskId, value, setAppState, {
-          isMeta: true,
-          origin: origin as never,
-        })
-      },
-    })
-    return {
-      data: {
-        success: result.success,
-        message: result.message,
-      } satisfies Output,
     }
   },
 } satisfies ToolDef<InputSchema, Output>)

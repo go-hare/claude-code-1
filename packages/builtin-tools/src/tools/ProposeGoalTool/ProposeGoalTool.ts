@@ -18,7 +18,12 @@ import {
 import { isGoalClearKeyword } from 'src/services/goal/clearKeywords.js'
 import { getGoalRestoreGate } from 'src/services/goal/restoreGoalFromTranscript.js'
 import { setQueuedGoalOrigin } from 'src/services/goal/queuedGoalOrigin.js'
-import { buildTool, type ToolResultBlockParam } from 'src/Tool.js'
+import {
+  buildTool,
+  type ToolDef,
+  type ToolDeps,
+  type ToolResultBlockParam,
+} from 'src/Tool.js'
 import { randomUUID } from 'src/utils/crypto.js'
 import { TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 'src/utils/errors.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
@@ -152,142 +157,146 @@ export const ProposeGoalTool = buildTool({
     }
   },
 
-  async call({ condition, ask_user }: ProposeGoalInput, context) {
-    if (context.agentId) {
-      throw Error('SetGoal cannot be used in agent contexts')
-    }
-    if (
-      getIsNonInteractiveSession() ||
-      getIsRemoteMode() ||
-      isBgSessionKind()
-    ) {
-      sad('session_shape')
-      throw Error(
-        'Goal proposals are only available in interactive local sessions.',
-      )
-    }
-    const n = canonicalizeGoalCondition(flattenNewlines(condition)).trim()
-    if (n === '') {
-      throw Error(
-        'The goal condition is empty once whitespace and invisible characters are removed. Provide a visible condition.',
-      )
-    }
-    if (n.length > PROPOSE_GOAL_CONDITION_MAX_CHARS) {
-      throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
-        `The goal condition exceeds ${PROPOSE_GOAL_CONDITION_MAX_CHARS} characters once canonicalized for display (tabs expand to spaces). Shorten the condition — the user must be able to read all of it in the approval dialog.`,
-        'goal condition exceeds the canonicalized-length cap',
-      )
-    }
-    if (isGoalClearKeyword(n)) {
-      throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
-        `${SET_GOAL_TOOL_NAME} cannot clear a goal. The user can end it with /goal clear.`,
-        'set goal asked to clear',
-      )
-    }
-    const gate = getGoalRestoreGate()
-    if (gate !== null) {
-      sad(gate.code)
-      throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
-        gate.message,
-        'goal evaluator blocked',
-      )
-    }
-    if (context.getAppState().toolPermissionContext.mode === 'plan') {
-      sad('plan_mode')
-      throw Error(
-        'Plan mode is active, so a goal cannot be proposed yet. Keep planning; propose the goal after the plan is approved.',
-      )
-    }
-    const setting = await getModelProposedGoalsSettingAsync()
-    if (setting === 'disabled') {
-      sad('setting_disabled')
-      throw Error(
-        'The user has disabled model-proposed goals in their settings. Do not propose goals; the user can set one themselves with /goal.',
-      )
-    }
-    const askUser = setting === 'alwaysAsk' || ask_user !== false
-    const requestDialog = context.requestDialog
-    if (requestDialog === undefined) {
-      throw Error(
-        'Goal proposals need an interactive session to render the approval prompt; none is available here.',
-      )
-    }
-    if (context.getAppState().pendingGoalProposal) {
-      throw Error(
-        "A goal proposal is already awaiting the user's decision. Keep working; if it is approved you will receive a kickoff message.",
-      )
-    }
-    logEvent('tengu_goal_proposed', {
-      promptLength: n.length,
-      askUser,
-      forcedAsk: askUser && ask_user === false,
-    })
-    ok()
-    if (!askUser) {
-      setQueuedGoalOrigin(context.setAppState, n, 'proposal_direct')
-      enqueue({
-        agentId: getMainThreadAgentId(),
-        mode: 'prompt',
-        value: `/goal ${n}`,
-        origin: { kind: 'task-notification' },
-      })
-      return { data: { condition: n, askUser: false } }
-    }
-    const { setAppState } = context
-    const latch = randomUUID()
-    setAppState(prev => ({ ...prev, pendingGoalProposal: latch }))
-    void requestDialog(
-      goalProposalSpec,
-      { condition: n },
-      { queueBehind: true },
-    )
-      .then((raw: unknown) => {
-        const parsed = goalProposalSpec.result().safeParse(raw)
-        const d = parsed.success ? parsed.data : goalProposalSpec.default
-        const stale = context.getAppState().pendingGoalProposal !== latch
-        const disabled = getModelProposedGoalsSetting() === 'disabled'
-        const plan = context.getAppState().toolPermissionContext.mode === 'plan'
-        logEvent('tengu_goal_proposal_decided', {
-          decision: d.approved
-            ? stale
-              ? meta('approved_stale')
-              : disabled
-                ? meta('approved_disabled')
-                : plan
-                  ? meta('approved_plan_mode')
-                  : meta('approved')
-            : d.explicit === true
-              ? meta('declined')
-              : meta('unanswered'),
-        })
-        if (!d.approved || stale || disabled || plan) {
-          if (d.approved && !stale) {
-            if (disabled) sad('approved_dropped_disabled')
-            else if (plan) sad('approved_dropped_plan_mode')
-          }
-          return
+  create(deps: ToolDeps) {
+    return {
+      async call({ condition, ask_user }: ProposeGoalInput) {
+        if (deps.agentId) {
+          throw Error('SetGoal cannot be used in agent contexts')
         }
-        setQueuedGoalOrigin(setAppState, n, 'proposal_approved')
-        enqueue({
-          agentId: getMainThreadAgentId(),
-          mode: 'prompt',
-          value: `/goal ${n}`,
-          origin: { kind: 'auto-continuation' },
+        if (
+          getIsNonInteractiveSession() ||
+          getIsRemoteMode() ||
+          isBgSessionKind()
+        ) {
+          sad('session_shape')
+          throw Error(
+            'Goal proposals are only available in interactive local sessions.',
+          )
+        }
+        const n = canonicalizeGoalCondition(flattenNewlines(condition)).trim()
+        if (n === '') {
+          throw Error(
+            'The goal condition is empty once whitespace and invisible characters are removed. Provide a visible condition.',
+          )
+        }
+        if (n.length > PROPOSE_GOAL_CONDITION_MAX_CHARS) {
+          throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+            `The goal condition exceeds ${PROPOSE_GOAL_CONDITION_MAX_CHARS} characters once canonicalized for display (tabs expand to spaces). Shorten the condition — the user must be able to read all of it in the approval dialog.`,
+            'goal condition exceeds the canonicalized-length cap',
+          )
+        }
+        if (isGoalClearKeyword(n)) {
+          throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+            `${SET_GOAL_TOOL_NAME} cannot clear a goal. The user can end it with /goal clear.`,
+            'set goal asked to clear',
+          )
+        }
+        const gate = getGoalRestoreGate()
+        if (gate !== null) {
+          sad(gate.code)
+          throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+            gate.message,
+            'goal evaluator blocked',
+          )
+        }
+        if (deps.permissions().mode === 'plan') {
+          sad('plan_mode')
+          throw Error(
+            'Plan mode is active, so a goal cannot be proposed yet. Keep planning; propose the goal after the plan is approved.',
+          )
+        }
+        const setting = await getModelProposedGoalsSettingAsync()
+        if (setting === 'disabled') {
+          sad('setting_disabled')
+          throw Error(
+            'The user has disabled model-proposed goals in their settings. Do not propose goals; the user can set one themselves with /goal.',
+          )
+        }
+        const askUser = setting === 'alwaysAsk' || ask_user !== false
+        const requestDialog = deps.requestDialog
+        if (requestDialog === undefined) {
+          throw Error(
+            'Goal proposals need an interactive session to render the approval prompt; none is available here.',
+          )
+        }
+        if (deps.getAppState().pendingGoalProposal) {
+          throw Error(
+            "A goal proposal is already awaiting the user's decision. Keep working; if it is approved you will receive a kickoff message.",
+          )
+        }
+        logEvent('tengu_goal_proposed', {
+          promptLength: n.length,
+          askUser,
+          forcedAsk: askUser && ask_user === false,
         })
-      })
-      .catch((err: unknown) => {
-        logError(err)
-      })
-      .finally(() => {
-        setAppState(prev =>
-          prev.pendingGoalProposal === latch
-            ? { ...prev, pendingGoalProposal: undefined }
-            : prev,
+        ok()
+        if (!askUser) {
+          setQueuedGoalOrigin(deps.setAppState, n, 'proposal_direct')
+          enqueue({
+            agentId: getMainThreadAgentId(),
+            mode: 'prompt',
+            value: `/goal ${n}`,
+            origin: { kind: 'task-notification' },
+          })
+          return { data: { condition: n, askUser: false } }
+        }
+        const { setAppState } = deps
+        const latch = randomUUID()
+        setAppState(prev => ({ ...prev, pendingGoalProposal: latch }))
+        void requestDialog(
+          goalProposalSpec,
+          { condition: n },
+          { queueBehind: true },
         )
-      })
-    return { data: { condition: n, askUser: true } }
+          .then((raw: unknown) => {
+            const parsed = goalProposalSpec.result().safeParse(raw)
+            const d = parsed.success ? parsed.data : goalProposalSpec.default
+            const stale = deps.getAppState().pendingGoalProposal !== latch
+            const disabled = getModelProposedGoalsSetting() === 'disabled'
+            const plan = deps.permissions().mode === 'plan'
+            logEvent('tengu_goal_proposal_decided', {
+              decision: d.approved
+                ? stale
+                  ? meta('approved_stale')
+                  : disabled
+                    ? meta('approved_disabled')
+                    : plan
+                      ? meta('approved_plan_mode')
+                      : meta('approved')
+                : d.explicit === true
+                  ? meta('declined')
+                  : meta('unanswered'),
+            })
+            if (!d.approved || stale || disabled || plan) {
+              if (d.approved && !stale) {
+                if (disabled) sad('approved_dropped_disabled')
+                else if (plan) sad('approved_dropped_plan_mode')
+              }
+              return
+            }
+            setQueuedGoalOrigin(setAppState, n, 'proposal_approved')
+            enqueue({
+              agentId: getMainThreadAgentId(),
+              mode: 'prompt',
+              value: `/goal ${n}`,
+              origin: { kind: 'auto-continuation' },
+            })
+          })
+          .catch((err: unknown) => {
+            logError(err)
+          })
+          .finally(() => {
+            setAppState(prev =>
+              prev.pendingGoalProposal === latch
+                ? { ...prev, pendingGoalProposal: undefined }
+                : prev,
+            )
+          })
+        return { data: { condition: n, askUser: true } }
+      },
+    }
   },
-})
+} satisfies ToolDef<InputSchema, ProposeGoalOutput>)
 
 /** Official 2.1.331 canonical export name (`SetGoalTool`). */
 export const SetGoalTool = ProposeGoalTool

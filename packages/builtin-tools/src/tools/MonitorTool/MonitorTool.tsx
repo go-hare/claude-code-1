@@ -4,8 +4,15 @@ import { Text } from '@anthropic/ink';
 import { z } from 'zod/v4';
 import { MessageResponse } from 'src/components/MessageResponse.js';
 import { TOOL_SUMMARY_MAX_LENGTH } from 'src/constants/toolLimits.js';
-import type { ToolResultBlockParam, ToolUseContext, ValidationResult } from 'src/Tool.js';
-import { buildTool } from 'src/Tool.js';
+import type {
+  ToolCallContext,
+  ToolDef,
+  ToolDeps,
+  ToolResultBlockParam,
+  ToolUseContext,
+  ValidationResult,
+} from 'src/Tool.js';
+import { buildTool, resolveToolUseContext } from 'src/Tool.js';
 import { spawnShellTask } from 'src/tasks/LocalShellTask/LocalShellTask.js';
 import { killTask } from 'src/tasks/LocalShellTask/killShellTasks.js';
 import { addKeepaliveReason, monitorKeepaliveReason, removeKeepaliveReason } from 'src/utils/task/framework.js';
@@ -159,14 +166,27 @@ function checkMonitorWsPrecondition(url: string) {
   return monitorWebSocketPrecondition(url);
 }
 
+type MonitorPermissionDeps = Pick<ToolDeps, 'permissions' | 'unlayeredPermissions'>;
+
+function readBashCommandClamps(deps?: Partial<MonitorPermissionDeps>): unknown[] | undefined {
+  const unlayered = deps?.unlayeredPermissions?.() as { bashCommandClamps?: unknown[] } | undefined;
+  if (Array.isArray(unlayered?.bashCommandClamps) && unlayered.bashCommandClamps.length > 0) {
+    return unlayered.bashCommandClamps;
+  }
+  const layered = deps?.permissions?.() as { bashCommandClamps?: unknown[] } | undefined;
+  if (Array.isArray(layered?.bashCommandClamps) && layered.bashCommandClamps.length > 0) {
+    return layered.bashCommandClamps;
+  }
+  return undefined;
+}
+
 /** Official 2.1.331 `mtl` + `qe` + `Ue` — deny bashCommandClamp / precondition / Bash(*) deny, else ask. */
 function checkMonitorWebSocketPermission(
   ws: { url: string; protocols?: string[] },
-  context?: ToolUseContext,
+  deps?: Partial<MonitorPermissionDeps>,
 ): PermissionResult {
-  const clamps = (context?.getAppState?.()?.toolPermissionContext as { bashCommandClamps?: unknown[] } | undefined)
-    ?.bashCommandClamps;
-  if (Array.isArray(clamps) && clamps.length > 0) {
+  const clamps = readBashCommandClamps(deps);
+  if (clamps !== undefined) {
     return {
       behavior: 'deny',
       message:
@@ -200,7 +220,7 @@ function checkMonitorWebSocketPermission(
     message: `Monitor will open a WebSocket to ${ws.url}${protocols}`,
     suggestions: [],
   };
-  const permCtx = context?.getAppState?.()?.toolPermissionContext;
+  const permCtx = deps?.permissions?.();
   if (!permCtx) {
     return askResult;
   }
@@ -313,11 +333,13 @@ function buildBoundedInputSchema() {
 }
 
 export function buildMonitorInputSchema(bounded = isMonitorTimeoutBounded()): InputSchema {
-  return bounded ? (buildBoundedInputSchema() as unknown as InputSchema) : unboundedInputSchema();
+  return bounded ? buildBoundedInputSchema() : unboundedInputSchema();
 }
 
-type InputSchema = ReturnType<typeof unboundedInputSchema>;
-export type MonitorInput = Omit<z.infer<InputSchema>, 'persistent'> & { persistent?: boolean };
+type InputSchema = ReturnType<typeof unboundedInputSchema> | ReturnType<typeof buildBoundedInputSchema>;
+export type MonitorInput = Omit<z.infer<ReturnType<typeof unboundedInputSchema>>, 'persistent'> & {
+  persistent?: boolean;
+};
 
 const outputSchema = lazySchema(() =>
   z.object({
@@ -458,74 +480,6 @@ export const MonitorTool = buildTool({
     return BashTool.preparePermissionMatcher({ command });
   },
 
-  permissionCheckFailureDecision(_input: MonitorInput, context: ToolUseContext): PermissionResult | undefined {
-    // Official 2.1.331 `Wls` (@316633649): fail closed when a permission check
-    // crashes under an active per-spawn `bashCommandClamp`.
-    const clamps = (context?.getAppState?.()?.toolPermissionContext as { bashCommandClamps?: unknown[] } | undefined)
-      ?.bashCommandClamps;
-    if (Array.isArray(clamps) && clamps.length > 0) {
-      return {
-        behavior: 'deny',
-        message: `The ${MONITOR_TOOL_NAME} permission check crashed and this agent carries a per-spawn bashCommandClamp; denying rather than running an unverified command.`,
-        decisionReason: {
-          type: 'other',
-          reason: 'bashCommandClamp permission check crashed',
-        },
-      };
-    }
-    return undefined;
-  },
-
-  async checkPermissions(input: MonitorInput, context: ToolUseContext): Promise<PermissionResult> {
-    if (input.ws !== undefined) {
-      return checkMonitorWebSocketPermission(input.ws, context);
-    }
-    const sandboxAtStart = shouldUseSandbox({ command: input.command });
-    try {
-      const appState = context.getAppState();
-      const bashRule = checkBashRuleForCodeExec(appState.toolPermissionContext, MONITOR_TOOL_NAME);
-      if (bashRule?.verdict.behavior === 'deny') {
-        return bashRule.verdict;
-      }
-      // densable 2.1.289 @194307650 `Dzn({ ...n, command: n.command }, r.shellPermission)` —
-      // preserve `description`, `timeout_ms`, and `persistent` in `updatedInput` so toolExecution
-      // never overwrites MonitorInput with `{ command }` alone (`Monitor event: "undefined"`).
-      // 2.1.290 `Ne` (@297418221): suspend sandbox auto-allow so Monitor doesn't silently bypass rules.
-      const bashInput = {
-        ...input,
-        command: input.command ?? '',
-      } as unknown as Parameters<typeof bashToolHasPermission>[0];
-      const suspendedContext: ToolUseContext = {
-        ...context,
-        permissionLayers: [...(context.permissionLayers ?? []), { kind: 'sandbox_auto_allow_suspended' }],
-      };
-      const perm = await bashToolHasPermission(bashInput, suspendedContext);
-      const mergedPerm: PermissionResult =
-        (perm.behavior === 'allow' || perm.behavior === 'ask') && perm.updatedInput !== undefined
-          ? {
-              ...perm,
-              updatedInput: { ...input, ...perm.updatedInput },
-            }
-          : perm;
-      if (bashRule === null || mergedPerm.behavior === 'deny') {
-        return mergedPerm;
-      }
-      if (mergedPerm.behavior === 'ask') {
-        const { suggestions: _suggestions, ...rest } = mergedPerm;
-        return { ...rest, matchedAskRule: bashRule.rule };
-      }
-      return bashRule.verdict;
-    } finally {
-      // Official 2.1.331 `He` / `fNn` (@326863500): pin check-time sandbox state
-      // so hook/settings changes cannot silently drop sandboxing between check and call.
-      recordSandboxStateAtCheck(
-        context.toolUseId,
-        { command: input.command },
-        sandboxAtStart || shouldUseSandbox({ command: input.command }),
-      );
-    }
-  },
-
   userFacingName() {
     return MONITOR_TOOL_NAME;
   },
@@ -541,231 +495,306 @@ export const MonitorTool = buildTool({
     return input?.description ? `Monitoring: ${input.description}` : 'Monitoring';
   },
 
-  async validateInput(input: MonitorInput): Promise<ValidationResult> {
-    const hasCommand = Boolean(input.command && input.command.trim() !== '');
-    const hasWs = input.ws !== undefined;
-    if (hasCommand === hasWs) {
-      return {
-        result: false,
-        message: 'exactly one of command or ws',
-        errorCode: 1,
-      };
-    }
-    if (!input.description || input.description.trim() === '') {
-      return {
-        result: false,
-        message: 'Monitor description cannot be empty.',
-        errorCode: 2,
-      };
-    }
-    if (input.command !== undefined) {
-      // Official 2.1.331 `ze` (@326864650): enforce Windows strict-sandbox / MXC policy refusal.
-      const policyRefusal = getMonitorCommandSandboxRefusal(
-        shouldUseSandbox({ command: input.command }),
-        input.command,
-      );
-      if (policyRefusal !== null) {
-        return {
-          result: false,
-          message: policyRefusal,
-          errorCode: 14,
-        };
-      }
-    }
-    return { result: true };
-  },
-
-  async call(input: MonitorInput, context: ToolUseContext) {
-    const { command, description, timeout_ms = DEFAULT_MONITOR_TIMEOUT_MS, persistent = false, ws } = input;
-    const { abortController, setAppState, toolUseId } = context;
-    const effectiveAgentId = (context.agentId ?? getAgentContext()?.agentId) as AgentId | undefined;
-    if (effectiveAgentId !== undefined && isAgentStopPending(effectiveAgentId)) {
-      throw new Error('This agent has been stopped and its stop is still completing; it cannot start monitors.');
-    }
-    const registry = context.taskRegistry ?? createTaskRegistry(context.getAppState, setAppState);
-    // densable `p=RQ()`, `S=b6o(n,p)` then `vIt({...n,...S,bounded:p})` / `xe(...,p)`.
-    const bounded = isMonitorTimeoutBounded();
-    const S = clampMonitorSpawn({ timeout_ms, persistent }, bounded);
-
-    logEvent('tengu_monitor_tool_used', {});
-
-    if (ws !== undefined) {
-      // Official 2.1.331 `Ke` (@326868480): re-check compliance (`allow_web_fetch`),
-      // SSRF, and sandbox network policy right before opening the WebSocket.
-      const wsPrecondition = checkMonitorWsPrecondition(ws.url);
-      if (wsPrecondition !== null) {
-        throw new MonitorWsPreconditionError(formatMonitorWebSocketPreconditionError(wsPrecondition));
-      }
-      const handle = await spawnMonitorWebSocket({
-        url: ws.url,
-        protocols: ws.protocols,
-        description,
-        timeoutMs: S.timeout_ms,
-        persistent: S.persistent,
-        bounded,
-        toolUseId,
-        agentId: effectiveAgentId,
-        setAppState,
-        taskRegistry: registry,
-      });
-      return {
-        data: {
-          taskId: handle.taskId,
-          timeoutMs: S.persistent ? 0 : S.timeout_ms,
-          persistent: S.persistent,
-        },
-      };
-    }
-
-    if (!command) {
-      throw new Error('exactly one of command or ws');
-    }
-
-    // Official 2.1.331 `Ve` (@326866000): pin check-to-run sandbox decision and
-    // enforce Windows strict-sandbox / MXC policy refusal before spawning.
-    const keepInSandboxSinceCheck = shouldKeepRewrittenCommandInSandbox(toolUseId, { command });
-    clearSandboxStateAtCheck(toolUseId);
-    const effectiveUseSandbox = shouldUseSandbox({ command }, { disableUnsandboxedCommands: keepInSandboxSinceCheck });
-    const policyRefusal = getMonitorCommandSandboxRefusal(effectiveUseSandbox, command);
-    if (policyRefusal !== null) {
-      throw new SandboxPolicyRefusalError(policyRefusal);
-    }
-    if (keepInSandboxSinceCheck && !effectiveUseSandbox) {
-      throw new SandboxPolicyRefusalError(SANDBOX_GONE_SINCE_CHECK_MESSAGE);
-    }
-    const keptInSandboxByCheck = keepInSandboxSinceCheck && effectiveUseSandbox && !shouldUseSandbox({ command });
-
-    // densable xe / w1n: pipe stdout into the stream pump (j6 Monitor event).
-    const taskRef: { id?: string } = {};
-    let pump: MonitorStreamPump | undefined;
-    if (feature('MONITOR_TOOL')) {
-      pump = createMonitorStreamPump({
-        description,
-        agentId: effectiveAgentId,
-        taskRef,
-        killTask: () => {
-          const id = taskRef.id;
-          if (!id) return false;
-          killTask(id, registry);
-          return true;
-        },
-      });
-    }
-
-    // Official 2.1.331 (`Zoe.#g` / `Fe`): track piped stdout in UTF-16 code units
-    // (same unit as TaskOutput.totalBytes) so CJK/UTF-8 output never skews stderr detection.
-    let pipedStdoutChars = 0;
-    const onMonitorStdout = feature('MONITOR_TOOL')
-      ? (chunk: string) => {
-          pipedStdoutChars += chunk.length;
-          pump?.onData(chunk);
-        }
-      : undefined;
-
-    const shellCommand = await exec(command, abortController.signal, 'bash', {
-      onStdout: onMonitorStdout,
-      preventCwdChanges: true,
-      shouldUseSandbox: effectiveUseSandbox,
-      agentWorktree: context.agentWorktree,
-      useToolMemoryCgroup: true,
-    });
-    if (shellCommand.status === 'completed') {
-      const completed = await shellCommand.result;
-      if (completed.preSpawnError) {
-        shellCommand.cleanup();
-        pump?.dropAndClose();
-        throw new Error(completed.preSpawnError);
-      }
-    }
-    if (shellCommand.status === 'killed') {
-      await shellCommand.result;
-      shellCommand.cleanup();
-      pump?.dropAndClose();
-      if (effectiveAgentId !== undefined && isAgentStopPending(effectiveAgentId)) {
-        throw new Error('This agent has been stopped and its stop is still completing; it cannot start monitors.');
-      }
-      throw new Error('This call was interrupted before the monitor started; nothing is running.');
-    }
-    if (effectiveAgentId !== undefined && isAgentStopPending(effectiveAgentId)) {
-      shellCommand.kill();
-      shellCommand.cleanup();
-      pump?.dropAndClose();
-      throw new Error('This agent has been stopped and its stop is still completing; it cannot start monitors.');
-    }
-
-    // Spawn as a background task with kind: 'monitor'
-    const handle = await spawnShellTask(
-      {
-        command,
-        description,
-        shellCommand,
-        toolUseId: toolUseId,
-        agentId: effectiveAgentId,
-        innerCall: context.innerCall,
-        kind: 'monitor',
-      },
-      {
-        abortController,
-        getAppState: context.getAppState,
-        setAppState,
-      },
-    );
-    taskRef.id = handle.taskId;
-
-    if (feature('MONITOR_TOOL')) {
-      if (pump) {
-        const stream = pump;
-        // Official 2.1.331 `Ve` / `Fe`: use the canonical `monitor:<id>` keepalive
-        // key (deduplicated via Set with spawnShellTask's attachShellKeepalive)
-        // instead of registering a second duplicate `monitor:<id>:stream` entry.
-        const keepaliveReason = monitorKeepaliveReason(handle.taskId);
-        if (effectiveAgentId) {
-          addKeepaliveReason(effectiveAgentId, keepaliveReason, registry);
-        }
-        const timeoutId = S.persistent
-          ? undefined
-          : setTimeout(() => {
-              if (stream.isClosed()) return;
-              stream.flush();
-              if (stream.isClosed()) return;
-              // Official 2.1.331 (`Fe` @326865200): compare totalBytes against
-              // pipedStdoutBytes in matching units to detect stderr reliably.
-              const stderrOutputFile = hasMonitorStderrOutput(shellCommand.taskOutput, pipedStdoutChars)
-                ? shellCommand.taskOutput.path
-                : undefined;
-              notifyMonitorStreamEvent(
-                description,
-                monitorExpiredEvent(S.timeout_ms, stream.eventCount(), bounded, stderrOutputFile),
-                handle.taskId,
-                {
-                  isHousekeeping: true,
-                  agentId: effectiveAgentId,
-                },
-              );
-              killTask(handle.taskId, registry);
-            }, S.timeout_ms);
-        timeoutId?.unref?.();
-        void shellCommand.result.then(async () => {
-          if (timeoutId) clearTimeout(timeoutId);
-          try {
-            await stream.reportExit(handle);
-          } catch {
-            // best-effort
-          } finally {
-            if (effectiveAgentId) {
-              removeKeepaliveReason(effectiveAgentId, keepaliveReason, registry);
-            }
-          }
-        });
-      }
-    }
-
+  create(deps: ToolDeps) {
     return {
-      data: {
-        taskId: handle.taskId,
-        timeoutMs: S.persistent ? 0 : S.timeout_ms,
-        persistent: S.persistent,
-        ...(keptInSandboxByCheck ? { keptInSandboxByCheck: true } : {}),
+      permissionCheckFailureDecision(_input: MonitorInput, _callCtx: ToolCallContext): PermissionResult | undefined {
+        // Official 2.1.331 `Wls` (@316633649): fail closed when a permission check
+        // crashes under an active per-spawn `bashCommandClamp`.
+        const clamps = readBashCommandClamps(deps);
+        if (clamps !== undefined) {
+          return {
+            behavior: 'deny',
+            message: `The ${MONITOR_TOOL_NAME} permission check crashed and this agent carries a per-spawn bashCommandClamp; denying rather than running an unverified command.`,
+            decisionReason: {
+              type: 'other',
+              reason: 'bashCommandClamp permission check crashed',
+            },
+          };
+        }
+        return undefined;
+      },
+
+      async checkPermissions(input: MonitorInput, callCtx: ToolCallContext): Promise<PermissionResult> {
+        if (input.ws !== undefined) {
+          return checkMonitorWebSocketPermission(input.ws, deps);
+        }
+        const sandboxAtStart = shouldUseSandbox({ command: input.command });
+        try {
+          const bashRule = checkBashRuleForCodeExec(deps.permissions(), MONITOR_TOOL_NAME);
+          if (bashRule?.verdict.behavior === 'deny') {
+            return bashRule.verdict;
+          }
+          // densable 2.1.289 @194307650 `Dzn({ ...n, command: n.command }, r.shellPermission)` —
+          // preserve `description`, `timeout_ms`, and `persistent` in `updatedInput` so toolExecution
+          // never overwrites MonitorInput with `{ command }` alone (`Monitor event: "undefined"`).
+          // 2.1.290 `Ne` (@297418221): suspend sandbox auto-allow so Monitor doesn't silently bypass rules.
+          const bashInput = {
+            ...input,
+            command: input.command ?? '',
+          } as unknown as Parameters<typeof bashToolHasPermission>[0];
+          const baseContext = resolveToolUseContext(deps, callCtx);
+          const suspendedContext: ToolUseContext = {
+            ...baseContext,
+            permissionLayers: [...(baseContext.permissionLayers ?? []), { kind: 'sandbox_auto_allow_suspended' }],
+          };
+          const perm = await bashToolHasPermission(bashInput, suspendedContext);
+          const mergedPerm: PermissionResult =
+            (perm.behavior === 'allow' || perm.behavior === 'ask') && perm.updatedInput !== undefined
+              ? {
+                  ...perm,
+                  updatedInput: { ...input, ...perm.updatedInput },
+                }
+              : perm;
+          if (bashRule === null || mergedPerm.behavior === 'deny') {
+            return mergedPerm;
+          }
+          if (mergedPerm.behavior === 'ask') {
+            const { suggestions: _suggestions, ...rest } = mergedPerm;
+            return { ...rest, matchedAskRule: bashRule.rule };
+          }
+          return bashRule.verdict;
+        } finally {
+          // Official 2.1.331 `He` / `fNn` (@326863500): pin check-time sandbox state
+          // so hook/settings changes cannot silently drop sandboxing between check and call.
+          recordSandboxStateAtCheck(
+            callCtx.toolUseId,
+            { command: input.command },
+            sandboxAtStart || shouldUseSandbox({ command: input.command }),
+          );
+        }
+      },
+
+      async validateInput(input: MonitorInput, _callCtx: ToolCallContext): Promise<ValidationResult> {
+        const hasCommand = Boolean(input.command && input.command.trim() !== '');
+        const hasWs = input.ws !== undefined;
+        if (hasCommand === hasWs) {
+          return {
+            result: false,
+            message: 'exactly one of command or ws',
+            errorCode: 1,
+          };
+        }
+        if (!input.description || input.description.trim() === '') {
+          return {
+            result: false,
+            message: 'Monitor description cannot be empty.',
+            errorCode: 2,
+          };
+        }
+        if (input.command !== undefined) {
+          // Official 2.1.331 `ze` (@326864650): enforce Windows strict-sandbox / MXC policy refusal.
+          const policyRefusal = getMonitorCommandSandboxRefusal(
+            shouldUseSandbox({ command: input.command }),
+            input.command,
+          );
+          if (policyRefusal !== null) {
+            return {
+              result: false,
+              message: policyRefusal,
+              errorCode: 14,
+            };
+          }
+        }
+        return { result: true };
+      },
+
+      async call(input: MonitorInput, callCtx: ToolCallContext) {
+        const { command, description, timeout_ms = DEFAULT_MONITOR_TIMEOUT_MS, persistent = false, ws } = input;
+        const { abortController, toolUseId } = callCtx;
+        const setAppState = deps.setAppStateForTasks ?? deps.setAppState;
+        const effectiveAgentId = (deps.agentId ?? getAgentContext()?.agentId) as AgentId | undefined;
+        if (effectiveAgentId !== undefined && isAgentStopPending(effectiveAgentId)) {
+          throw new Error('This agent has been stopped and its stop is still completing; it cannot start monitors.');
+        }
+        const registry = deps.taskRegistry ?? createTaskRegistry(deps.getAppState, setAppState);
+        // densable `p=RQ()`, `S=b6o(n,p)` then `vIt({...n,...S,bounded:p})` / `xe(...,p)`.
+        const bounded = isMonitorTimeoutBounded();
+        const S = clampMonitorSpawn({ timeout_ms, persistent }, bounded);
+
+        logEvent('tengu_monitor_tool_used', {});
+
+        if (ws !== undefined) {
+          // Official 2.1.331 `Ke` (@326868480): re-check compliance (`allow_web_fetch`),
+          // SSRF, and sandbox network policy right before opening the WebSocket.
+          const wsPrecondition = checkMonitorWsPrecondition(ws.url);
+          if (wsPrecondition !== null) {
+            throw new MonitorWsPreconditionError(formatMonitorWebSocketPreconditionError(wsPrecondition));
+          }
+          const handle = await spawnMonitorWebSocket({
+            url: ws.url,
+            protocols: ws.protocols,
+            description,
+            timeoutMs: S.timeout_ms,
+            persistent: S.persistent,
+            bounded,
+            toolUseId,
+            agentId: effectiveAgentId,
+            setAppState,
+            taskRegistry: registry,
+          });
+          return {
+            data: {
+              taskId: handle.taskId,
+              timeoutMs: S.persistent ? 0 : S.timeout_ms,
+              persistent: S.persistent,
+            },
+          };
+        }
+
+        if (!command) {
+          throw new Error('exactly one of command or ws');
+        }
+
+        // Official 2.1.331 `Ve` (@326866000): pin check-to-run sandbox decision and
+        // enforce Windows strict-sandbox / MXC policy refusal before spawning.
+        const keepInSandboxSinceCheck = shouldKeepRewrittenCommandInSandbox(toolUseId, { command });
+        clearSandboxStateAtCheck(toolUseId);
+        const effectiveUseSandbox = shouldUseSandbox(
+          { command },
+          { disableUnsandboxedCommands: keepInSandboxSinceCheck },
+        );
+        const policyRefusal = getMonitorCommandSandboxRefusal(effectiveUseSandbox, command);
+        if (policyRefusal !== null) {
+          throw new SandboxPolicyRefusalError(policyRefusal);
+        }
+        if (keepInSandboxSinceCheck && !effectiveUseSandbox) {
+          throw new SandboxPolicyRefusalError(SANDBOX_GONE_SINCE_CHECK_MESSAGE);
+        }
+        const keptInSandboxByCheck = keepInSandboxSinceCheck && effectiveUseSandbox && !shouldUseSandbox({ command });
+
+        // densable xe / w1n: pipe stdout into the stream pump (j6 Monitor event).
+        const taskRef: { id?: string } = {};
+        let pump: MonitorStreamPump | undefined;
+        if (feature('MONITOR_TOOL')) {
+          pump = createMonitorStreamPump({
+            description,
+            agentId: effectiveAgentId,
+            taskRef,
+            killTask: () => {
+              const id = taskRef.id;
+              if (!id) return false;
+              killTask(id, registry);
+              return true;
+            },
+          });
+        }
+
+        // Official 2.1.331 (`Zoe.#g` / `Fe`): track piped stdout in UTF-16 code units
+        // (same unit as TaskOutput.totalBytes) so CJK/UTF-8 output never skews stderr detection.
+        let pipedStdoutChars = 0;
+        const onMonitorStdout = feature('MONITOR_TOOL')
+          ? (chunk: string) => {
+              pipedStdoutChars += chunk.length;
+              pump?.onData(chunk);
+            }
+          : undefined;
+
+        const shellCommand = await exec(command, callCtx.signal, 'bash', {
+          onStdout: onMonitorStdout,
+          preventCwdChanges: true,
+          shouldUseSandbox: effectiveUseSandbox,
+          agentWorktree: deps.agentWorktree,
+          useToolMemoryCgroup: true,
+        });
+        if (shellCommand.status === 'completed') {
+          const completed = await shellCommand.result;
+          if (completed.preSpawnError) {
+            shellCommand.cleanup();
+            pump?.dropAndClose();
+            throw new Error(completed.preSpawnError);
+          }
+        }
+        if (shellCommand.status === 'killed') {
+          await shellCommand.result;
+          shellCommand.cleanup();
+          pump?.dropAndClose();
+          if (effectiveAgentId !== undefined && isAgentStopPending(effectiveAgentId)) {
+            throw new Error('This agent has been stopped and its stop is still completing; it cannot start monitors.');
+          }
+          throw new Error('This call was interrupted before the monitor started; nothing is running.');
+        }
+        if (effectiveAgentId !== undefined && isAgentStopPending(effectiveAgentId)) {
+          shellCommand.kill();
+          shellCommand.cleanup();
+          pump?.dropAndClose();
+          throw new Error('This agent has been stopped and its stop is still completing; it cannot start monitors.');
+        }
+
+        // Spawn as a background task with kind: 'monitor'
+        const handle = await spawnShellTask(
+          {
+            command,
+            description,
+            shellCommand,
+            toolUseId: toolUseId,
+            agentId: effectiveAgentId,
+            innerCall: callCtx.innerCall ?? deps.innerCall,
+            kind: 'monitor',
+          },
+          {
+            abortController,
+            getAppState: deps.getAppState,
+            setAppState,
+          },
+        );
+        taskRef.id = handle.taskId;
+
+        if (feature('MONITOR_TOOL')) {
+          if (pump) {
+            const stream = pump;
+            // Official 2.1.331 `Ve` / `Fe`: use the canonical `monitor:<id>` keepalive
+            // key (deduplicated via Set with spawnShellTask's attachShellKeepalive)
+            // instead of registering a second duplicate `monitor:<id>:stream` entry.
+            const keepaliveReason = monitorKeepaliveReason(handle.taskId);
+            if (effectiveAgentId) {
+              addKeepaliveReason(effectiveAgentId, keepaliveReason, registry);
+            }
+            const timeoutId = S.persistent
+              ? undefined
+              : setTimeout(() => {
+                  if (stream.isClosed()) return;
+                  stream.flush();
+                  if (stream.isClosed()) return;
+                  // Official 2.1.331 (`Fe` @326865200): compare totalBytes against
+                  // pipedStdoutBytes in matching units to detect stderr reliably.
+                  const stderrOutputFile = hasMonitorStderrOutput(shellCommand.taskOutput, pipedStdoutChars)
+                    ? shellCommand.taskOutput.path
+                    : undefined;
+                  notifyMonitorStreamEvent(
+                    description,
+                    monitorExpiredEvent(S.timeout_ms, stream.eventCount(), bounded, stderrOutputFile),
+                    handle.taskId,
+                    {
+                      isHousekeeping: true,
+                      agentId: effectiveAgentId,
+                    },
+                  );
+                  killTask(handle.taskId, registry);
+                }, S.timeout_ms);
+            timeoutId?.unref?.();
+            void shellCommand.result.then(async () => {
+              if (timeoutId) clearTimeout(timeoutId);
+              try {
+                await stream.reportExit(handle);
+              } catch {
+                // best-effort
+              } finally {
+                if (effectiveAgentId) {
+                  removeKeepaliveReason(effectiveAgentId, keepaliveReason, registry);
+                }
+              }
+            });
+          }
+        }
+
+        return {
+          data: {
+            taskId: handle.taskId,
+            timeoutMs: S.persistent ? 0 : S.timeout_ms,
+            persistent: S.persistent,
+            ...(keptInSandboxByCheck ? { keptInSandboxByCheck: true } : {}),
+          },
+        };
       },
     };
   },
@@ -804,4 +833,4 @@ export const MonitorTool = buildTool({
       </MessageResponse>
     );
   },
-});
+} satisfies ToolDef<InputSchema, MonitorOutput>);

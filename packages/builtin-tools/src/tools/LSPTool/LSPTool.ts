@@ -18,8 +18,13 @@ import {
   hasEverConnected,
   waitForInitialization,
 } from 'src/services/lsp/manager.js'
-import type { ValidationResult } from 'src/Tool.js'
-import { buildTool, type ToolDef } from 'src/Tool.js'
+import {
+  buildTool,
+  type ToolDef,
+  type ToolDeps,
+  type ToolResult,
+  type ValidationResult,
+} from 'src/Tool.js'
 import { uniq } from 'src/utils/array.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
@@ -153,264 +158,265 @@ export const LSPTool = buildTool({
   getPath({ filePath }): string {
     return expandPath(filePath)
   },
-  async validateInput(input: Input): Promise<ValidationResult> {
-    // First validate against the discriminated union for better type safety
-    const parseResult = lspToolInputSchema().safeParse(input)
-    if (!parseResult.success) {
-      return {
-        result: false,
-        message: `Invalid input: ${parseResult.error.message}`,
-        errorCode: 3,
-      }
-    }
-
-    // Validate file exists and is a regular file
-    const fs = getFsImplementation()
-    const absolutePath = expandPath(input.filePath)
-
-    // SECURITY: Skip filesystem operations for UNC paths to prevent NTLM credential leaks.
-    if (absolutePath.startsWith('\\\\') || absolutePath.startsWith('//')) {
-      return { result: true }
-    }
-
-    let stats
-    try {
-      stats = await fs.stat(absolutePath)
-    } catch (error) {
-      if (isENOENT(error)) {
-        return {
-          result: false,
-          message: `File does not exist: ${input.filePath}`,
-          errorCode: 1,
-        }
-      }
-      const err = toError(error)
-      // Log filesystem access errors for tracking
-      logError(
-        new Error(
-          `Failed to access file stats for LSP operation on ${input.filePath}: ${err.message}`,
-        ),
-      )
-      return {
-        result: false,
-        message: `Cannot access file: ${input.filePath}. ${err.message}`,
-        errorCode: 4,
-      }
-    }
-
-    if (!stats.isFile()) {
-      return {
-        result: false,
-        message: `Path is not a file: ${input.filePath}`,
-        errorCode: 2,
-      }
-    }
-
-    return { result: true }
-  },
-  async checkPermissions(input, context): Promise<PermissionDecision> {
-    const appState = context.getAppState()
-    return checkReadPermissionForTool(
-      LSPTool,
-      input,
-      appState.toolPermissionContext,
-    )
-  },
   async prompt() {
     return DESCRIPTION
   },
   renderToolUseMessage,
   renderToolUseErrorMessage,
   renderToolResultMessage,
-  async call(input: Input, _context) {
-    const absolutePath = expandPath(input.filePath)
-    const cwd = getCwd()
-
-    // Wait for initialization if it's still pending
-    // This prevents returning "no server available" before init completes
-    const status = getInitializationStatus()
-    if (status.status === 'pending') {
-      await waitForInitialization()
-    }
-
-    // Get the LSP server manager
-    const manager = getLspServerManager()
-    if (!manager) {
-      // Log this system-level failure for tracking
-      logError(
-        new Error('LSP server manager not initialized when tool was called'),
-      )
-
-      const output: Output = {
-        operation: input.operation,
-        result:
-          'LSP server manager not initialized. This may indicate a startup issue.',
-        filePath: input.filePath,
-      }
-      return {
-        data: output,
-      }
-    }
-
-    // Map operation to LSP method and prepare params
-    const { method, params } = getMethodAndParams(input, absolutePath)
-
-    try {
-      // Ensure file is open in LSP server before making requests
-      // Most LSP servers require textDocument/didOpen before operations
-      // Only read the file if it's not already open to avoid unnecessary I/O
-      if (!manager.isFileOpen(absolutePath)) {
-        const handle = await open(absolutePath, 'r')
-        try {
-          const stats = await handle.stat()
-          if (stats.size > MAX_LSP_FILE_SIZE_BYTES) {
-            const output: Output = {
-              operation: input.operation,
-              result: `File too large for LSP analysis (${Math.ceil(stats.size / 1_000_000)}MB exceeds 10MB limit)`,
-              filePath: input.filePath,
-            }
-            return { data: output }
+  create(deps: ToolDeps) {
+    return {
+      async validateInput(input: Input): Promise<ValidationResult> {
+        // First validate against the discriminated union for better type safety
+        const parseResult = lspToolInputSchema().safeParse(input)
+        if (!parseResult.success) {
+          return {
+            result: false,
+            message: `Invalid input: ${parseResult.error.message}`,
+            errorCode: 3,
           }
-          const fileContent = await handle.readFile({ encoding: 'utf-8' })
-          await manager.openFile(absolutePath, fileContent)
-        } finally {
-          await handle.close()
         }
-      }
 
-      // Send request to LSP server
-      let result = await manager.sendRequest(absolutePath, method, params)
+        // Validate file exists and is a regular file
+        const fs = getFsImplementation()
+        const absolutePath = expandPath(input.filePath)
 
-      if (result === undefined) {
-        // Log for diagnostic purposes - helps track usage patterns and potential bugs
-        logForDebugging(
-          `No LSP server available for file type ${path.extname(absolutePath)} for operation ${input.operation} on file ${input.filePath}`,
-        )
-
-        const output: Output = {
-          operation: input.operation,
-          result: `No LSP server available for file type: ${path.extname(absolutePath)}`,
-          filePath: input.filePath,
+        // SECURITY: Skip filesystem operations for UNC paths to prevent NTLM credential leaks.
+        if (absolutePath.startsWith('\\\\') || absolutePath.startsWith('//')) {
+          return { result: true }
         }
-        return {
-          data: output,
-        }
-      }
 
-      // For incomingCalls and outgoingCalls, we need a two-step process:
-      // 1. First get CallHierarchyItem(s) from prepareCallHierarchy
-      // 2. Then request the actual calls using that item
-      if (
-        input.operation === 'incomingCalls' ||
-        input.operation === 'outgoingCalls'
-      ) {
-        const callItems = result as CallHierarchyItem[]
-        if (!callItems || callItems.length === 0) {
+        let stats
+        try {
+          stats = await fs.stat(absolutePath)
+        } catch (error) {
+          if (isENOENT(error)) {
+            return {
+              result: false,
+              message: `File does not exist: ${input.filePath}`,
+              errorCode: 1,
+            }
+          }
+          const err = toError(error)
+          // Log filesystem access errors for tracking
+          logError(
+            new Error(
+              `Failed to access file stats for LSP operation on ${input.filePath}: ${err.message}`,
+            ),
+          )
+          return {
+            result: false,
+            message: `Cannot access file: ${input.filePath}. ${err.message}`,
+            errorCode: 4,
+          }
+        }
+
+        if (!stats.isFile()) {
+          return {
+            result: false,
+            message: `Path is not a file: ${input.filePath}`,
+            errorCode: 2,
+          }
+        }
+
+        return { result: true }
+      },
+      async checkPermissions(input): Promise<PermissionDecision> {
+        return checkReadPermissionForTool(LSPTool, input, deps.permissions())
+      },
+      async call(input: Input): Promise<ToolResult<Output>> {
+        const absolutePath = expandPath(input.filePath)
+        const cwd = getCwd()
+
+        // Wait for initialization if it's still pending
+        // This prevents returning "no server available" before init completes
+        const status = getInitializationStatus()
+        if (status.status === 'pending') {
+          await waitForInitialization()
+        }
+
+        // Get the LSP server manager
+        const manager = getLspServerManager()
+        if (!manager) {
+          // Log this system-level failure for tracking
+          logError(
+            new Error(
+              'LSP server manager not initialized when tool was called',
+            ),
+          )
+
           const output: Output = {
             operation: input.operation,
-            result: 'No call hierarchy item found at this position',
+            result:
+              'LSP server manager not initialized. This may indicate a startup issue.',
             filePath: input.filePath,
-            resultCount: 0,
-            fileCount: 0,
           }
-          return { data: output }
+          return {
+            data: output,
+          }
         }
 
-        // Use the first call hierarchy item to request calls
-        const callMethod =
-          input.operation === 'incomingCalls'
-            ? 'callHierarchy/incomingCalls'
-            : 'callHierarchy/outgoingCalls'
+        // Map operation to LSP method and prepare params
+        const { method, params } = getMethodAndParams(input, absolutePath)
 
-        result = await manager.sendRequest(absolutePath, callMethod, {
-          item: callItems[0],
-        })
+        try {
+          // Ensure file is open in LSP server before making requests
+          // Most LSP servers require textDocument/didOpen before operations
+          // Only read the file if it's not already open to avoid unnecessary I/O
+          if (!manager.isFileOpen(absolutePath)) {
+            const handle = await open(absolutePath, 'r')
+            try {
+              const stats = await handle.stat()
+              if (stats.size > MAX_LSP_FILE_SIZE_BYTES) {
+                const output: Output = {
+                  operation: input.operation,
+                  result: `File too large for LSP analysis (${Math.ceil(stats.size / 1_000_000)}MB exceeds 10MB limit)`,
+                  filePath: input.filePath,
+                }
+                return { data: output }
+              }
+              const fileContent = await handle.readFile({ encoding: 'utf-8' })
+              await manager.openFile(absolutePath, fileContent)
+            } finally {
+              await handle.close()
+            }
+          }
 
-        if (result === undefined) {
-          logForDebugging(
-            `LSP server returned undefined for ${callMethod} on ${input.filePath}`,
-          )
-          // Continue to formatter which will handle empty/null gracefully
-        }
-      }
+          // Send request to LSP server
+          let result = await manager.sendRequest(absolutePath, method, params)
 
-      // Filter out gitignored files from location-based results
-      if (
-        result &&
-        Array.isArray(result) &&
-        (input.operation === 'findReferences' ||
-          input.operation === 'goToDefinition' ||
-          input.operation === 'goToImplementation' ||
-          input.operation === 'workspaceSymbol')
-      ) {
-        if (input.operation === 'workspaceSymbol') {
-          // SymbolInformation has location.uri — filter by extracting locations
-          const symbols = result as SymbolInformation[]
-          const locations = symbols
-            .filter(s => s?.location?.uri)
-            .map(s => s.location)
-          const filteredLocations = await filterGitIgnoredLocations(
-            locations,
+          if (result === undefined) {
+            // Log for diagnostic purposes - helps track usage patterns and potential bugs
+            logForDebugging(
+              `No LSP server available for file type ${path.extname(absolutePath)} for operation ${input.operation} on file ${input.filePath}`,
+            )
+
+            const output: Output = {
+              operation: input.operation,
+              result: `No LSP server available for file type: ${path.extname(absolutePath)}`,
+              filePath: input.filePath,
+            }
+            return {
+              data: output,
+            }
+          }
+
+          // For incomingCalls and outgoingCalls, we need a two-step process:
+          // 1. First get CallHierarchyItem(s) from prepareCallHierarchy
+          // 2. Then request the actual calls using that item
+          if (
+            input.operation === 'incomingCalls' ||
+            input.operation === 'outgoingCalls'
+          ) {
+            const callItems = result as CallHierarchyItem[]
+            if (!callItems || callItems.length === 0) {
+              const output: Output = {
+                operation: input.operation,
+                result: 'No call hierarchy item found at this position',
+                filePath: input.filePath,
+                resultCount: 0,
+                fileCount: 0,
+              }
+              return { data: output }
+            }
+
+            // Use the first call hierarchy item to request calls
+            const callMethod =
+              input.operation === 'incomingCalls'
+                ? 'callHierarchy/incomingCalls'
+                : 'callHierarchy/outgoingCalls'
+
+            result = await manager.sendRequest(absolutePath, callMethod, {
+              item: callItems[0],
+            })
+
+            if (result === undefined) {
+              logForDebugging(
+                `LSP server returned undefined for ${callMethod} on ${input.filePath}`,
+              )
+              // Continue to formatter which will handle empty/null gracefully
+            }
+          }
+
+          // Filter out gitignored files from location-based results
+          if (
+            result &&
+            Array.isArray(result) &&
+            (input.operation === 'findReferences' ||
+              input.operation === 'goToDefinition' ||
+              input.operation === 'goToImplementation' ||
+              input.operation === 'workspaceSymbol')
+          ) {
+            if (input.operation === 'workspaceSymbol') {
+              // SymbolInformation has location.uri — filter by extracting locations
+              const symbols = result as SymbolInformation[]
+              const locations = symbols
+                .filter(s => s?.location?.uri)
+                .map(s => s.location)
+              const filteredLocations = await filterGitIgnoredLocations(
+                locations,
+                cwd,
+              )
+              const filteredUris = new Set(filteredLocations.map(l => l.uri))
+              result = symbols.filter(
+                s => !s?.location?.uri || filteredUris.has(s.location.uri),
+              )
+            } else {
+              // Location[] or (Location | LocationLink)[]
+              const locations = (result as (Location | LocationLink)[]).map(
+                toLocation,
+              )
+              const filteredLocations = await filterGitIgnoredLocations(
+                locations,
+                cwd,
+              )
+              const filteredUris = new Set(filteredLocations.map(l => l.uri))
+              result = (result as (Location | LocationLink)[]).filter(item => {
+                const loc = toLocation(item)
+                return !loc.uri || filteredUris.has(loc.uri)
+              })
+            }
+          }
+
+          // Format the result based on operation type
+          const { formatted, resultCount, fileCount } = formatResult(
+            input.operation,
+            result,
             cwd,
           )
-          const filteredUris = new Set(filteredLocations.map(l => l.uri))
-          result = symbols.filter(
-            s => !s?.location?.uri || filteredUris.has(s.location.uri),
+
+          const output: Output = {
+            operation: input.operation,
+            result: formatted,
+            filePath: input.filePath,
+            resultCount,
+            fileCount,
+          }
+
+          return {
+            data: output,
+          }
+        } catch (error) {
+          const err = toError(error)
+          const errorMessage = err.message
+
+          // Log error for tracking
+          logError(
+            new Error(
+              `LSP tool request failed for ${input.operation} on ${input.filePath}: ${errorMessage}`,
+            ),
           )
-        } else {
-          // Location[] or (Location | LocationLink)[]
-          const locations = (result as (Location | LocationLink)[]).map(
-            toLocation,
-          )
-          const filteredLocations = await filterGitIgnoredLocations(
-            locations,
-            cwd,
-          )
-          const filteredUris = new Set(filteredLocations.map(l => l.uri))
-          result = (result as (Location | LocationLink)[]).filter(item => {
-            const loc = toLocation(item)
-            return !loc.uri || filteredUris.has(loc.uri)
-          })
+
+          const output: Output = {
+            operation: input.operation,
+            result: `Error performing ${input.operation}: ${errorMessage}`,
+            filePath: input.filePath,
+          }
+          return {
+            data: output,
+          }
         }
-      }
-
-      // Format the result based on operation type
-      const { formatted, resultCount, fileCount } = formatResult(
-        input.operation,
-        result,
-        cwd,
-      )
-
-      const output: Output = {
-        operation: input.operation,
-        result: formatted,
-        filePath: input.filePath,
-        resultCount,
-        fileCount,
-      }
-
-      return {
-        data: output,
-      }
-    } catch (error) {
-      const err = toError(error)
-      const errorMessage = err.message
-
-      // Log error for tracking
-      logError(
-        new Error(
-          `LSP tool request failed for ${input.operation} on ${input.filePath}: ${errorMessage}`,
-        ),
-      )
-
-      const output: Output = {
-        operation: input.operation,
-        result: `Error performing ${input.operation}: ${errorMessage}`,
-        filePath: input.filePath,
-      }
-      return {
-        data: output,
-      }
+      },
     }
   },
   mapToolResultToToolResultBlockParam(output, toolUseID) {

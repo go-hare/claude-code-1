@@ -1,5 +1,5 @@
 import { z } from 'zod/v4'
-import type { ToolResultBlockParam } from 'src/Tool.js'
+import type { ToolDef, ToolResultBlockParam } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { SNIP_TOOL_NAME } from './prompt.js'
@@ -78,15 +78,20 @@ Guidelines:
     }
   },
 
-  async call(input: SnipInput) {
-    // Snip implementation is handled by the query engine's projection system.
-    // The tool call itself records the intent; the query engine intercepts
-    // snip tool results and adjusts its message projection accordingly.
+  create() {
     return {
-      data: {
-        snipped_count: input.message_ids.length,
-        summary: input.reason ?? `Snipped ${input.message_ids.length} messages`,
+      async call(input: SnipInput) {
+        // Snip implementation is handled by the query engine's projection system.
+        // The tool call itself records the intent; the query engine intercepts
+        // snip tool results and adjusts its message projection accordingly.
+        return {
+          data: {
+            snipped_count: input.message_ids.length,
+            summary:
+              input.reason ?? `Snipped ${input.message_ids.length} messages`,
+          },
+        }
       },
     }
   },
-})
+} satisfies ToolDef<InputSchema, SnipOutput>)

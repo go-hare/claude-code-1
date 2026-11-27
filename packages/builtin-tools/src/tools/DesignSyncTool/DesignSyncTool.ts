@@ -4,10 +4,14 @@
  */
 import { stat } from 'fs/promises'
 import { resolve } from 'path'
-import type { ToolUseContext } from 'src/Tool.js'
-import { buildTool } from 'src/Tool.js'
+import {
+  buildTool,
+  resolveToolUseContext,
+  type ToolDef,
+  type ToolDeps,
+  type ValidationResult,
+} from 'src/Tool.js'
 import type { PermissionResult } from 'src/types/permissions.js'
-import type { ValidationResult } from 'src/Tool.js'
 import { isArtifactToolRegistered } from 'src/utils/artifactUrl.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
@@ -150,12 +154,12 @@ function attachTelemetry(error: Error, telemetry: string): void {
 }
 
 /** Gold `ee` — the approval card can reach a person. */
-function consentAskCanReachUser(context: ToolUseContext): boolean {
-  if (context.options?.isNonInteractiveSession) return false
+function consentAskCanReachUser(deps: ToolDeps): boolean {
+  if (deps.isNonInteractiveSession) return false
   let mode: string | undefined
   let bypassAvailable = false
   try {
-    const perms = context.getAppState().toolPermissionContext
+    const perms = deps.permissions()
     mode = perms?.mode
     bypassAvailable = perms?.isBypassPermissionsModeAvailable === true
   } catch {
@@ -166,9 +170,9 @@ function consentAskCanReachUser(context: ToolUseContext): boolean {
   return true
 }
 
-function permissionMode(context: ToolUseContext): string | undefined {
+function permissionMode(deps: ToolDeps): string | undefined {
   try {
-    return context.getAppState().toolPermissionContext?.mode
+    return deps.permissions()?.mode
   } catch {
     return undefined
   }
@@ -289,265 +293,273 @@ export const DesignSyncTool = buildTool({
     }
     return designSyncUseLabel(input)
   },
-  async validateInput(input: Input): Promise<ValidationResult> {
-    const missing = missingFields(input)
-    if (missing.length > 0) {
-      return {
-        result: false,
-        message: `${input.method} requires: ${missing.join(', ')}.`,
-        errorCode: 1,
-      }
-    }
-    if (
-      input.method === 'finalize_plan' &&
-      (input.writes?.length ?? 0) === 0 &&
-      (input.deletes?.length ?? 0) === 0
-    ) {
-      return {
-        result: false,
-        message: 'finalize_plan needs at least one write or delete path.',
-        errorCode: 1,
-      }
-    }
-    if (input.method === 'write_files') {
-      for (const file of input.files ?? []) {
-        const hasData = file.data !== undefined
-        const hasLocal = file.localPath !== undefined
-        if (hasData === hasLocal) {
+  create(deps: ToolDeps) {
+    return {
+      async validateInput(input: Input): Promise<ValidationResult> {
+        const missing = missingFields(input)
+        if (missing.length > 0) {
           return {
             result: false,
-            message: `Each file needs exactly one of "data" or "localPath" (offending path: ${file.path}).`,
+            message: `${input.method} requires: ${missing.join(', ')}.`,
             errorCode: 1,
           }
         }
-        if (hasLocal && file.encoding !== undefined) {
+        if (
+          input.method === 'finalize_plan' &&
+          (input.writes?.length ?? 0) === 0 &&
+          (input.deletes?.length ?? 0) === 0
+        ) {
           return {
             result: false,
-            message: `"encoding" only applies to inline "data"; localPath files are encoded automatically (offending path: ${file.path}).`,
+            message: 'finalize_plan needs at least one write or delete path.',
             errorCode: 1,
           }
         }
-      }
-    }
-    return { result: true }
-  },
-  async checkPermissions(
-    input: Input,
-    context: ToolUseContext,
-  ): Promise<PermissionResult<Input>> {
-    const state = designSessionState(context)
-    const shown = await missingDesignConsentBit(state, context.credentials)
-    const ask = consentAskCanReachUser(context)
-    const stamped = {
-      ...input,
-      __consentBitShown: shown,
-      __consentAskCanReachUser: ask,
-    } as Input
-    const consentLine = shown !== null ? getDesignConsentPrompt() : null
-    const loginLine = await designLoginBanner(context.credentials)
-    const banner =
-      [consentLine, loginLine].filter(line => line !== null).join('\n\n') ||
-      null
-    if (
-      banner &&
-      input.method !== 'finalize_plan' &&
-      input.method !== 'create_project' &&
-      input.method !== 'report_validate'
-    ) {
-      const reason = [
-        consentLine
-          ? 'design agent consent — approving records a server-side grant for Claude agents to write your design projects'
-          : null,
-        loginLine
-          ? 'design login — approving opens a browser OAuth consent and stores a design credential'
-          : null,
-      ]
-        .filter(part => part !== null)
-        .join('; ')
-      return {
-        behavior: 'ask',
-        message: banner,
-        updatedInput: stamped,
-        localDisplayOnly: true,
-        decisionReason: {
-          type: 'safetyCheck',
-          reason: reason || 'design credential prompt',
-          classifierApprovable: false,
-        },
-      }
-    }
-    if (input.method === 'finalize_plan') {
-      const writes = (input.writes ?? []).map(normalizePath)
-      const deletes = (input.deletes ?? []).map(normalizePath)
-      let localDir: string
-      try {
-        localDir = await resolveDesignSyncLocalDir(input.localDir)
-      } catch (error) {
-        return {
-          behavior: 'deny',
-          message: `localDir does not exist or is not accessible: ${input.localDir ?? getCwd()} (${errorMessage(error)})`,
-          decisionReason: {
-            type: 'safetyCheck',
-            reason: 'localDir not found',
-            classifierApprovable: false,
-          },
+        if (input.method === 'write_files') {
+          for (const file of input.files ?? []) {
+            const hasData = file.data !== undefined
+            const hasLocal = file.localPath !== undefined
+            if (hasData === hasLocal) {
+              return {
+                result: false,
+                message: `Each file needs exactly one of "data" or "localPath" (offending path: ${file.path}).`,
+                errorCode: 1,
+              }
+            }
+            if (hasLocal && file.encoding !== undefined) {
+              return {
+                result: false,
+                message: `"encoding" only applies to inline "data"; localPath files are encoded automatically (offending path: ${file.path}).`,
+                errorCode: 1,
+              }
+            }
+          }
         }
-      }
-      const writeGlobs = writes.filter(isDesignPlanGlob)
-      const writeLiterals = writes.filter(path => !isDesignPlanGlob(path))
-      const deleteGlobs = deletes.filter(isDesignPlanGlob)
-      const deleteLiterals = deletes.filter(path => !isDesignPlanGlob(path))
-      const found = await Promise.all(
-        writeLiterals.map(async path => {
+        return { result: true }
+      },
+      async checkPermissions(
+        input: Input,
+        callCtx,
+      ): Promise<PermissionResult<Input>> {
+        const ctx = resolveToolUseContext(deps, callCtx)
+        const state = designSessionState(ctx)
+        const shown = await missingDesignConsentBit(state, deps.credentials)
+        const ask = consentAskCanReachUser(deps)
+        const stamped = {
+          ...input,
+          __consentBitShown: shown,
+          __consentAskCanReachUser: ask,
+        } as Input
+        const consentLine = shown !== null ? getDesignConsentPrompt() : null
+        const loginLine = await designLoginBanner(deps.credentials)
+        const banner =
+          [consentLine, loginLine].filter(line => line !== null).join('\n\n') ||
+          null
+        if (
+          banner &&
+          input.method !== 'finalize_plan' &&
+          input.method !== 'create_project' &&
+          input.method !== 'report_validate'
+        ) {
+          const reason = [
+            consentLine
+              ? 'design agent consent — approving records a server-side grant for Claude agents to write your design projects'
+              : null,
+            loginLine
+              ? 'design login — approving opens a browser OAuth consent and stores a design credential'
+              : null,
+          ]
+            .filter(part => part !== null)
+            .join('; ')
+          return {
+            behavior: 'ask',
+            message: banner,
+            updatedInput: stamped,
+            localDisplayOnly: true,
+            decisionReason: {
+              type: 'safetyCheck',
+              reason: reason || 'design credential prompt',
+              classifierApprovable: false,
+            },
+          }
+        }
+        if (input.method === 'finalize_plan') {
+          const writes = (input.writes ?? []).map(normalizePath)
+          const deletes = (input.deletes ?? []).map(normalizePath)
+          let localDir: string
           try {
-            await stat(resolve(localDir, path))
-            return true
-          } catch {
-            return false
+            localDir = await resolveDesignSyncLocalDir(input.localDir)
+          } catch (error) {
+            return {
+              behavior: 'deny',
+              message: `localDir does not exist or is not accessible: ${input.localDir ?? getCwd()} (${errorMessage(error)})`,
+              decisionReason: {
+                type: 'safetyCheck',
+                reason: 'localDir not found',
+                classifierApprovable: false,
+              },
+            }
           }
-        }),
-      )
-      const missing = writeLiterals.filter((_path, index) => !found[index])
-      const typo =
-        writeLiterals.length - missing.length > 0 && missing.length > 0
-          ? `⚠ ${missing.length} of ${writeLiterals.length} literal write ${plural(writeLiterals.length, 'path')} not found under localDir — expected if they use a different localPath or inline data, otherwise check for a typo: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? `, … and ${missing.length - 5} more` : ''}`
-          : null
-      const lines = [
-        banner,
-        `To project: ${shortDesignProjectId(input.projectId)}`,
-        `From folder: ${localDir}`,
-        writeLiterals.length > 0
-          ? `Upload ${writeLiterals.length} ${plural(writeLiterals.length, 'file')}: ${writeLiterals.join(', ')}`
-          : null,
-        writeGlobs.length > 0
-          ? `Upload files matching: ${writeGlobs.join(', ')}`
-          : null,
-        typo,
-        deleteLiterals.length > 0
-          ? `Delete ${deleteLiterals.length} ${plural(deleteLiterals.length, 'file')}: ${deleteLiterals.join(', ')}`
-          : null,
-        deleteGlobs.length > 0
-          ? `Delete files matching: ${deleteGlobs.join(', ')}`
-          : null,
-      ].filter(line => line !== null)
-      return {
-        behavior: 'ask',
-        message: lines.join('\n'),
-        updatedInput: { ...stamped, localDir } as Input,
-        localDisplayOnly: true,
-        decisionReason: {
-          type: 'safetyCheck',
-          reason: banner
-            ? 'Approving also grants Claude ongoing write access to your design projects.'
-            : 'Review what will be uploaded before continuing.',
-          classifierApprovable: false,
-        },
-      }
-    }
-    if (input.method === 'create_project') {
-      const lines = [
-        banner,
-        `Create design-system project "${input.name ?? '?'}" on claude.ai/design. The new project will be visible to your whole org (server default — you can change this from the Share menu after creation).`,
-      ].filter(line => line !== null)
-      return {
-        behavior: 'ask',
-        message: lines.join('\n'),
-        updatedInput: stamped,
-        localDisplayOnly: true,
-        decisionReason: {
-          type: 'safetyCheck',
-          reason: banner
-            ? 'Approving also grants Claude ongoing write access to your design projects.'
-            : 'This creates a new project on your claude.ai account.',
-          classifierApprovable: false,
-        },
-      }
-    }
-    return { behavior: 'allow', updatedInput: stamped }
-  },
-  async call(input: Input, context: ToolUseContext) {
-    if (input.method === 'report_validate') {
-      return { data: { method: 'report_validate' } }
-    }
-    const signal = context.abortController.signal
-    const stamped = input as Stamped
-    const state = designSessionState(context)
-    const shown = stamped.__consentBitShown ?? null
-    const askStamp = stamped.__consentAskCanReachUser === true
-    const askNow = askStamp && consentAskCanReachUser(context)
-    let token = ''
-    try {
-      token = await designSyncAccessToken(context.credentials, {
-        signal,
-        isNonInteractiveSession:
-          context.options?.isNonInteractiveSession === true,
-        permissionMode: permissionMode(context),
-        askReachesUser: askStamp,
-      })
-      if (shown !== null && askNow && input.method === 'finalize_plan') {
-        await postDesignConsent(state, context.credentials).catch(error => {
-          logForDebugging(
-            `Proactive design consent POST for finalize_plan failed (${errorMessage(error)}); the next RPC call's 403 intercept will retry.`,
+          const writeGlobs = writes.filter(isDesignPlanGlob)
+          const writeLiterals = writes.filter(path => !isDesignPlanGlob(path))
+          const deleteGlobs = deletes.filter(isDesignPlanGlob)
+          const deleteLiterals = deletes.filter(path => !isDesignPlanGlob(path))
+          const found = await Promise.all(
+            writeLiterals.map(async path => {
+              try {
+                await stat(resolve(localDir, path))
+                return true
+              } catch {
+                return false
+              }
+            }),
           )
-        })
-      }
-      let result: DesignSyncResult
-      try {
-        result = await dispatchDesignSync(state, input, token, signal)
-        // A successful non-finalize RPC is not a server grant. Recording the
-        // bit locally first makes the next checkPermissions leave `shown`
-        // empty, so a later 403 takes the not-shown path and never POSTs.
-        if (shown !== null && askNow && input.method !== 'finalize_plan') {
-          await postDesignConsent(state, context.credentials).catch(error => {
-            logForDebugging(
-              `Design consent POST after ${input.method} failed (${errorMessage(error)}); the next call can still show the bit and retry on 403.`,
-            )
-          })
-        }
-      } catch (error) {
-        const bit = consentBitFromAuthError(error)
-        if (bit === null) {
-          if (
-            (error instanceof DesignAuthError &&
-              authBodyError(error) === 'insufficient_scope') ||
-            (error instanceof DesignAuthError && error.status === 401)
-          ) {
-            throw new DesignSyncPreconditionError(
-              designSyncPreconditionMessage('needs_design_login', {
-                isNonInteractiveSession:
-                  context.options?.isNonInteractiveSession === true,
-              }),
-            )
+          const missing = writeLiterals.filter((_path, index) => !found[index])
+          const typo =
+            writeLiterals.length - missing.length > 0 && missing.length > 0
+              ? `⚠ ${missing.length} of ${writeLiterals.length} literal write ${plural(writeLiterals.length, 'path')} not found under localDir — expected if they use a different localPath or inline data, otherwise check for a typo: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? `, … and ${missing.length - 5} more` : ''}`
+              : null
+          const lines = [
+            banner,
+            `To project: ${shortDesignProjectId(input.projectId)}`,
+            `From folder: ${localDir}`,
+            writeLiterals.length > 0
+              ? `Upload ${writeLiterals.length} ${plural(writeLiterals.length, 'file')}: ${writeLiterals.join(', ')}`
+              : null,
+            writeGlobs.length > 0
+              ? `Upload files matching: ${writeGlobs.join(', ')}`
+              : null,
+            typo,
+            deleteLiterals.length > 0
+              ? `Delete ${deleteLiterals.length} ${plural(deleteLiterals.length, 'file')}: ${deleteLiterals.join(', ')}`
+              : null,
+            deleteGlobs.length > 0
+              ? `Delete files matching: ${deleteGlobs.join(', ')}`
+              : null,
+          ].filter(line => line !== null)
+          return {
+            behavior: 'ask',
+            message: lines.join('\n'),
+            updatedInput: { ...stamped, localDir } as Input,
+            localDisplayOnly: true,
+            decisionReason: {
+              type: 'safetyCheck',
+              reason: banner
+                ? 'Approving also grants Claude ongoing write access to your design projects.'
+                : 'Review what will be uploaded before continuing.',
+              classifierApprovable: false,
+            },
           }
-          throw error
         }
-        if (bit !== shown) {
-          writeDesignConsentBit(state, bit, false)
-          throw new DesignSyncPreconditionError(designConsentNotShownMessage())
+        if (input.method === 'create_project') {
+          const lines = [
+            banner,
+            `Create design-system project "${input.name ?? '?'}" on claude.ai/design. The new project will be visible to your whole org (server default — you can change this from the Share menu after creation).`,
+          ].filter(line => line !== null)
+          return {
+            behavior: 'ask',
+            message: lines.join('\n'),
+            updatedInput: stamped,
+            localDisplayOnly: true,
+            decisionReason: {
+              type: 'safetyCheck',
+              reason: banner
+                ? 'Approving also grants Claude ongoing write access to your design projects.'
+                : 'This creates a new project on your claude.ai account.',
+              classifierApprovable: false,
+            },
+          }
         }
-        if (!askNow) {
-          writeDesignConsentBit(state, bit, false)
-          throw new DesignSyncPreconditionError(designConsentNoPromptMessage())
+        return { behavior: 'allow', updatedInput: stamped }
+      },
+      async call(input: Input, callCtx) {
+        if (input.method === 'report_validate') {
+          return { data: { method: 'report_validate' } }
         }
-        await postDesignConsent(state, context.credentials)
-        result = await dispatchDesignSync(state, input, token, signal)
-      }
-      return { data: result }
-    } catch (error) {
-      if (signal.aborted) throw new AbortError()
-      const message = redactOauthToken(errorMessage(error), token)
-      const telemetry =
-        error instanceof DesignAuthError
-          ? error.telemetryMessage
-          : 'DesignSync tool call failed'
-      if (error instanceof DesignSyncPreconditionError) {
-        const wrapped = new DesignSyncPreconditionError(message)
-        attachTelemetry(wrapped, telemetry)
-        throw wrapped
-      }
-      const wrapped = new Error(message)
-      attachTelemetry(wrapped, telemetry)
-      throw wrapped
+        const signal = callCtx.signal
+        const stamped = input as Stamped
+        const ctx = resolveToolUseContext(deps, callCtx)
+        const state = designSessionState(ctx)
+        const shown = stamped.__consentBitShown ?? null
+        const askStamp = stamped.__consentAskCanReachUser === true
+        const askNow = askStamp && consentAskCanReachUser(deps)
+        let token = ''
+        try {
+          token = await designSyncAccessToken(deps.credentials, {
+            signal,
+            isNonInteractiveSession: deps.isNonInteractiveSession,
+            permissionMode: permissionMode(deps),
+            askReachesUser: askStamp,
+          })
+          if (shown !== null && askNow && input.method === 'finalize_plan') {
+            await postDesignConsent(state, deps.credentials).catch(error => {
+              logForDebugging(
+                `Proactive design consent POST for finalize_plan failed (${errorMessage(error)}); the next RPC call's 403 intercept will retry.`,
+              )
+            })
+          }
+          let result: DesignSyncResult
+          try {
+            result = await dispatchDesignSync(state, input, token, signal)
+            // A successful non-finalize RPC is not a server grant. Recording the
+            // bit locally first makes the next checkPermissions leave `shown`
+            // empty, so a later 403 takes the not-shown path and never POSTs.
+            if (shown !== null && askNow && input.method !== 'finalize_plan') {
+              await postDesignConsent(state, deps.credentials).catch(error => {
+                logForDebugging(
+                  `Design consent POST after ${input.method} failed (${errorMessage(error)}); the next call can still show the bit and retry on 403.`,
+                )
+              })
+            }
+          } catch (error) {
+            const bit = consentBitFromAuthError(error)
+            if (bit === null) {
+              if (
+                (error instanceof DesignAuthError &&
+                  authBodyError(error) === 'insufficient_scope') ||
+                (error instanceof DesignAuthError && error.status === 401)
+              ) {
+                throw new DesignSyncPreconditionError(
+                  designSyncPreconditionMessage('needs_design_login', {
+                    isNonInteractiveSession: deps.isNonInteractiveSession,
+                  }),
+                )
+              }
+              throw error
+            }
+            if (bit !== shown) {
+              writeDesignConsentBit(state, bit, false)
+              throw new DesignSyncPreconditionError(
+                designConsentNotShownMessage(),
+              )
+            }
+            if (!askNow) {
+              writeDesignConsentBit(state, bit, false)
+              throw new DesignSyncPreconditionError(
+                designConsentNoPromptMessage(),
+              )
+            }
+            await postDesignConsent(state, deps.credentials)
+            result = await dispatchDesignSync(state, input, token, signal)
+          }
+          return { data: result }
+        } catch (error) {
+          if (signal.aborted) throw new AbortError()
+          const message = redactOauthToken(errorMessage(error), token)
+          const telemetry =
+            error instanceof DesignAuthError
+              ? error.telemetryMessage
+              : 'DesignSync tool call failed'
+          if (error instanceof DesignSyncPreconditionError) {
+            const wrapped = new DesignSyncPreconditionError(message)
+            attachTelemetry(wrapped, telemetry)
+            throw wrapped
+          }
+          const wrapped = new Error(message)
+          attachTelemetry(wrapped, telemetry)
+          throw wrapped
+        }
+      },
     }
   },
   mapToolResultToToolResultBlockParam(output, toolUseID) {
@@ -557,4 +569,4 @@ export const DesignSyncTool = buildTool({
       content: JSON.stringify(output),
     }
   },
-})
+} satisfies ToolDef<ReturnType<typeof inputSchema>, DesignSyncResult>)

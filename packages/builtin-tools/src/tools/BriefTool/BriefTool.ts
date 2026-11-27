@@ -3,7 +3,7 @@ import { z } from 'zod/v4'
 import { getKairosActive, getUserMsgOptIn } from 'src/bootstrap/state.js'
 import { getFeatureValue_CACHED_WITH_REFRESH } from 'src/services/analytics/growthbook.js'
 import { logEvent } from 'src/services/analytics/index.js'
-import type { ValidationResult } from 'src/Tool.js'
+import type { ToolDeps, ValidationResult } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
@@ -253,12 +253,6 @@ export const BriefTool = buildTool({
   toAutoClassifierInput(input) {
     return input.message
   },
-  async validateInput({ attachments }, _context): Promise<ValidationResult> {
-    if (!attachments || attachments.length === 0) {
-      return { result: true }
-    }
-    return validateAttachmentPaths(attachments)
-  },
   async description() {
     return DESCRIPTION
   },
@@ -276,22 +270,32 @@ export const BriefTool = buildTool({
   },
   renderToolUseMessage,
   renderToolResultMessage,
-  async call({ message, attachments, status }, context) {
-    const sentAt = new Date().toISOString()
-    logEvent('tengu_brief_send', {
-      proactive: status === 'proactive',
-      attachment_count: attachments?.length ?? 0,
-    })
-    if (!attachments || attachments.length === 0) {
-      return { data: { message, sentAt } }
-    }
-    const appState = context.getAppState()
-    const resolved = await resolveAttachments(attachments, {
-      replBridgeEnabled: appState.replBridgeEnabled,
-      signal: context.abortController.signal,
-    })
+  create(deps: ToolDeps) {
     return {
-      data: { message, attachments: resolved, sentAt },
+      async validateInput({ attachments }): Promise<ValidationResult> {
+        if (!attachments || attachments.length === 0) {
+          return { result: true }
+        }
+        return validateAttachmentPaths(attachments)
+      },
+      async call({ message, attachments, status }, callCtx) {
+        const sentAt = new Date().toISOString()
+        logEvent('tengu_brief_send', {
+          proactive: status === 'proactive',
+          attachment_count: attachments?.length ?? 0,
+        })
+        if (!attachments || attachments.length === 0) {
+          return { data: { message, sentAt } }
+        }
+        const appState = deps.getAppState()
+        const resolved = await resolveAttachments(attachments, {
+          replBridgeEnabled: appState.replBridgeEnabled,
+          signal: callCtx.signal,
+        })
+        return {
+          data: { message, attachments: resolved, sentAt },
+        }
+      },
     }
   },
 } satisfies ToolDef<InputSchema, Output>)

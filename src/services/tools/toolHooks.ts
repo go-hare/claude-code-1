@@ -40,6 +40,7 @@ import {
   type PermissionResult,
 } from '../../utils/permissions/PermissionResult.js'
 import {
+  checkRemoteNativeToolPermissionOverride,
   checkRuleBasedPermissions,
   evaluatePermissionWithToolCheck,
   hasEvaluatedToolCheckForCall,
@@ -1203,12 +1204,17 @@ export async function resolveHookPermissionDecision(
 
     // Hook allow skips the interactive prompt, but deny/ask rules and plan-mode
     // write floor still apply.
-    const ruleCheck = await checkRuleBasedPermissions(
-      tool,
-      hookInput,
-      toolUseContext,
-      { crashIsObjection: true, planModeWriteFloor: true },
-    )
+    const ruleCheck =
+      (await checkRuleBasedPermissions(tool, hookInput, toolUseContext, {
+        crashIsObjection: true,
+        planModeWriteFloor: true,
+      })) ??
+      (await checkRemoteNativeToolPermissionOverride(
+        tool,
+        hookInput,
+        toolUseContext,
+        toolUseID,
+      ))
     if (ruleCheck === null) {
       const effectiveMode = getEffectivePermissionMode(
         tool,
@@ -1334,11 +1340,14 @@ export async function resolveHookPermissionDecision(
       ? hookPermissionResult.updatedInput
       : input
   if (hookPermissionResult?.behavior === 'ask') {
-    const ruleCheck = await checkRuleBasedPermissions(
-      tool,
-      askInput,
-      toolUseContext,
-    )
+    const ruleCheck =
+      (await checkRuleBasedPermissions(tool, askInput, toolUseContext)) ??
+      (await checkRemoteNativeToolPermissionOverride(
+        tool,
+        askInput,
+        toolUseContext,
+        toolUseID,
+      ))
     if (ruleCheck?.behavior === 'deny') {
       logForDebugging(
         `Hook returned 'ask' for ${tool.name}, but deny rule overrides: ${ruleCheck.message}`,

@@ -18,13 +18,7 @@ import { isMcpTasksEnabled } from 'src/services/mcp/mcpV2Client.js'
 import { normalizeNameForMCP } from 'src/services/mcp/normalization.js'
 import type { MCPServerConnection } from 'src/services/mcp/types.js'
 import { isMcpTask, type McpTaskState } from 'src/tasks/McpTask/McpTask.js'
-import {
-  buildTool,
-  resolveMcpClients,
-  type ToolDef,
-  type ToolResultBlockParam,
-  type ToolUseContext,
-} from 'src/Tool.js'
+import { buildTool, type ToolDef, type ToolResultBlockParam } from 'src/Tool.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { isDisklessLaunch } from 'src/utils/sessionHost.js'
@@ -329,43 +323,49 @@ export const McpTaskResumePollingTool = buildTool({
     return ''
   },
 
-  async call({ task_id }: McpTaskResumePollingInput, context: ToolUseContext) {
-    const registry: TaskRegistry | undefined = context.taskRegistry
-    const result: OfferMcpTaskResult = isMcpTaskResumePollingEnabled()
-      ? await offerMcpTaskToPoller(
-          task_id,
-          {
-            getTask: id =>
-              registry
-                ? registry.get(id)
-                : context.getAppState?.()?.tasks?.[id],
-            updateTask: (id, updater) => {
-              if (registry) {
-                registry.update<ExtendedMcpTaskState>(id, updater)
-              } else if (context.setAppState) {
-                context.setAppState(prev => {
-                  const cur = prev.tasks?.[id]
-                  if (!isMcpTask(cur)) return prev
-                  return {
-                    ...prev,
-                    tasks: {
-                      ...prev.tasks,
-                      [id]: updater(cur as ExtendedMcpTaskState),
-                    },
-                  }
-                })
-              }
-            },
-            getMcpClients: () => resolveMcpClients(context),
-          },
-          context.abortController?.signal,
-        )
-      : { outcome: 'cannot', status: undefined }
-
-    logResumeOutcome(result.outcome)
-
+  create(deps) {
     return {
-      data: formatMcpTaskResumeOutcome(result.outcome, task_id, result.status),
+      async call({ task_id }: McpTaskResumePollingInput, callCtx) {
+        const registry: TaskRegistry | undefined = deps.taskRegistry
+        const result: OfferMcpTaskResult = isMcpTaskResumePollingEnabled()
+          ? await offerMcpTaskToPoller(
+              task_id,
+              {
+                getTask: id =>
+                  registry ? registry.get(id) : deps.tasks()?.[id],
+                updateTask: (id, updater) => {
+                  if (registry) {
+                    registry.update<ExtendedMcpTaskState>(id, updater)
+                  } else {
+                    deps.setAppState(prev => {
+                      const cur = prev.tasks?.[id]
+                      if (!isMcpTask(cur)) return prev
+                      return {
+                        ...prev,
+                        tasks: {
+                          ...prev.tasks,
+                          [id]: updater(cur as ExtendedMcpTaskState),
+                        },
+                      }
+                    })
+                  }
+                },
+                getMcpClients: () => deps.mcpClients(),
+              },
+              callCtx.signal,
+            )
+          : { outcome: 'cannot', status: undefined }
+
+        logResumeOutcome(result.outcome)
+
+        return {
+          data: formatMcpTaskResumeOutcome(
+            result.outcome,
+            task_id,
+            result.status,
+          ),
+        }
+      },
     }
   },
 

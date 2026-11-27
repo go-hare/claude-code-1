@@ -120,6 +120,8 @@ import type { Command } from '../../commands.js'
 import { getOauthConfig } from '../../constants/oauth.js'
 import type { AppState } from '../../state/AppState.js'
 import {
+  createDefaultCanUseTool,
+  resolveToolUseContext,
   type Tool,
   type ToolCallProgress,
   toolMatchesName,
@@ -3802,6 +3804,8 @@ export function composeMcpTool(params: {
   requiresUserInteraction: boolean
   isFirstPartyDesignServer: boolean
   baseTool: Tool
+  /** Optional server-specific permission check override (e.g. Claude in Chrome URL policy). */
+  customCheckPermissions?: Tool['checkPermissions']
 }): Tool {
   const {
     serverName,
@@ -3815,6 +3819,7 @@ export function composeMcpTool(params: {
     requiresUserInteraction,
     isFirstPartyDesignServer,
     baseTool,
+    customCheckPermissions,
   } = params
 
   const spoofedClaudeAi = isSpoofedClaudeAiServerName(serverName, config)
@@ -3846,18 +3851,28 @@ export function composeMcpTool(params: {
     allowRulesBlocked ||
     connectorDesignOmitsPersistentAllow(isFirstPartyDesignServer, toolName)
 
-  return {
-    ...baseTool,
+  const {
+    create: _baseCreate,
+    permissionCheckFailureDecision: _basePermFailure,
+    deriveObservableInput: _baseDeriveObs,
+    ...cleanBaseTool
+  } = baseTool
+
+  const composed: Tool = {
+    ...cleanBaseTool,
     mcpInfo,
     suppressesAlwaysAllowRule: () =>
       requiresUserInteraction || omitsPersistentAllow,
-    async checkPermissions(input: unknown) {
+    async checkPermissions(input: unknown, context) {
       const denied = connectorDesignTokenlessWriteDeny(
         isFirstPartyDesignServer,
         toolName,
         input,
       )
       if (denied) return denied
+      if (customCheckPermissions !== undefined) {
+        return customCheckPermissions(input as Record<string, unknown>, context)
+      }
       return mcpToolCheckPermissionsResult(
         requiresUserInteraction,
         fullyQualifiedName,
@@ -3865,7 +3880,48 @@ export function composeMcpTool(params: {
         omitsPersistentAllow,
       )
     },
+    create(deps) {
+      return {
+        call(args, callCtx) {
+          const ctx = resolveToolUseContext(deps, callCtx)
+          return composed.call(
+            args,
+            ctx,
+            callCtx.canUseTool ?? createDefaultCanUseTool(),
+            callCtx.parentMessage as Parameters<Tool['call']>[3],
+            callCtx.onProgress,
+            {
+              userModified: callCtx.userModified,
+              globLimits: callCtx.globLimits,
+              fileReadingLimits: callCtx.fileReadingLimits,
+              gitDiffRead: callCtx.gitDiffRead,
+              smallResultAsked: callCtx.smallResultAsked,
+              callerLogsSharedEvents: callCtx.callerLogsSharedEvents,
+              timing: callCtx.timing,
+              remoteCall: callCtx.remoteCall,
+            },
+          )
+        },
+        ...(cleanBaseTool.validateInput !== undefined
+          ? {
+              validateInput(input, callCtx) {
+                return cleanBaseTool.validateInput!(
+                  input,
+                  resolveToolUseContext(deps, callCtx),
+                )
+              },
+            }
+          : {}),
+        checkPermissions(input, callCtx) {
+          return composed.checkPermissions(
+            input,
+            resolveToolUseContext(deps, callCtx),
+          )
+        },
+      }
+    },
   }
+  return composed
 }
 
 /**
@@ -3988,8 +4044,22 @@ function composeMcpToolsFromRawListing(
           : {}),
         ...(accountMemoryServer ? { accountMemoryServer: true } : {}),
       }
+      const {
+        create: _mcpCreate,
+        validateInput: _mcpValidateInput,
+        permissionCheckFailureDecision: _mcpPermFail,
+        deriveObservableInput: _mcpDeriveObs,
+        ...mcpToolTemplate
+      } = MCPTool
+      const chromeToolOverrides =
+        isClaudeInChromeMCPServer(client.name) &&
+        (client.config.type === 'stdio' || !client.config.type)
+          ? claudeInChromeToolRendering().getClaudeInChromeMCPToolOverrides(
+              tool.name,
+            )
+          : undefined
       const baseTool: Tool = {
-        ...MCPTool,
+        ...mcpToolTemplate,
         // In skip-prefix mode, use the original name for model invocation so MCP tools
         // can override builtins by name. mcpInfo is used for permission checking.
         name: skipPrefix ? tool.name : fullyQualifiedName,
@@ -4650,12 +4720,7 @@ function composeMcpToolsFromRawListing(
           const displayName = tool.annotations?.title || tool.name
           return `${client.name} - ${displayName} (MCP)`
         },
-        ...(isClaudeInChromeMCPServer(client.name) &&
-        (client.config.type === 'stdio' || !client.config.type)
-          ? claudeInChromeToolRendering().getClaudeInChromeMCPToolOverrides(
-              tool.name,
-            )
-          : {}),
+        ...(chromeToolOverrides ?? {}),
         ...(feature('CHICAGO_MCP') &&
         (client.config.type === 'stdio' || !client.config.type) &&
         isComputerUseMCPServer!(client.name)
@@ -4674,6 +4739,7 @@ function composeMcpToolsFromRawListing(
         requiresUserInteraction,
         isFirstPartyDesignServer,
         baseTool,
+        customCheckPermissions: chromeToolOverrides?.checkPermissions,
       })
     })
     .map(mappedTool =>

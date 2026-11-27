@@ -25,6 +25,7 @@ import {
   isBypassPermissionsModeDisabled,
 } from '../utils/permissions/permissionSetup.js'
 import type { HostPermissionLayer } from './hostPermissionLayers.js'
+import { registerToolPermissionLayerReader } from '../utils/toolCreateRuntime.js'
 
 /** densable Mo-style unique preserve-order merge for rule command lists. */
 export function uniqueStrings(items: readonly string[]): string[] {
@@ -314,3 +315,5 @@ export function applyContextLayers(
       : {}),
   }
 }
+
+registerToolPermissionLayerReader(getToolPermissionContextFromLayers)

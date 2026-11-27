@@ -1,5 +1,5 @@
 import { z } from 'zod/v4'
-import type { ToolResultBlockParam } from 'src/Tool.js'
+import type { ToolDef, ToolResultBlockParam } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import {
@@ -81,47 +81,51 @@ Subscriptions are stored locally (~/.claude/pr-subscriptions.json) and shared wi
     }
   },
 
-  async call(input: SubscribeInput) {
-    const repo = input.repo.trim()
-    if (!/^[^/]+\/[^/]+$/.test(repo)) {
-      return {
-        data: {
-          subscribed: false,
-          subscription_id: '',
-          error: 'repo must be owner/repo',
-        } satisfies SubscribeOutput,
-      }
-    }
-    if (!Number.isFinite(input.pr_number) || input.pr_number <= 0) {
-      return {
-        data: {
-          subscribed: false,
-          subscription_id: '',
-          error: 'pr_number must be a positive number',
-        } satisfies SubscribeOutput,
-      }
-    }
+  create() {
+    return {
+      async call(input: SubscribeInput) {
+        const repo = input.repo.trim()
+        if (!/^[^/]+\/[^/]+$/.test(repo)) {
+          return {
+            data: {
+              subscribed: false,
+              subscription_id: '',
+              error: 'repo must be owner/repo',
+            } satisfies SubscribeOutput,
+          }
+        }
+        if (!Number.isFinite(input.pr_number) || input.pr_number <= 0) {
+          return {
+            data: {
+              subscribed: false,
+              subscription_id: '',
+              error: 'pr_number must be a positive number',
+            } satisfies SubscribeOutput,
+          }
+        }
 
-    try {
-      const { subscription } = upsertPRSubscription({
-        repo,
-        prNumber: input.pr_number,
-        events: input.events,
-      })
-      return {
-        data: {
-          subscribed: true,
-          subscription_id: prSubscriptionId(subscription),
-        } satisfies SubscribeOutput,
-      }
-    } catch (e) {
-      return {
-        data: {
-          subscribed: false,
-          subscription_id: '',
-          error: e instanceof Error ? e.message : String(e),
-        } satisfies SubscribeOutput,
-      }
+        try {
+          const { subscription } = upsertPRSubscription({
+            repo,
+            prNumber: input.pr_number,
+            events: input.events,
+          })
+          return {
+            data: {
+              subscribed: true,
+              subscription_id: prSubscriptionId(subscription),
+            } satisfies SubscribeOutput,
+          }
+        } catch (e) {
+          return {
+            data: {
+              subscribed: false,
+              subscription_id: '',
+              error: e instanceof Error ? e.message : String(e),
+            } satisfies SubscribeOutput,
+          }
+        }
+      },
     }
   },
-})
+} satisfies ToolDef<InputSchema, SubscribeOutput>)

@@ -21,11 +21,16 @@ import * as vm from 'node:vm'
 import { getMainThreadAgentId, setCwdState } from '../../bootstrap/state.js'
 import type { HostPermissionLayer } from '../../engine/hostPermissionLayers.js'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
-import type {
-  Tool,
-  ToolPermissionContext,
-  ToolResult,
-  ToolUseContext,
+import {
+  consumeRemoteNativeToolLocallyChecked,
+  createDefaultCanUseTool,
+  getRemoteNativeToolCheck,
+  getRemoteNativeToolRunner,
+  resolveToolUseContext,
+  type Tool,
+  type ToolPermissionContext,
+  type ToolResult,
+  type ToolUseContext,
 } from '../../Tool.js'
 import type {
   AssistantMessage,
@@ -5802,6 +5807,24 @@ export function wrapReplToolForCodeMode(
                 suspendLayer,
               ],
             }
+            const innerRemoteRunnerAtStart = getRemoteNativeToolRunner(
+              innerPermissionContext.session,
+              target.name,
+            )
+            const innerRemotePermCheckedFor =
+              getRemoteNativeToolCheck(
+                innerPermissionContext.session,
+                target.name,
+              ) !== undefined
+                ? innerRemoteRunnerAtStart
+                : innerRemoteRunnerAtStart === undefined
+                  ? null
+                  : undefined
+            const innerRemoteRunnerCheckedHere =
+              innerRemotePermCheckedFor !== undefined &&
+              innerRemotePermCheckedFor !== null
+                ? undefined
+                : innerRemoteRunnerAtStart
             const resolved = await resolveHookPermissionDecision(
               hookPermissionResult,
               target,
@@ -5832,6 +5855,11 @@ export function wrapReplToolForCodeMode(
               activeCwd,
             )
             const callStartMs = Date.now()
+            const innerLocalCheckDeferred =
+              consumeRemoteNativeToolLocallyChecked(
+                innerHookContext.session,
+                innerToolUseId,
+              )
             let out: ToolResult<unknown>
             try {
               out = (await target.call(
@@ -5839,6 +5867,16 @@ export function wrapReplToolForCodeMode(
                 innerHookContext,
                 canUseTool,
                 parentMessage,
+                undefined,
+                {
+                  userModified: permission.userModified ?? false,
+                  permissionCheckedFor: innerLocalCheckDeferred
+                    ? undefined
+                    : innerRemotePermCheckedFor,
+                  runnerCheckedHere: innerLocalCheckDeferred
+                    ? innerRemoteRunnerAtStart
+                    : innerRemoteRunnerCheckedHere,
+                },
               )) as ToolResult<unknown>
             } catch (callErr) {
               // Official 2.1.325 #2314: sync expired MCP server auth to /mcp.
@@ -6314,6 +6352,36 @@ export function wrapReplToolForCodeMode(
         ...(collectedContextLayers.length > 0
           ? { contextLayers: collectedContextLayers }
           : {}),
+      }
+    },
+    create(deps) {
+      return {
+        call(args, callCtx) {
+          const ctx = resolveToolUseContext(deps, callCtx)
+          return wrappedTool.call(
+            args,
+            ctx,
+            callCtx.canUseTool ?? createDefaultCanUseTool(),
+            callCtx.parentMessage as Parameters<Tool['call']>[3],
+            callCtx.onProgress,
+          )
+        },
+        ...(wrappedTool.validateInput !== undefined
+          ? {
+              validateInput(input, callCtx) {
+                return wrappedTool.validateInput!(
+                  input,
+                  resolveToolUseContext(deps, callCtx),
+                )
+              },
+            }
+          : {}),
+        checkPermissions(input, callCtx) {
+          return wrappedTool.checkPermissions(
+            input,
+            resolveToolUseContext(deps, callCtx),
+          )
+        },
       }
     },
   }

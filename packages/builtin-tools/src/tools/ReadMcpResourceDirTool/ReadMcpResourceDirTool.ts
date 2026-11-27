@@ -16,12 +16,7 @@ import type {
   MCPServerConnection,
   ServerCapabilities,
 } from 'src/services/mcp/types.js'
-import {
-  buildTool,
-  resolveMcpClients,
-  type ToolDef,
-  type ToolResultBlockParam,
-} from 'src/Tool.js'
+import { buildTool, type ToolDef, type ToolResultBlockParam } from 'src/Tool.js'
 import { AbortError } from 'src/utils/errors.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { logMCPError } from 'src/utils/log.js'
@@ -260,83 +255,87 @@ export const ReadMcpResourceDirTool = buildTool({
     return `List directory resource "${input.uri}" from server "${input.server}"`
   },
 
-  async call(input: ReadMcpResourceDirInput, context) {
-    const { server: serverName, uri } = input
-    const signal = context.abortController?.signal
-    const clients = resolveMcpClients(context)
-    const client = findMcpClient(clients, serverName)
+  create(deps) {
+    return {
+      async call(input: ReadMcpResourceDirInput, callCtx) {
+        const { server: serverName, uri } = input
+        const signal = callCtx.signal
+        const clients = deps.mcpClients()
+        const client = findMcpClient(clients, serverName)
 
-    if (!client) {
-      throw new Error(
-        `Server "${serverName}" not found. Available servers: ${clients.map(c => c.name).join(', ')}`,
-      )
-    }
+        if (!client) {
+          throw new Error(
+            `Server "${serverName}" not found. Available servers: ${clients.map(c => c.name).join(', ')}`,
+          )
+        }
 
-    if (client.type !== 'connected') {
-      return {
-        data: {
-          resources: [],
-          error: `Server "${client.name}" is not connected yet, so this tool cannot tell if it supports directory listing. First call ${LIST_MCP_RESOURCES_TOOL_NAME} with "server" set to "${client.name}". Then call this tool again.`,
-        },
-      }
-    }
+        if (client.type !== 'connected') {
+          return {
+            data: {
+              resources: [],
+              error: `Server "${client.name}" is not connected yet, so this tool cannot tell if it supports directory listing. First call ${LIST_MCP_RESOURCES_TOOL_NAME} with "server" set to "${client.name}". Then call this tool again.`,
+            },
+          }
+        }
 
-    if (!serverDeclaresDirectoryRead(client.capabilities)) {
-      return {
-        data: {
-          resources: [],
-          error: `Server "${client.name}" does not support directory listing.`,
-        },
-      }
-    }
+        if (!serverDeclaresDirectoryRead(client.capabilities)) {
+          return {
+            data: {
+              resources: [],
+              error: `Server "${client.name}" does not support directory listing.`,
+            },
+          }
+        }
 
-    const connectedClient =
-      client.client !== undefined
-        ? await ensureConnectedClient(client, {
-            signal,
-            context: 'MCP resource directory read',
-          }).catch(() => client)
-        : client
+        const connectedClient =
+          client.client !== undefined
+            ? await ensureConnectedClient(client, {
+                signal,
+                context: 'MCP resource directory read',
+              }).catch(() => client)
+            : client
 
-    let entries: McpDirectoryResourceEntry[]
-    try {
-      entries = await readMcpDirectory(connectedClient, uri, signal)
-    } catch (err) {
-      if (signal?.aborted) {
-        throw new AbortError()
-      }
-      if (isMcpNotADirectoryError(err)) {
-        logMCPError(
-          client.name,
-          `resources/directory/read returned ${getMcpErrorCode(err)} — not a directory`,
-        )
+        let entries: McpDirectoryResourceEntry[]
+        try {
+          entries = await readMcpDirectory(connectedClient, uri, signal)
+        } catch (err) {
+          if (signal?.aborted) {
+            throw new AbortError()
+          }
+          if (isMcpNotADirectoryError(err)) {
+            logMCPError(
+              client.name,
+              `resources/directory/read returned ${getMcpErrorCode(err)} — not a directory`,
+            )
+            return {
+              data: {
+                resources: [],
+                error: `Not a directory resource: ${uri}. If it is a file resource, use ${READ_MCP_RESOURCE_TOOL_NAME} instead.`,
+              },
+            }
+          }
+          throw err
+        }
+
+        const { items, skippedCount } = capMcpResourceListing(entries)
+        if (skippedCount > 0) {
+          logMCPError(
+            client.name,
+            `directory entries listing truncated (${entries.length} entries exceeded budget)`,
+          )
+          return {
+            data: {
+              resources: [],
+              error: `The listing of ${uri} is too large to read.`,
+            },
+          }
+        }
+
         return {
           data: {
-            resources: [],
-            error: `Not a directory resource: ${uri}. If it is a file resource, use ${READ_MCP_RESOURCE_TOOL_NAME} instead.`,
+            resources: items,
           },
         }
-      }
-      throw err
-    }
-
-    const { items, skippedCount } = capMcpResourceListing(entries)
-    if (skippedCount > 0) {
-      logMCPError(
-        client.name,
-        `directory entries listing truncated (${entries.length} entries exceeded budget)`,
-      )
-      return {
-        data: {
-          resources: [],
-          error: `The listing of ${uri} is too large to read.`,
-        },
-      }
-    }
-
-    return {
-      data: {
-        resources: items,
       },
     }
   },

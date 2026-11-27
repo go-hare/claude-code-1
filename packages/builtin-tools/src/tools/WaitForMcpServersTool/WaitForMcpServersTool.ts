@@ -17,8 +17,8 @@ import type { MCPServerConnection } from 'src/services/mcp/types.js'
 import {
   buildTool,
   type ToolDef,
+  type ToolDeps,
   type ToolResultBlockParam,
-  type ToolUseContext,
   toolMatchesName,
 } from 'src/Tool.js'
 import { logForDebugging } from 'src/utils/debug.js'
@@ -172,24 +172,24 @@ function isIneligibleFailedClient(client: ClientWithOptionalMeta): boolean {
   )
 }
 
-function getLiveMcpClientsFromContext(
-  context: ToolUseContext,
+function getLiveMcpClientsFromDeps(
+  deps: ToolDeps,
 ): readonly WaitableMcpClient[] {
-  if (context.options.refreshMcpClients) {
-    return context.options.refreshMcpClients()
+  if (deps.refreshMcpClients) {
+    return deps.refreshMcpClients()
   }
-  if (context.getMcp) {
-    return context.getMcp().clients
+  if (deps.getMcp) {
+    return deps.getMcp().clients
   }
-  const appClients = context.getAppState?.()?.mcp?.clients
+  const appClients = deps.getAppState?.()?.mcp?.clients
   if (Array.isArray(appClients) && appClients.length > 0) {
     return appClients
   }
-  return context.options.mcpClients ?? appClients ?? []
+  return deps.mcpClients() ?? appClients ?? []
 }
 
-function isReplPresentInTools(context: ToolUseContext): boolean {
-  const tools = context.options.tools
+function isReplPresentInTools(deps: ToolDeps): boolean {
+  const tools = deps.tools
   if (!Array.isArray(tools)) return false
   return tools.some(t => toolMatchesName(t, REPL_TOOL_NAME))
 }
@@ -380,13 +380,17 @@ export const WaitForMcpServersTool = buildTool({
       : 'Wait for pending MCP servers to connect'
   },
 
-  async call(input: WaitForMcpServersInput, context: ToolUseContext) {
-    const data = await waitForMcpServers(input, {
-      getClients: () => getLiveMcpClientsFromContext(context),
-      signal: context.abortController?.signal,
-      codeModeRouted: isCodeModeEnabled() && isReplPresentInTools(context),
-    })
-    return { data }
+  create(deps) {
+    return {
+      async call(input: WaitForMcpServersInput, callCtx) {
+        const data = await waitForMcpServers(input, {
+          getClients: () => getLiveMcpClientsFromDeps(deps),
+          signal: callCtx.signal,
+          codeModeRouted: isCodeModeEnabled() && isReplPresentInTools(deps),
+        })
+        return { data }
+      },
+    }
   },
 
   mapToolResultToToolResultBlockParam(

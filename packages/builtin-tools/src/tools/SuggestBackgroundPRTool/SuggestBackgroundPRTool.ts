@@ -1,5 +1,5 @@
 import { z } from 'zod/v4'
-import type { ToolResultBlockParam } from 'src/Tool.js'
+import type { ToolDef, ToolResultBlockParam } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 
@@ -76,15 +76,19 @@ The suggestion is presented to the user who can approve or dismiss it. If approv
     }
   },
 
-  async call(_input: SuggestInput) {
-    // densable 2.1.289: tool BODY absent from gold SEA; keep a minimal stub that
-    // matches SuggestOutput (no undeclared error field). isEnabled() is false and
-    // the tool stays out of getAllBaseTools.
+  create() {
     return {
-      data: {
-        suggested: false,
-        suggestion_id: '',
-      } satisfies SuggestOutput,
+      async call(_input: SuggestInput) {
+        // densable 2.1.289: tool BODY absent from gold SEA; keep a minimal stub that
+        // matches SuggestOutput (no undeclared error field). isEnabled() is false and
+        // the tool stays out of getAllBaseTools.
+        return {
+          data: {
+            suggested: false,
+            suggestion_id: '',
+          } satisfies SuggestOutput,
+        }
+      },
     }
   },
-})
+} satisfies ToolDef<InputSchema, SuggestOutput>)

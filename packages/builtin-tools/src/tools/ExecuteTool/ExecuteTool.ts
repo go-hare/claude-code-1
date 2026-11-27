@@ -1,13 +1,16 @@
 import { z } from 'zod/v4'
 import {
   buildTool,
+  createDefaultCanUseTool,
   findToolByName,
-  type Tool,
+  resolveToolUseContext,
+  type ToolCallContext,
   type ToolDef,
-  type ToolUseContext,
+  type ToolDeps,
   type ToolResult,
   type Tools,
 } from 'src/Tool.js'
+import type { AssistantMessage } from 'src/types/message.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { createUserMessage } from 'src/utils/messages.js'
 import { formatZodValidationError } from 'src/utils/toolErrors.js'
@@ -33,6 +36,7 @@ export const inputSchema = lazySchema(() =>
   }),
 )
 type InputSchema = ReturnType<typeof inputSchema>
+type ExecuteInput = z.infer<InputSchema>
 
 export const outputSchema = lazySchema(() =>
   z.object({
@@ -63,173 +67,183 @@ export const ExecuteTool = buildTool({
   async prompt() {
     return getPrompt()
   },
-  async call(input, context, canUseTool, parentMessage, onProgress) {
-    const tools: Tools = context.options.tools ?? []
-
-    const targetTool = findToolByName(tools, input.tool_name)
-    if (!targetTool) {
-      return {
-        data: {
-          result: null,
-          tool_name: input.tool_name,
-        },
-        newMessages: [
-          createUserMessage({
-            content: `Tool "${input.tool_name}" not found. Use ToolSearch to discover available tools.`,
-          }),
-        ],
-      }
-    }
-
-    // Guard: block execution of undiscovered deferred tools.
-    // densable: use definitive DSn (isSearchExtraToolsEnabled), not optimistic Y4 —
-    // model/Vertex/$Fe/threshold gates can still force standard mode.
-    // When tool search is active, deferred tools must be discovered via
-    // ToolSearch first so the model has seen their schemas and knows
-    // the correct parameters.  Executing an undiscovered tool almost always
-    // fails with parameter validation errors.
-    if (
-      isSearchExtraToolsToolAvailable(tools) &&
-      isDeferredTool(targetTool) &&
-      (await isSearchExtraToolsEnabled(
-        context.options.mainLoopModel,
-        tools,
-        async () =>
-          context.getAppState?.()?.toolPermissionContext ?? ({} as never),
-        context.options.agentDefinitions?.activeAgents ?? [],
-        'ExecuteTool',
-      ))
-    ) {
-      const discovered = extractDiscoveredToolNames(context.messages)
-      if (!discovered.has(input.tool_name)) {
-        return {
-          data: {
-            result: null,
-            tool_name: input.tool_name,
-          },
-          newMessages: [
-            createUserMessage({
-              content: `Tool "${input.tool_name}" has not been discovered yet. You must first use ToolSearch to discover this tool before executing it.\n\nUsage: ToolSearch("select:${input.tool_name}")`,
-            }),
-          ],
-        }
-      }
-    }
-
-    // Check if the target tool is currently enabled
-    if (!targetTool.isEnabled()) {
-      return {
-        data: {
-          result: null,
-          tool_name: input.tool_name,
-        },
-        newMessages: [
-          createUserMessage({
-            content: `工具 "${input.tool_name}" 当前不可用：Remote Control 未连接。`,
-          }),
-        ],
-      }
-    }
-
-    // Schema-validate params against the target tool BEFORE delegating.
-    // ExecuteExtraTool passes raw params straight from the model to
-    // validateInput/call without re-running the target's zod schema, so a
-    // wrong field name (e.g. 'schedule' instead of 'cron') or a missing
-    // required field reaches the tool as undefined and the first
-    // .trim()/.length/.split() crashes with "undefined is not an object".
-    // CronCreateTool's .trim() crash was the reported symptom; centralizing
-    // the check here covers every deferred tool without relying on each one
-    // to defensively guard its own validateInput. Duck-typed so MCP tools
-    // (whose schema is inputJSONSchema, not zod) skip this branch.
-    const targetSchema = targetTool.inputSchema as
-      | { safeParse?: (data: unknown) => unknown }
-      | undefined
-    if (targetSchema?.safeParse) {
-      const parsed = targetSchema.safeParse(input.params) as
-        | { success: true; data: Record<string, unknown> }
-        | { success: false; error: z.ZodError }
-      if (!parsed.success) {
-        return {
-          data: {
-            result: null,
-            tool_name: input.tool_name,
-          },
-          newMessages: [
-            createUserMessage({
-              content: formatZodValidationError(input.tool_name, parsed.error),
-            }),
-          ],
-        }
-      }
-      // Use parsed params going forward — picks up .default() values and
-      // strips unknown keys for strictObject schemas so validateInput/call
-      // never see fields they don't expect.
-      input.params = parsed.data
-    }
-
-    // Validate input before delegating — prevents crashes when the model
-    // omits required params (e.g. TeamCreate without team_name →
-    // sanitizeName(undefined).replace() TypeError).
-    if (targetTool.validateInput) {
-      const validation = await targetTool.validateInput(
-        input.params as Record<string, unknown>,
-        context,
-      )
-      if (!validation.result) {
-        return {
-          data: {
-            result: null,
-            tool_name: input.tool_name,
-          },
-          newMessages: [
-            createUserMessage({
-              content: `Invalid parameters for tool "${input.tool_name}": ${validation.message}`,
-            }),
-          ],
-        }
-      }
-    }
-
-    // Check permissions on the target tool
-    const permResult = await targetTool.checkPermissions?.(
-      input.params as Record<string, unknown>,
-      context,
-    )
-    if (permResult && permResult.behavior === 'deny') {
-      return {
-        data: {
-          result: null,
-          tool_name: input.tool_name,
-        },
-        newMessages: [
-          createUserMessage({
-            content: `Permission denied for tool "${input.tool_name}": ${permResult.message ?? 'Permission denied'}`,
-          }),
-        ],
-      }
-    }
-
-    // Delegate execution to the target tool
-    const targetResult: ToolResult<unknown> = await targetTool.call(
-      input.params as Record<string, unknown>,
-      context,
-      canUseTool,
-      parentMessage,
-      onProgress,
-    )
-
+  create(deps: ToolDeps) {
     return {
-      ...targetResult,
-      data: {
-        result: targetResult.data,
-        tool_name: input.tool_name,
+      async call(input: ExecuteInput, callCtx: ToolCallContext) {
+        const tools: Tools = deps.tools
+
+        const targetTool = findToolByName(tools, input.tool_name)
+        if (!targetTool) {
+          return {
+            data: {
+              result: null,
+              tool_name: input.tool_name,
+            },
+            newMessages: [
+              createUserMessage({
+                content: `Tool "${input.tool_name}" not found. Use ToolSearch to discover available tools.`,
+              }),
+            ],
+          }
+        }
+
+        // Guard: block execution of undiscovered deferred tools.
+        // densable: use definitive DSn (isSearchExtraToolsEnabled), not optimistic Y4 —
+        // model/Vertex/$Fe/threshold gates can still force standard mode.
+        // When tool search is active, deferred tools must be discovered via
+        // ToolSearch first so the model has seen their schemas and knows
+        // the correct parameters.  Executing an undiscovered tool almost always
+        // fails with parameter validation errors.
+        if (
+          isSearchExtraToolsToolAvailable(tools) &&
+          isDeferredTool(targetTool) &&
+          (await isSearchExtraToolsEnabled(
+            deps.loopModel(),
+            tools,
+            async () => deps.permissions(),
+            deps.agentDefinitions?.activeAgents ?? [],
+            'ExecuteTool',
+          ))
+        ) {
+          const discovered = extractDiscoveredToolNames(deps.messages())
+          if (!discovered.has(input.tool_name)) {
+            return {
+              data: {
+                result: null,
+                tool_name: input.tool_name,
+              },
+              newMessages: [
+                createUserMessage({
+                  content: `Tool "${input.tool_name}" has not been discovered yet. You must first use ToolSearch to discover this tool before executing it.\n\nUsage: ToolSearch("select:${input.tool_name}")`,
+                }),
+              ],
+            }
+          }
+        }
+
+        // Check if the target tool is currently enabled
+        if (!targetTool.isEnabled()) {
+          return {
+            data: {
+              result: null,
+              tool_name: input.tool_name,
+            },
+            newMessages: [
+              createUserMessage({
+                content: `工具 "${input.tool_name}" 当前不可用：Remote Control 未连接。`,
+              }),
+            ],
+          }
+        }
+
+        // Schema-validate params against the target tool BEFORE delegating.
+        // ExecuteExtraTool passes raw params straight from the model to
+        // validateInput/call without re-running the target's zod schema, so a
+        // wrong field name (e.g. 'schedule' instead of 'cron') or a missing
+        // required field reaches the tool as undefined and the first
+        // .trim()/.length/.split() crashes with "undefined is not an object".
+        // CronCreateTool's .trim() crash was the reported symptom; centralizing
+        // the check here covers every deferred tool without relying on each one
+        // to defensively guard its own validateInput. Duck-typed so MCP tools
+        // (whose schema is inputJSONSchema, not zod) skip this branch.
+        const targetSchema = targetTool.inputSchema as
+          | { safeParse?: (data: unknown) => unknown }
+          | undefined
+        if (targetSchema?.safeParse) {
+          const parsed = targetSchema.safeParse(input.params) as
+            | { success: true; data: Record<string, unknown> }
+            | { success: false; error: z.ZodError }
+          if (!parsed.success) {
+            return {
+              data: {
+                result: null,
+                tool_name: input.tool_name,
+              },
+              newMessages: [
+                createUserMessage({
+                  content: formatZodValidationError(
+                    input.tool_name,
+                    parsed.error,
+                  ),
+                }),
+              ],
+            }
+          }
+          // Use parsed params going forward — picks up .default() values and
+          // strips unknown keys for strictObject schemas so validateInput/call
+          // never see fields they don't expect.
+          input.params = parsed.data
+        }
+
+        const context = resolveToolUseContext(deps, callCtx)
+
+        // Validate input before delegating — prevents crashes when the model
+        // omits required params (e.g. TeamCreate without team_name →
+        // sanitizeName(undefined).replace() TypeError).
+        if (targetTool.validateInput) {
+          const validation = await targetTool.validateInput(
+            input.params as Record<string, unknown>,
+            context,
+          )
+          if (!validation.result) {
+            return {
+              data: {
+                result: null,
+                tool_name: input.tool_name,
+              },
+              newMessages: [
+                createUserMessage({
+                  content: `Invalid parameters for tool "${input.tool_name}": ${validation.message}`,
+                }),
+              ],
+            }
+          }
+        }
+
+        // Check permissions on the target tool
+        const permResult = await targetTool.checkPermissions?.(
+          input.params as Record<string, unknown>,
+          context,
+        )
+        if (permResult && permResult.behavior === 'deny') {
+          return {
+            data: {
+              result: null,
+              tool_name: input.tool_name,
+            },
+            newMessages: [
+              createUserMessage({
+                content: `Permission denied for tool "${input.tool_name}": ${permResult.message ?? 'Permission denied'}`,
+              }),
+            ],
+          }
+        }
+
+        // Delegate execution to the target tool
+        const canUseTool = callCtx.canUseTool ?? createDefaultCanUseTool()
+        const parentMessage = callCtx.parentMessage as AssistantMessage
+        const targetResult: ToolResult<unknown> = await targetTool.call(
+          input.params as Record<string, unknown>,
+          context,
+          canUseTool,
+          parentMessage,
+          callCtx.onProgress,
+        )
+
+        return {
+          ...targetResult,
+          data: {
+            result: targetResult.data,
+            tool_name: input.tool_name,
+          },
+        }
       },
-    }
-  },
-  async checkPermissions() {
-    return {
-      behavior: 'passthrough',
-      message: 'ExecuteExtraTool delegates permission to the target tool.',
+      async checkPermissions() {
+        return {
+          behavior: 'passthrough' as const,
+          message: 'ExecuteExtraTool delegates permission to the target tool.',
+        }
+      },
     }
   },
   renderToolUseMessage(input) {

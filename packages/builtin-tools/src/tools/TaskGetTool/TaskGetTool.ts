@@ -1,5 +1,5 @@
 import { z } from 'zod/v4'
-import { buildTool, type ToolDef } from 'src/Tool.js'
+import { buildTool, type ToolDef, type ToolDeps } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import {
   getTask,
@@ -71,29 +71,33 @@ export const TaskGetTool = buildTool({
   renderToolUseMessage() {
     return null
   },
-  async call({ taskId }) {
-    const taskListId = getTaskListId()
-
-    const task = await getTask(taskListId, taskId)
-
-    if (!task) {
-      return {
-        data: {
-          task: null,
-        },
-      }
-    }
-
+  create(_deps: ToolDeps) {
     return {
-      data: {
-        task: {
-          id: task.id,
-          subject: task.subject,
-          description: task.description,
-          status: task.status,
-          blocks: task.blocks,
-          blockedBy: task.blockedBy,
-        },
+      async call({ taskId }) {
+        const taskListId = getTaskListId()
+
+        const task = await getTask(taskListId, taskId)
+
+        if (!task) {
+          return {
+            data: {
+              task: null,
+            },
+          }
+        }
+
+        return {
+          data: {
+            task: {
+              id: task.id,
+              subject: task.subject,
+              description: task.description,
+              status: task.status,
+              blocks: task.blocks,
+              blockedBy: task.blockedBy,
+            },
+          },
+        }
       },
     }
   },

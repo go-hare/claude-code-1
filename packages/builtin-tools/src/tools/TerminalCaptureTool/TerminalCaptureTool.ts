@@ -1,5 +1,10 @@
 import { z } from 'zod/v4'
-import type { ToolResultBlockParam } from 'src/Tool.js'
+import type {
+  ToolCallContext,
+  ToolDef,
+  ToolDeps,
+  ToolResultBlockParam,
+} from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { TERMINAL_CAPTURE_TOOL_NAME } from './prompt.js'
@@ -74,13 +79,17 @@ Guidelines:
     }
   },
 
-  async call(input: CaptureInput) {
-    // Terminal panel capture is provided by the TERMINAL_PANEL runtime.
+  create(_deps: ToolDeps) {
     return {
-      data: {
-        content: '',
-        line_count: 0,
+      async call(_input: CaptureInput, _callCtx: ToolCallContext) {
+        // Terminal panel capture is provided by the TERMINAL_PANEL runtime.
+        return {
+          data: {
+            content: '',
+            line_count: 0,
+          },
+        }
       },
     }
   },
-})
+} satisfies ToolDef<InputSchema, CaptureOutput>)

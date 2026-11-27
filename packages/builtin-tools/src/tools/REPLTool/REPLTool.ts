@@ -1,5 +1,10 @@
 import { z } from 'zod/v4'
-import type { ToolResultBlockParam, ToolUseContext } from 'src/Tool.js'
+import type {
+  ToolCallContext,
+  ToolDef,
+  ToolDeps,
+  ToolResultBlockParam,
+} from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { REPL_TOOL_NAME } from './constants.js'
@@ -83,20 +88,6 @@ The REPL runs in a VM context with tool APIs available as functions. Results fro
     return input.code
   },
 
-  async checkPermissions(input: REPLInput, context: ToolUseContext) {
-    const mode = context.getAppState?.()?.toolPermissionContext?.mode
-    if (mode === 'auto') {
-      return {
-        behavior: 'passthrough' as const,
-        message: `${REPL_TOOL_NAME} script requires classifier review.`,
-      }
-    }
-    return {
-      behavior: 'allow' as const,
-      updatedInput: input,
-    }
-  },
-
   getToolUseSummary(input: Partial<REPLInput> | undefined): string | null {
     if (!input) return null
     const desc =
@@ -155,17 +146,35 @@ The REPL runs in a VM context with tool APIs available as functions. Results fro
     }
   },
 
-  async call(_input: REPLInput) {
-    // REPL execution engine is provided by the ant-native runtime.
-    // This stub satisfies the tool interface; the actual VM dispatch
-    // is wired in the ant build. Without the ant runtime, REPL is
-    // not available and callers should be informed.
+  create(deps: ToolDeps) {
     return {
-      data: {
-        result:
-          'Error: REPL tool is not available in this build. The REPL execution engine requires the ant-native runtime.',
-        tool_calls: 0,
+      async checkPermissions(input: REPLInput, _callCtx: ToolCallContext) {
+        const mode = deps.permissions().mode
+        if (mode === 'auto') {
+          return {
+            behavior: 'passthrough' as const,
+            message: `${REPL_TOOL_NAME} script requires classifier review.`,
+          }
+        }
+        return {
+          behavior: 'allow' as const,
+          updatedInput: input,
+        }
+      },
+
+      async call(_input: REPLInput, _callCtx: ToolCallContext) {
+        // REPL execution engine is provided by the ant-native runtime.
+        // This stub satisfies the tool interface; the actual VM dispatch
+        // is wired in the ant build. Without the ant runtime, REPL is
+        // not available and callers should be informed.
+        return {
+          data: {
+            result:
+              'Error: REPL tool is not available in this build. The REPL execution engine requires the ant-native runtime.',
+            tool_calls: 0,
+          },
+        }
       },
     }
   },
-})
+} satisfies ToolDef<InputSchema, REPLOutput>)

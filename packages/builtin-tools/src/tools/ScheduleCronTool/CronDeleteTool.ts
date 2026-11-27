@@ -1,6 +1,16 @@
 import { z } from 'zod/v4'
-import type { ValidationResult } from 'src/Tool.js'
-import { buildTool, type ToolDef } from 'src/Tool.js'
+import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js'
+import {
+  buildTool,
+  type ToolCallExecutionOptions,
+  type ToolCallProgress,
+  type ToolDef,
+  type ToolProgressData,
+  type ToolResult,
+  type ToolUseContext,
+  type ValidationResult,
+} from 'src/Tool.js'
+import type { AssistantMessage } from 'src/types/message.js'
 import {
   getCronFilePath,
   listAllCronTasks,
@@ -32,7 +42,7 @@ const outputSchema = lazySchema(() =>
 type OutputSchema = ReturnType<typeof outputSchema>
 export type DeleteOutput = z.infer<OutputSchema>
 
-export const CronDeleteTool = buildTool({
+const builtCronDeleteTool = buildTool({
   name: CRON_DELETE_TOOL_NAME,
   searchHint: 'cancel a scheduled cron job',
   maxResultSizeChars: 100_000,
@@ -58,30 +68,34 @@ export const CronDeleteTool = buildTool({
   getPath() {
     return getCronFilePath()
   },
-  async validateInput(input): Promise<ValidationResult> {
-    const tasks = await listAllCronTasks()
-    const task = tasks.find(t => t.id === input.id)
-    if (!task) {
-      return {
-        result: false,
-        message: `No scheduled job with id '${input.id}'`,
-        errorCode: 1,
-      }
+  create(_deps) {
+    return {
+      async validateInput(input): Promise<ValidationResult> {
+        const tasks = await listAllCronTasks()
+        const task = tasks.find(t => t.id === input.id)
+        if (!task) {
+          return {
+            result: false,
+            message: `No scheduled job with id '${input.id}'`,
+            errorCode: 1,
+          }
+        }
+        // Teammates may only delete their own crons.
+        const ctx = getTeammateContext()
+        if (ctx && task.agentId !== ctx.agentId) {
+          return {
+            result: false,
+            message: `Cannot delete cron job '${input.id}': owned by another agent`,
+            errorCode: 2,
+          }
+        }
+        return { result: true }
+      },
+      async call({ id }) {
+        await removeCronTasks([id])
+        return { data: { id } }
+      },
     }
-    // Teammates may only delete their own crons.
-    const ctx = getTeammateContext()
-    if (ctx && task.agentId !== ctx.agentId) {
-      return {
-        result: false,
-        message: `Cannot delete cron job '${input.id}': owned by another agent`,
-        errorCode: 2,
-      }
-    }
-    return { result: true }
-  },
-  async call({ id }) {
-    await removeCronTasks([id])
-    return { data: { id } }
   },
   mapToolResultToToolResultBlockParam(output, toolUseID) {
     return {
@@ -93,3 +107,26 @@ export const CronDeleteTool = buildTool({
   renderToolUseMessage: renderDeleteToolUseMessage,
   renderToolResultMessage: renderDeleteResultMessage,
 } satisfies ToolDef<InputSchema, DeleteOutput>)
+
+export const CronDeleteTool: Omit<typeof builtCronDeleteTool, 'call'> & {
+  call(
+    args: z.infer<InputSchema>,
+    context?: ToolUseContext,
+    canUseTool?: CanUseToolFn,
+    parentMessage?: AssistantMessage,
+    onProgress?: ToolCallProgress<ToolProgressData>,
+    opts?: ToolCallExecutionOptions,
+  ): Promise<ToolResult<DeleteOutput>>
+} = builtCronDeleteTool as unknown as Omit<
+  typeof builtCronDeleteTool,
+  'call'
+> & {
+  call(
+    args: z.infer<InputSchema>,
+    context?: ToolUseContext,
+    canUseTool?: CanUseToolFn,
+    parentMessage?: AssistantMessage,
+    onProgress?: ToolCallProgress<ToolProgressData>,
+    opts?: ToolCallExecutionOptions,
+  ): Promise<ToolResult<DeleteOutput>>
+}

@@ -4,8 +4,7 @@ import {
   getAllowedChannels,
   handlePlanModeTransition,
 } from 'src/bootstrap/state.js'
-import type { Tool } from 'src/Tool.js'
-import { buildTool, type ToolDef } from 'src/Tool.js'
+import { buildTool, type ToolDef, type ToolDeps } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { applyPermissionUpdate } from 'src/utils/permissions/PermissionUpdate.js'
 import { prepareContextForPlanMode } from 'src/utils/permissions/permissionSetup.js'
@@ -33,7 +32,7 @@ const outputSchema = lazySchema(() =>
 type OutputSchema = ReturnType<typeof outputSchema>
 export type Output = z.infer<OutputSchema>
 
-export const EnterPlanModeTool: Tool<InputSchema, Output> = buildTool({
+export const EnterPlanModeTool = buildTool({
   name: ENTER_PLAN_MODE_TOOL_NAME,
   searchHint: 'switch to plan mode to design an approach before coding',
   maxResultSizeChars: 100_000,
@@ -74,29 +73,42 @@ export const EnterPlanModeTool: Tool<InputSchema, Output> = buildTool({
   renderToolUseMessage,
   renderToolResultMessage,
   renderToolUseRejectedMessage,
-  async call(_input, context) {
-    if (context.agentId) {
-      throw new Error('EnterPlanMode tool cannot be used in agent contexts')
-    }
-
-    const appState = context.getAppState()
-    handlePlanModeTransition(appState.toolPermissionContext.mode, 'plan')
-
-    // Update the permission mode to 'plan'. prepareContextForPlanMode runs
-    // the classifier activation side effects when the user's defaultMode is
-    // 'auto' — see permissionSetup.ts for the full lifecycle.
-    context.setAppState(prev => ({
-      ...prev,
-      toolPermissionContext: applyPermissionUpdate(
-        prepareContextForPlanMode(prev.toolPermissionContext),
-        { type: 'setMode', mode: 'plan', destination: 'session' },
-      ),
-    }))
-
+  create(deps: ToolDeps) {
     return {
-      data: {
-        message:
-          'Entered plan mode. You should now focus on exploring the codebase and designing an implementation approach.',
+      async call() {
+        if (deps.agentId) {
+          throw new Error('EnterPlanMode tool cannot be used in agent contexts')
+        }
+
+        handlePlanModeTransition(deps.permissions().mode, 'plan')
+
+        // Update the permission mode to 'plan'. prepareContextForPlanMode runs
+        // the classifier activation side effects when the user's defaultMode is
+        // 'auto' — see permissionSetup.ts for the full lifecycle.
+        if (deps.setToolPermissionContext) {
+          deps.setToolPermissionContext(prev =>
+            applyPermissionUpdate(prepareContextForPlanMode(prev), {
+              type: 'setMode',
+              mode: 'plan',
+              destination: 'session',
+            }),
+          )
+        } else {
+          deps.setAppState(prev => ({
+            ...prev,
+            toolPermissionContext: applyPermissionUpdate(
+              prepareContextForPlanMode(prev.toolPermissionContext),
+              { type: 'setMode', mode: 'plan', destination: 'session' },
+            ),
+          }))
+        }
+
+        return {
+          data: {
+            message:
+              'Entered plan mode. You should now focus on exploring the codebase and designing an implementation approach.',
+          },
+        }
       },
     }
   },

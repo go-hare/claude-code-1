@@ -10,7 +10,14 @@ import {
   fileHistoryTrackEdit,
 } from 'src/utils/fileHistory.js'
 import { z } from 'zod/v4'
-import { buildTool, type ToolDef, type ToolUseContext } from 'src/Tool.js'
+import {
+  buildTool,
+  isNativeToolDisabledInThisProcess,
+  sanitizeRemoteWireText,
+  type ToolDef,
+  type ToolDeps,
+  type ToolResult,
+} from 'src/Tool.js'
 import type { NotebookCell, NotebookContent } from 'src/types/notebook.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { checkBgIsolationWriteBlock } from 'src/utils/bgIsolationContainment.js'
@@ -76,6 +83,10 @@ export const outputSchema = lazySchema(() =>
     new_source: z
       .string()
       .describe('The new source code that was written to the cell'),
+    old_source: z
+      .string()
+      .optional()
+      .describe('The previous cell source before modification'),
     cell_id: z
       .string()
       .optional()
@@ -100,6 +111,31 @@ export const outputSchema = lazySchema(() =>
 type OutputSchema = ReturnType<typeof outputSchema>
 
 export type Output = z.infer<OutputSchema>
+
+const MAX_REMOTE_NOTEBOOK_CELL_ID_CHARS = 200
+const MAX_REMOTE_NOTEBOOK_ERROR_CHARS = 2000
+const MAX_REMOTE_NOTEBOOK_OLD_SOURCE_CHARS = 100_000
+
+/**
+ * Official 2.1.331 cross-process wire output schema for NotebookEditTool:
+ * makes host-derived / bulky fields optional on the wire and strips unknown
+ * keys; `fromAnotherProcess` restores trusted host input fields, sanitizes
+ * remote strings, caps `old_source`, and clears full-file diff payloads.
+ */
+const outputSchemaAcrossProcesses = lazySchema(() =>
+  outputSchema()
+    .extend({
+      notebook_path: z.string().optional(),
+      new_source: z.string().optional(),
+      edit_mode: z.string().optional(),
+      original_file: z.string().optional(),
+      updated_file: z.string().optional(),
+    })
+    .strip(),
+)
+type OutputSchemaAcrossProcesses = ReturnType<
+  typeof outputSchemaAcrossProcesses
+>
 
 /**
  * Official 2.1.321 #1914 (`uT` / ToolExecutionError): thrown on all
@@ -177,6 +213,48 @@ export const NotebookEditTool = buildTool({
   get outputSchema(): OutputSchema {
     return outputSchema()
   },
+  get outputSchemaAcrossProcesses(): OutputSchemaAcrossProcesses {
+    return outputSchemaAcrossProcesses()
+  },
+  fromAnotherProcess(data, input) {
+    const sanitizedCellId =
+      typeof data.cell_id === 'string'
+        ? sanitizeRemoteWireText(
+            data.cell_id,
+            MAX_REMOTE_NOTEBOOK_CELL_ID_CHARS,
+          )
+        : undefined
+    const sanitizedError =
+      typeof data.error === 'string'
+        ? sanitizeRemoteWireText(data.error, MAX_REMOTE_NOTEBOOK_ERROR_CHARS)
+        : undefined
+    const cappedOldSource =
+      typeof data.old_source === 'string'
+        ? data.old_source.length > MAX_REMOTE_NOTEBOOK_OLD_SOURCE_CHARS
+          ? data.old_source.slice(0, MAX_REMOTE_NOTEBOOK_OLD_SOURCE_CHARS)
+          : data.old_source
+        : undefined
+
+    return {
+      data: {
+        cell_type: data.cell_type,
+        language: sanitizeRemoteWireText(
+          data.language,
+          MAX_REMOTE_NOTEBOOK_CELL_ID_CHARS,
+        ),
+        notebook_path: String(input.notebook_path ?? ''),
+        new_source: String(input.new_source ?? ''),
+        edit_mode: input.edit_mode ?? 'replace',
+        ...(sanitizedCellId !== undefined ? { cell_id: sanitizedCellId } : {}),
+        ...(sanitizedError !== undefined ? { error: sanitizedError } : {}),
+        ...(cappedOldSource !== undefined
+          ? { old_source: cappedOldSource }
+          : {}),
+        original_file: '',
+        updated_file: '',
+      },
+    }
+  },
   toAutoClassifierInput(input) {
     if (feature('TRANSCRIPT_CLASSIFIER')) {
       const mode = input.edit_mode ?? 'replace'
@@ -202,6 +280,9 @@ export const NotebookEditTool = buildTool({
     return ''
   },
   getPath(input): string {
+    if (isNativeToolDisabledInThisProcess(NOTEBOOK_EDIT_TOOL_NAME)) {
+      return input.notebook_path ?? ''
+    }
     return input.notebook_path
   },
   async preparePermissionMatcher({ notebook_path }) {
@@ -209,15 +290,6 @@ export const NotebookEditTool = buildTool({
     const { matchesPathRule } =
       require('src/utils/permissions/filesystem.js') as typeof import('src/utils/permissions/filesystem.js')
     return (pattern: string) => matchesPathRule(pattern, notebook_path)
-  },
-  async checkPermissions(input, context): Promise<PermissionDecision> {
-    noteApprovedFileToolPath(input.notebook_path, context.toolUseId)
-    const appState = context.getAppState()
-    return checkWritePermissionForTool(
-      NotebookEditTool,
-      input,
-      appState.toolPermissionContext,
-    )
   },
   mapToolResultToToolResultBlockParam(
     { cell_id, edit_mode, new_source, error },
@@ -262,351 +334,370 @@ export const NotebookEditTool = buildTool({
   renderToolUseRejectedMessage,
   renderToolUseErrorMessage,
   renderToolResultMessage,
-  async validateInput(
-    { notebook_path, cell_type, cell_id, edit_mode = 'replace' },
-    toolUseContext: ToolUseContext,
-  ) {
-    const fullPath = isAbsolute(notebook_path)
-      ? notebook_path
-      : resolve(getCwd(), notebook_path)
+  create(deps: ToolDeps) {
+    return {
+      async checkPermissions(input, callCtx): Promise<PermissionDecision> {
+        noteApprovedFileToolPath(input.notebook_path, callCtx.toolUseId)
+        return checkWritePermissionForTool(
+          NotebookEditTool,
+          input,
+          deps.permissions(),
+        )
+      },
+      async validateInput({
+        notebook_path,
+        cell_type,
+        cell_id,
+        edit_mode = 'replace',
+      }) {
+        const fullPath = isAbsolute(notebook_path)
+          ? notebook_path
+          : resolve(getCwd(), notebook_path)
 
-    // densable 2.1.217 #5 hsr — bg / worktree isolation containment (errorCode 12)
-    const isolationBlock = checkBgIsolationWriteBlock(fullPath, {
-      agentId: toolUseContext.agentId,
-      agentWorktree: toolUseContext.agentWorktree,
-    })
-    if (isolationBlock) {
-      return { result: false, message: isolationBlock, errorCode: 12 }
-    }
-
-    // SECURITY: Skip filesystem operations for UNC paths to prevent NTLM credential leaks.
-    if (fullPath.startsWith('\\\\') || fullPath.startsWith('//')) {
-      return { result: true }
-    }
-
-    if (extname(fullPath) !== '.ipynb') {
-      return {
-        result: false,
-        message:
-          'File must be a Jupyter notebook (.ipynb file). For editing other file types, use the FileEdit tool.',
-        errorCode: 2,
-      }
-    }
-
-    if (
-      edit_mode !== 'replace' &&
-      edit_mode !== 'insert' &&
-      edit_mode !== 'delete'
-    ) {
-      return {
-        result: false,
-        message: 'Edit mode must be replace, insert, or delete.',
-        errorCode: 4,
-      }
-    }
-
-    if (edit_mode === 'insert' && !cell_type) {
-      return {
-        result: false,
-        message: 'Cell type is required when using edit_mode=insert.',
-        errorCode: 5,
-      }
-    }
-
-    // Require Read-before-Edit (matches FileEditTool/FileWriteTool). Without
-    // this, the model could edit a notebook it never saw, or edit against a
-    // stale view after an external change — silent data loss.
-    const readTimestamp = toolUseContext.readFileState.get(fullPath)
-    if (!readTimestamp) {
-      return {
-        result: false,
-        message:
-          'File has not been read yet. Read it first before writing to it.',
-        errorCode: 9,
-      }
-    }
-    if (getFileModificationTime(fullPath) > readTimestamp.timestamp) {
-      return {
-        result: false,
-        message:
-          'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
-        errorCode: 10,
-      }
-    }
-
-    let content: string
-    try {
-      const rawBytes = readFileSync(fullPath)
-      const detected = detectBufferTextEncoding(rawBytes)
-      if (detected.notText) {
-        return {
-          result: false,
-          message: formatNonTextFileRefusal(detected.notText),
-          errorCode: 15,
+        // densable 2.1.217 #5 hsr — bg / worktree isolation containment (errorCode 12)
+        // Official 2.1.331: deps.agentWorktree (projected from toolUseContext.agentWorktree)
+        const isolationBlock = checkBgIsolationWriteBlock(fullPath, {
+          agentId: deps.agentId,
+          agentWorktree: deps.agentWorktree,
+        })
+        if (isolationBlock) {
+          return { result: false, message: isolationBlock, errorCode: 12 }
         }
-      }
-      content = readFileSyncWithMetadata(fullPath).content
-    } catch (e) {
-      if (isENOENT(e)) {
-        return {
-          result: false,
-          message: 'Notebook file does not exist.',
-          errorCode: 1,
-        }
-      }
-      throw e
-    }
-    const notebook = safeParseJSON(content) as NotebookContent | null
-    if (!notebook) {
-      return {
-        result: false,
-        message: 'Notebook is not valid JSON.',
-        errorCode: 6,
-      }
-    }
-    if (!cell_id) {
-      if (edit_mode !== 'insert') {
-        return {
-          result: false,
-          message: 'Cell ID must be specified when not inserting a new cell.',
-          errorCode: 7,
-        }
-      }
-    } else {
-      // First try to find the cell by its actual ID
-      const cellIndex = notebook.cells.findIndex(
-        (cell: NotebookCell) => cell.id === cell_id,
-      )
 
-      if (cellIndex === -1) {
-        // If not found, try to parse as a numeric index (cell-N format)
-        const parsedCellIndex = parseCellId(cell_id)
-        if (parsedCellIndex !== undefined) {
-          if (!notebook.cells[parsedCellIndex]) {
+        // SECURITY: Skip filesystem operations for UNC paths to prevent NTLM credential leaks.
+        if (fullPath.startsWith('\\\\') || fullPath.startsWith('//')) {
+          return { result: true }
+        }
+
+        if (extname(fullPath) !== '.ipynb') {
+          return {
+            result: false,
+            message:
+              'File must be a Jupyter notebook (.ipynb file). For editing other file types, use the FileEdit tool.',
+            errorCode: 2,
+          }
+        }
+
+        if (
+          edit_mode !== 'replace' &&
+          edit_mode !== 'insert' &&
+          edit_mode !== 'delete'
+        ) {
+          return {
+            result: false,
+            message: 'Edit mode must be replace, insert, or delete.',
+            errorCode: 4,
+          }
+        }
+
+        if (edit_mode === 'insert' && !cell_type) {
+          return {
+            result: false,
+            message: 'Cell type is required when using edit_mode=insert.',
+            errorCode: 5,
+          }
+        }
+
+        // Require Read-before-Edit (matches FileEditTool/FileWriteTool). Without
+        // this, the model could edit a notebook it never saw, or edit against a
+        // stale view after an external change — silent data loss.
+        const readTimestamp = deps.readFileState.get(fullPath)
+        if (!readTimestamp) {
+          return {
+            result: false,
+            message:
+              'File has not been read yet. Read it first before writing to it.',
+            errorCode: 9,
+          }
+        }
+        if (getFileModificationTime(fullPath) > readTimestamp.timestamp) {
+          return {
+            result: false,
+            message:
+              'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
+            errorCode: 10,
+          }
+        }
+
+        let content: string
+        try {
+          const rawBytes = readFileSync(fullPath)
+          const detected = detectBufferTextEncoding(rawBytes)
+          if (detected.notText) {
             return {
               result: false,
-              message: `Cell with index ${parsedCellIndex} does not exist in notebook.`,
+              message: formatNonTextFileRefusal(detected.notText),
+              errorCode: 15,
+            }
+          }
+          content = readFileSyncWithMetadata(fullPath).content
+        } catch (e) {
+          if (isENOENT(e)) {
+            return {
+              result: false,
+              message: 'Notebook file does not exist.',
+              errorCode: 1,
+            }
+          }
+          throw e
+        }
+        const notebook = safeParseJSON(content) as NotebookContent | null
+        if (!notebook) {
+          return {
+            result: false,
+            message: 'Notebook is not valid JSON.',
+            errorCode: 6,
+          }
+        }
+        if (!cell_id) {
+          if (edit_mode !== 'insert') {
+            return {
+              result: false,
+              message:
+                'Cell ID must be specified when not inserting a new cell.',
               errorCode: 7,
             }
           }
         } else {
-          return {
-            result: false,
-            message: `Cell with ID "${cell_id}" not found in notebook.`,
-            errorCode: 8,
-          }
-        }
-      }
-    }
-
-    return { result: true }
-  },
-  async call(
-    {
-      notebook_path,
-      new_source,
-      cell_id,
-      cell_type,
-      edit_mode: originalEditMode,
-    },
-    toolUseContext: ToolUseContext,
-    _,
-    parentMessage,
-  ) {
-    const { readFileState, updateFileHistoryState } = toolUseContext
-    const fullPath = isAbsolute(notebook_path)
-      ? notebook_path
-      : resolve(getCwd(), notebook_path)
-    const outsideWriteBlock = checkBlockWritesOutsideWorkingDirectories(
-      fullPath,
-      toolUseContext.getAppState().toolPermissionContext,
-    )
-    if (outsideWriteBlock !== undefined) {
-      throw new Error(outsideWriteBlock)
-    }
-    const approved = takeApprovedFileToolPath(
-      fullPath,
-      toolUseContext.toolUseId,
-      'write',
-    )
-    const openedWrite = await openApprovedWrite(fullPath, approved, {
-      createParents: true,
-      leaf: 'replace',
-    })
-
-    try {
-      if (fileHistoryEnabled()) {
-        await fileHistoryTrackEdit(
-          updateFileHistoryState,
-          fullPath,
-          parentMessage.uuid,
-        )
-      }
-
-      // readFileSyncWithMetadata gives content + encoding + line endings in
-      // one safeResolvePath + readFileSync pass, replacing the previous
-      // detectFileEncoding + readFile + detectLineEndings chain.
-      let rawBytes: Buffer
-      try {
-        rawBytes = readFileSync(openedWrite.ioPath)
-      } catch (readErr) {
-        const msg = readErr instanceof Error ? readErr.message : String(readErr)
-        if ((readErr as NodeJS.ErrnoException)?.code === 'ENOENT') {
-          throw new NotebookEditExecutionError('Notebook file does not exist.')
-        }
-        throw new NotebookEditExecutionError(msg)
-      }
-      const detected = detectBufferTextEncoding(rawBytes)
-      if (detected.notText) {
-        throw new NotebookEditExecutionError(
-          formatNonTextFileRefusal(detected.notText),
-        )
-      }
-      const { content, encoding, lineEndings } = readFileSyncWithMetadata(
-        openedWrite.ioPath,
-      )
-      const currentMtime = getFileModificationTime(openedWrite.ioPath)
-
-      // Must use non-memoized jsonParse here: safeParseJSON caches by content
-      // string and returns a shared object reference, but we mutate the
-      // notebook in place below (cells.splice, targetCell.source = ...).
-      let notebook: NotebookContent
-      try {
-        notebook = jsonParse(content) as NotebookContent
-      } catch {
-        throw new NotebookEditExecutionError('Notebook is not valid JSON.')
-      }
-      if (!notebook || !Array.isArray(notebook.cells)) {
-        throw new NotebookEditExecutionError(
-          'Notebook file is not a valid Jupyter notebook (top-level "cells" must be an array of cell objects, each with a string or string-array "source").',
-        )
-      }
-
-      // Official 2.1.319 #1744: re-check mtime in call() after any permission
-      // prompt so a concurrent edit while the prompt was open cannot target
-      // the wrong cell.
-      const lastRead = readFileState.get(fullPath)
-      if (lastRead !== undefined && currentMtime > lastRead.timestamp) {
-        throw new NotebookEditExecutionError(
-          'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
-        )
-      }
-
-      // Official 2.1.321 #1854 (`Crn`): validate cell_id in call() as well as
-      // validateInput() so network-path calls never default to cell 0 on
-      // delete/replace when cell_id is omitted or invalid.
-      const resolvedIndex = resolveNotebookCellIndex(
-        notebook.cells,
-        cell_id,
-        originalEditMode ?? 'replace',
-      )
-      if (typeof resolvedIndex !== 'number') {
-        throw new NotebookEditExecutionError(resolvedIndex.message)
-      }
-      const cellIndex = resolvedIndex
-      const edit_mode = originalEditMode ?? 'replace'
-
-      const language = notebook.metadata?.language_info?.name ?? 'python'
-      let new_cell_id: string | undefined
-      if (
-        (notebook.nbformat ?? 4) > 4 ||
-        ((notebook.nbformat ?? 4) === 4 && (notebook.nbformat_minor ?? 0) >= 5)
-      ) {
-        if (edit_mode === 'insert') {
-          new_cell_id = Math.random().toString(36).substring(2, 15)
-        } else if (cell_id !== null) {
-          new_cell_id = cell_id
-        }
-      }
-
-      if (edit_mode === 'delete') {
-        notebook.cells.splice(cellIndex, 1)
-      } else if (edit_mode === 'insert') {
-        let new_cell: NotebookCell
-        if (cell_type === 'markdown') {
-          new_cell = {
-            cell_type: 'markdown',
-            id: new_cell_id,
-            source: new_source,
-            metadata: {},
-          }
-        } else {
-          new_cell = {
-            cell_type: 'code',
-            id: new_cell_id,
-            source: new_source,
-            metadata: {},
-            execution_count: null,
-            outputs: [],
-          }
-        }
-        notebook.cells.splice(cellIndex, 0, new_cell)
-      } else {
-        const targetCell = notebook.cells[cellIndex]
-        if (!targetCell) {
-          throw new NotebookEditExecutionError(
-            `Cell with index ${cellIndex} does not exist in notebook.`,
+          // First try to find the cell by its actual ID
+          const cellIndex = notebook.cells.findIndex(
+            (cell: NotebookCell) => cell.id === cell_id,
           )
+
+          if (cellIndex === -1) {
+            // If not found, try to parse as a numeric index (cell-N format)
+            const parsedCellIndex = parseCellId(cell_id)
+            if (parsedCellIndex !== undefined) {
+              if (!notebook.cells[parsedCellIndex]) {
+                return {
+                  result: false,
+                  message: `Cell with index ${parsedCellIndex} does not exist in notebook.`,
+                  errorCode: 7,
+                }
+              }
+            } else {
+              return {
+                result: false,
+                message: `Cell with ID "${cell_id}" not found in notebook.`,
+                errorCode: 8,
+              }
+            }
+          }
         }
-        targetCell.source = new_source
-        if (targetCell.cell_type === 'code') {
-          targetCell.execution_count = null
-          targetCell.outputs = []
+
+        return { result: true }
+      },
+      async call(
+        {
+          notebook_path,
+          new_source,
+          cell_id,
+          cell_type,
+          edit_mode: originalEditMode,
+        },
+        callCtx,
+      ): Promise<ToolResult<Output>> {
+        const { readFileState, updateFileHistoryState } = deps
+        const { parentMessage, toolUseId } = callCtx
+        const fullPath = isAbsolute(notebook_path)
+          ? notebook_path
+          : resolve(getCwd(), notebook_path)
+        const outsideWriteBlock = checkBlockWritesOutsideWorkingDirectories(
+          fullPath,
+          deps.permissions(),
+        )
+        if (outsideWriteBlock !== undefined) {
+          throw new Error(outsideWriteBlock)
         }
-        if (cell_type && cell_type !== targetCell.cell_type) {
-          targetCell.cell_type = cell_type
+        const approved = takeApprovedFileToolPath(fullPath, toolUseId, 'write')
+        const openedWrite = await openApprovedWrite(fullPath, approved, {
+          createParents: true,
+          leaf: 'replace',
+        })
+
+        try {
+          if (
+            fileHistoryEnabled() &&
+            updateFileHistoryState &&
+            parentMessage?.uuid
+          ) {
+            await fileHistoryTrackEdit(
+              updateFileHistoryState,
+              fullPath,
+              parentMessage.uuid,
+            )
+          }
+
+          // readFileSyncWithMetadata gives content + encoding + line endings in
+          // one safeResolvePath + readFileSync pass, replacing the previous
+          // detectFileEncoding + readFile + detectLineEndings chain.
+          let rawBytes: Buffer
+          try {
+            rawBytes = readFileSync(openedWrite.ioPath)
+          } catch (readErr) {
+            const msg =
+              readErr instanceof Error ? readErr.message : String(readErr)
+            if ((readErr as NodeJS.ErrnoException)?.code === 'ENOENT') {
+              throw new NotebookEditExecutionError(
+                'Notebook file does not exist.',
+              )
+            }
+            throw new NotebookEditExecutionError(msg)
+          }
+          const detected = detectBufferTextEncoding(rawBytes)
+          if (detected.notText) {
+            throw new NotebookEditExecutionError(
+              formatNonTextFileRefusal(detected.notText),
+            )
+          }
+          const { content, encoding, lineEndings } = readFileSyncWithMetadata(
+            openedWrite.ioPath,
+          )
+          const currentMtime = getFileModificationTime(openedWrite.ioPath)
+
+          // Must use non-memoized jsonParse here: safeParseJSON caches by content
+          // string and returns a shared object reference, but we mutate the
+          // notebook in place below (cells.splice, targetCell.source = ...).
+          let notebook: NotebookContent
+          try {
+            notebook = jsonParse(content) as NotebookContent
+          } catch {
+            throw new NotebookEditExecutionError('Notebook is not valid JSON.')
+          }
+          if (!notebook || !Array.isArray(notebook.cells)) {
+            throw new NotebookEditExecutionError(
+              'Notebook file is not a valid Jupyter notebook (top-level "cells" must be an array of cell objects, each with a string or string-array "source").',
+            )
+          }
+
+          // Official 2.1.319 #1744: re-check mtime in call() after any permission
+          // prompt so a concurrent edit while the prompt was open cannot target
+          // the wrong cell.
+          const lastRead = readFileState.get(fullPath)
+          if (lastRead !== undefined && currentMtime > lastRead.timestamp) {
+            throw new NotebookEditExecutionError(
+              'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
+            )
+          }
+
+          // Official 2.1.321 #1854 (`Crn`): validate cell_id in call() as well as
+          // validateInput() so network-path calls never default to cell 0 on
+          // delete/replace when cell_id is omitted or invalid.
+          const resolvedIndex = resolveNotebookCellIndex(
+            notebook.cells,
+            cell_id,
+            originalEditMode ?? 'replace',
+          )
+          if (typeof resolvedIndex !== 'number') {
+            throw new NotebookEditExecutionError(resolvedIndex.message)
+          }
+          const cellIndex = resolvedIndex
+          const edit_mode = originalEditMode ?? 'replace'
+
+          const language = notebook.metadata?.language_info?.name ?? 'python'
+          let new_cell_id: string | undefined
+          if (
+            (notebook.nbformat ?? 4) > 4 ||
+            ((notebook.nbformat ?? 4) === 4 &&
+              (notebook.nbformat_minor ?? 0) >= 5)
+          ) {
+            if (edit_mode === 'insert') {
+              new_cell_id = Math.random().toString(36).substring(2, 15)
+            } else if (cell_id !== null) {
+              new_cell_id = cell_id
+            }
+          }
+
+          if (edit_mode === 'delete') {
+            notebook.cells.splice(cellIndex, 1)
+          } else if (edit_mode === 'insert') {
+            let new_cell: NotebookCell
+            if (cell_type === 'markdown') {
+              new_cell = {
+                cell_type: 'markdown',
+                id: new_cell_id,
+                source: new_source,
+                metadata: {},
+              }
+            } else {
+              new_cell = {
+                cell_type: 'code',
+                id: new_cell_id,
+                source: new_source,
+                metadata: {},
+                execution_count: null,
+                outputs: [],
+              }
+            }
+            notebook.cells.splice(cellIndex, 0, new_cell)
+          } else {
+            const targetCell = notebook.cells[cellIndex]
+            if (!targetCell) {
+              throw new NotebookEditExecutionError(
+                `Cell with index ${cellIndex} does not exist in notebook.`,
+              )
+            }
+            targetCell.source = new_source
+            if (targetCell.cell_type === 'code') {
+              targetCell.execution_count = null
+              targetCell.outputs = []
+            }
+            if (cell_type && cell_type !== targetCell.cell_type) {
+              targetCell.cell_type = cell_type
+            }
+          }
+          // Write back to file, preserving the original trailing newline (#416).
+          const IPYNB_INDENT = 1
+          const updatedContent =
+            jsonStringify(notebook, null, IPYNB_INDENT) +
+            (content.endsWith('\n') ? '\n' : '')
+          await openedWrite.recheckBeforeWrite()
+          writeTextContent(
+            openedWrite.ioPath,
+            updatedContent,
+            encoding,
+            lineEndings,
+          )
+          readFileState.set(fullPath, {
+            content: updatedContent,
+            timestamp: getFileModificationTime(fullPath),
+            offset: undefined,
+            limit: undefined,
+          })
+          const data = {
+            new_source,
+            cell_type: cell_type ?? 'code',
+            language,
+            edit_mode,
+            cell_id: new_cell_id || undefined,
+            error: '',
+            notebook_path: fullPath,
+            original_file: content,
+            updated_file: updatedContent,
+          }
+          return {
+            data,
+          }
+        } catch (error) {
+          // Official 2.1.321 #1914: throw ToolExecutionError on all failures rather
+          // than returning a success payload with `error` set.
+          if (error instanceof NotebookEditExecutionError) {
+            throw error
+          }
+          if (error instanceof Error) {
+            const msg =
+              openedWrite.ioPath !== fullPath
+                ? error.message.split(openedWrite.ioPath).join(fullPath)
+                : error.message
+            throw new NotebookEditExecutionError(msg)
+          }
+          throw new NotebookEditExecutionError(
+            'Unknown error occurred while editing notebook',
+          )
+        } finally {
+          await openedWrite.close()
         }
-      }
-      // Write back to file, preserving the original trailing newline (#416).
-      const IPYNB_INDENT = 1
-      const updatedContent =
-        jsonStringify(notebook, null, IPYNB_INDENT) +
-        (content.endsWith('\n') ? '\n' : '')
-      await openedWrite.recheckBeforeWrite()
-      writeTextContent(
-        openedWrite.ioPath,
-        updatedContent,
-        encoding,
-        lineEndings,
-      )
-      readFileState.set(fullPath, {
-        content: updatedContent,
-        timestamp: getFileModificationTime(fullPath),
-        offset: undefined,
-        limit: undefined,
-      })
-      const data = {
-        new_source,
-        cell_type: cell_type ?? 'code',
-        language,
-        edit_mode,
-        cell_id: new_cell_id || undefined,
-        error: '',
-        notebook_path: fullPath,
-        original_file: content,
-        updated_file: updatedContent,
-      }
-      return {
-        data,
-      }
-    } catch (error) {
-      // Official 2.1.321 #1914: throw ToolExecutionError on all failures rather
-      // than returning a success payload with `error` set.
-      if (error instanceof NotebookEditExecutionError) {
-        throw error
-      }
-      if (error instanceof Error) {
-        const msg =
-          openedWrite.ioPath !== fullPath
-            ? error.message.split(openedWrite.ioPath).join(fullPath)
-            : error.message
-        throw new NotebookEditExecutionError(msg)
-      }
-      throw new NotebookEditExecutionError(
-        'Unknown error occurred while editing notebook',
-      )
-    } finally {
-      await openedWrite.close()
+      },
     }
   },
 } satisfies ToolDef<InputSchema, Output>)

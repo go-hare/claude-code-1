@@ -1,5 +1,10 @@
 import { z } from 'zod/v4'
-import { buildTool, type ToolResultBlockParam } from 'src/Tool.js'
+import {
+  buildTool,
+  type ToolDef,
+  type ToolDeps,
+  type ToolResultBlockParam,
+} from 'src/Tool.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -217,16 +222,11 @@ function extractMediaFromCommands(
   )
 }
 
-function getLiveTasksFromContext(context: {
-  getAppState?: () => {
-    tasks?: Record<
-      string,
-      { status?: string; type?: string; description?: string }
-    >
-  }
-}): string[] {
+function getLiveTasksFromDeps(deps: ToolDeps): string[] {
   try {
-    const tasks = context.getAppState?.()?.tasks
+    const tasks = deps.tasks() as
+      | Record<string, { status?: string; type?: string; description?: string }>
+      | undefined
     if (!tasks) return []
     const running: string[] = []
     for (const task of Object.values(tasks)) {
@@ -427,47 +427,51 @@ export const PollTool = buildTool({
   renderToolUseMessage() {
     return ''
   },
-  async call(_input, context) {
-    const agentId = context.agentId
-    if (agentId !== undefined) {
-      throw new Error(
-        codeModeOptIn.isCodeModeEnabled()
-          ? `${POLL_TOOL_NAME} isn't available here and isn't needed: each REPL call you make here waits for its script to finish and returns the result.`
-          : 'Poll is available on the main thread only',
-      )
-    }
+  create(deps: ToolDeps) {
+    return {
+      async call(_input, callCtx) {
+        const agentId = deps.agentId
+        if (agentId !== undefined) {
+          throw new Error(
+            codeModeOptIn.isCodeModeEnabled()
+              ? `${POLL_TOOL_NAME} isn't available here and isn't needed: each REPL call you make here waits for its script to finish and returns the result.`
+              : 'Poll is available on the main thread only',
+          )
+        }
 
-    if (!tryBeginPollCall(agentId)) {
-      emitPollCallEndTelemetry('duplicate_call', 0, 0)
-      return {
-        data: {
-          content: NO_PENDING_EVENTS,
-          eventCount: 0,
-          remainingWakeCount: 0,
-        },
-      }
-    }
+        if (!tryBeginPollCall(agentId)) {
+          emitPollCallEndTelemetry('duplicate_call', 0, 0)
+          return {
+            data: {
+              content: NO_PENDING_EVENTS,
+              eventCount: 0,
+              remainingWakeCount: 0,
+            },
+          }
+        }
 
-    const startedAt = Date.now()
-    const replSessions = getDefaultReplSessions()
-    try {
-      const result = await runPollWaitLoop({
-        signal: context.abortController?.signal,
-        replSessions,
-        agentId,
-        liveTasks: () => getLiveTasksFromContext(context),
-      })
-      emitPollCallEndTelemetry(
-        result.endReason,
-        Date.now() - startedAt,
-        result.endReason === 'delivered' ? result.data.eventCount : 0,
-      )
-      if (result.data.eventCount > 0) {
-        replSessions?.takeUnwaited(MAIN_THREAD_KEY)
-      }
-      return { data: result.data }
-    } finally {
-      endPollCall(agentId)
+        const startedAt = Date.now()
+        const replSessions = getDefaultReplSessions()
+        try {
+          const result = await runPollWaitLoop({
+            signal: callCtx.signal,
+            replSessions,
+            agentId,
+            liveTasks: () => getLiveTasksFromDeps(deps),
+          })
+          emitPollCallEndTelemetry(
+            result.endReason,
+            Date.now() - startedAt,
+            result.endReason === 'delivered' ? result.data.eventCount : 0,
+          )
+          if (result.data.eventCount > 0) {
+            replSessions?.takeUnwaited(MAIN_THREAD_KEY)
+          }
+          return { data: result.data }
+        } finally {
+          endPollCall(agentId)
+        }
+      },
     }
   },
-})
+} satisfies ToolDef<InputSchema, PollOutput>)

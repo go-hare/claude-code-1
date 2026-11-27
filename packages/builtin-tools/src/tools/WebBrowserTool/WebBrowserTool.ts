@@ -1,6 +1,16 @@
 import { z } from 'zod/v4'
-import type { ToolResultBlockParam } from 'src/Tool.js'
+import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js'
+import type {
+  ToolCallExecutionOptions,
+  ToolCallProgress,
+  ToolDef,
+  ToolProgressData,
+  ToolResult,
+  ToolResultBlockParam,
+  ToolUseContext,
+} from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
+import type { AssistantMessage } from 'src/types/message.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 
 const WEB_BROWSER_TOOL_NAME = 'WebBrowser'
@@ -26,7 +36,7 @@ type BrowserOutput = {
   screenshot?: string
 }
 
-export const WebBrowserTool = buildTool({
+const builtWebBrowserTool = buildTool({
   name: WEB_BROWSER_TOOL_NAME,
   searchHint: 'web browser navigate url page screenshot click',
   maxResultSizeChars: 100_000,
@@ -84,86 +94,114 @@ Use this for:
     }
   },
 
-  async call(input: BrowserInput) {
-    const action = input.action ?? 'navigate'
-
-    if (action === 'navigate' || action === 'screenshot') {
-      // Fetch the page content via HTTP
-      try {
-        const response = await fetch(input.url, {
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            Accept:
-              'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          },
-          redirect: 'follow',
-        })
-
-        if (!response.ok) {
-          return {
-            data: {
-              title: `HTTP ${response.status}`,
-              url: input.url,
-              content: `Error: ${response.status} ${response.statusText}`,
-            },
-          }
-        }
-
-        const html = await response.text()
-
-        // Extract title
-        const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i)
-        const title = titleMatch?.[1]?.trim() ?? ''
-
-        // Extract text content (strip HTML tags, scripts, styles)
-        let textContent = html
-          .replace(/<script[\s\S]*?<\/script>/gi, '')
-          .replace(/<style[\s\S]*?<\/style>/gi, '')
-          .replace(/<[^>]+>/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim()
-
-        // Truncate to reasonable size
-        if (textContent.length > 50_000) {
-          textContent = textContent.slice(0, 50_000) + '\n[truncated]'
-        }
-
-        if (action === 'screenshot') {
-          return {
-            data: {
-              title,
-              url: response.url,
-              content: `[Text snapshot — visual screenshots require Chrome browser tools]\n\n${textContent}`,
-            },
-          }
-        }
-
-        return {
-          data: {
-            title,
-            url: response.url,
-            content: textContent,
-          },
-        }
-      } catch (err) {
-        return {
-          data: {
-            title: 'Error',
-            url: input.url,
-            content: `Failed to fetch: ${err instanceof Error ? err.message : String(err)}`,
-          },
-        }
-      }
-    }
-
-    // Unreachable — schema only allows navigate/screenshot
+  create(_deps) {
     return {
-      data: {
-        title: '',
-        url: input.url,
-        content: `Unknown action "${action}".`,
+      async call(input: BrowserInput, callCtx) {
+        const action = input.action ?? 'navigate'
+
+        if (action === 'navigate' || action === 'screenshot') {
+          // Fetch the page content via HTTP
+          try {
+            const response = await fetch(input.url, {
+              headers: {
+                'User-Agent':
+                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                Accept:
+                  'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              },
+              redirect: 'follow',
+              signal: callCtx.signal,
+            })
+
+            if (!response.ok) {
+              return {
+                data: {
+                  title: `HTTP ${response.status}`,
+                  url: input.url,
+                  content: `Error: ${response.status} ${response.statusText}`,
+                },
+              }
+            }
+
+            const html = await response.text()
+
+            // Extract title
+            const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i)
+            const title = titleMatch?.[1]?.trim() ?? ''
+
+            // Extract text content (strip HTML tags, scripts, styles)
+            let textContent = html
+              .replace(/<script[\s\S]*?<\/script>/gi, '')
+              .replace(/<style[\s\S]*?<\/style>/gi, '')
+              .replace(/<[^>]+>/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim()
+
+            // Truncate to reasonable size
+            if (textContent.length > 50_000) {
+              textContent = textContent.slice(0, 50_000) + '\n[truncated]'
+            }
+
+            if (action === 'screenshot') {
+              return {
+                data: {
+                  title,
+                  url: response.url,
+                  content: `[Text snapshot — visual screenshots require Chrome browser tools]\n\n${textContent}`,
+                },
+              }
+            }
+
+            return {
+              data: {
+                title,
+                url: response.url,
+                content: textContent,
+              },
+            }
+          } catch (err) {
+            return {
+              data: {
+                title: 'Error',
+                url: input.url,
+                content: `Failed to fetch: ${err instanceof Error ? err.message : String(err)}`,
+              },
+            }
+          }
+        }
+
+        // Unreachable — schema only allows navigate/screenshot
+        return {
+          data: {
+            title: '',
+            url: input.url,
+            content: `Unknown action "${action}".`,
+          },
+        }
       },
     }
   },
-})
+} satisfies ToolDef<InputSchema, BrowserOutput>)
+
+export const WebBrowserTool: Omit<typeof builtWebBrowserTool, 'call'> & {
+  call(
+    args: BrowserInput,
+    context?: ToolUseContext,
+    canUseTool?: CanUseToolFn,
+    parentMessage?: AssistantMessage,
+    onProgress?: ToolCallProgress<ToolProgressData>,
+    opts?: ToolCallExecutionOptions,
+  ): Promise<ToolResult<BrowserOutput>>
+} = builtWebBrowserTool as unknown as Omit<
+  typeof builtWebBrowserTool,
+  'call'
+> & {
+  call(
+    args: BrowserInput,
+    context?: ToolUseContext,
+    canUseTool?: CanUseToolFn,
+    parentMessage?: AssistantMessage,
+    onProgress?: ToolCallProgress<ToolProgressData>,
+    opts?: ToolCallExecutionOptions,
+  ): Promise<ToolResult<BrowserOutput>>
+}

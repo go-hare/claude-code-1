@@ -1,5 +1,5 @@
 import { z } from 'zod/v4'
-import { buildTool, type ToolDef } from 'src/Tool.js'
+import { buildTool, type ToolDef, type ToolDeps } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import {
   getTaskListId,
@@ -63,29 +63,33 @@ export const TaskListTool = buildTool({
   renderToolUseMessage() {
     return null
   },
-  async call() {
-    const taskListId = getTaskListId()
-
-    const allTasks = (await listTasks(taskListId)).filter(
-      t => !t.metadata?._internal,
-    )
-
-    // Build a set of resolved task IDs for filtering
-    const resolvedTaskIds = new Set(
-      allTasks.filter(t => t.status === 'completed').map(t => t.id),
-    )
-
-    const tasks = allTasks.map(task => ({
-      id: task.id,
-      subject: task.subject,
-      status: task.status,
-      owner: task.owner,
-      blockedBy: task.blockedBy.filter(id => !resolvedTaskIds.has(id)),
-    }))
-
+  create(_deps: ToolDeps) {
     return {
-      data: {
-        tasks,
+      async call() {
+        const taskListId = getTaskListId()
+
+        const allTasks = (await listTasks(taskListId)).filter(
+          t => !t.metadata?._internal,
+        )
+
+        // Build a set of resolved task IDs for filtering
+        const resolvedTaskIds = new Set(
+          allTasks.filter(t => t.status === 'completed').map(t => t.id),
+        )
+
+        const tasks = allTasks.map(task => ({
+          id: task.id,
+          subject: task.subject,
+          status: task.status,
+          owner: task.owner,
+          blockedBy: task.blockedBy.filter(id => !resolvedTaskIds.has(id)),
+        }))
+
+        return {
+          data: {
+            tasks,
+          },
+        }
       },
     }
   },

@@ -11,7 +11,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
-import type { ToolResultBlockParam } from 'src/Tool.js'
+import type { ToolDef, ToolDeps, ToolResultBlockParam } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { errorMessage } from 'src/utils/errors.js'
@@ -91,10 +91,6 @@ export const EndConversationTool = buildTool({
     return false
   },
 
-  async checkPermissions(input) {
-    return { behavior: 'allow', updatedInput: input }
-  },
-
   toAutoClassifierInput() {
     return ''
   },
@@ -114,91 +110,97 @@ export const EndConversationTool = buildTool({
     }
   },
 
-  async call(_input: EndConversationInput, context) {
-    const isNonInteractive = context.options.isNonInteractiveSession
-    const isFork = Boolean(context.agentId)
-    const surface = endConversationSurface(isNonInteractive, isFork)
-
-    // densable fork path: agentId set → no-op reflection
-    if (isFork) {
-      logEvent('tengu_end_conversation_tool_call', {
-        surface:
-          surface as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        is_non_interactive: isNonInteractive,
-        phase:
-          'reflect' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      })
-      return {
-        data: {
-          ended: false,
-          message: END_CONVERSATION_FORK_REFLECTION_PROMPT,
-        },
-      }
-    }
-
-    // densable first call: reflection, require second EndConversation in same turn
-    if (!lastAssistantTurnCalledEndConversation(context.messages)) {
-      logEvent('tengu_end_conversation_tool_call', {
-        surface:
-          surface as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        is_non_interactive: isNonInteractive,
-        phase:
-          'reflect' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      })
-      return {
-        data: {
-          ended: false,
-          message: getEndConversationReflectionPrompt(),
-        },
-      }
-    }
-
-    logEvent('tengu_end_conversation_tool_call', {
-      surface:
-        surface as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      is_non_interactive: isNonInteractive,
-      phase:
-        'end' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-    })
-
-    try {
-      const { markSessionEndedByModel } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('src/utils/sessionStorage.js') as typeof import('src/utils/sessionStorage.js')
-      await markSessionEndedByModel(getSessionId())
-    } catch (err) {
-      logForDebugging(
-        `[EndConversation] marker write failed: ${errorMessage(err)}`,
-      )
-    }
-
-    // densable: t.abortController.abort("end_conversation")
-    context.abortController.abort('end_conversation')
-
-    if (isNonInteractive) {
-      const { gracefulShutdown } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('src/utils/gracefulShutdown.js') as typeof import('src/utils/gracefulShutdown.js')
-      // densable: o(1,"other",{finalMessage:Sms}) — fire-and-forget exit path
-      void gracefulShutdown(1, 'other', {
-        finalMessage: END_CONVERSATION_FINAL_MESSAGE,
-      })
-      return {
-        data: {
-          ended: true,
-          message: END_CONVERSATION_TOOL_RESULT,
-        },
-      }
-    }
-
-    context.setAppState(prev =>
-      prev.endedByModel ? prev : { ...prev, endedByModel: true },
-    )
+  create(deps: ToolDeps) {
     return {
-      data: {
-        ended: true,
-        message: END_CONVERSATION_TOOL_RESULT,
+      async checkPermissions(input: EndConversationInput) {
+        return { behavior: 'allow' as const, updatedInput: input }
+      },
+
+      async call(_input: EndConversationInput, callCtx) {
+        const isNonInteractive = deps.isNonInteractiveSession
+        const isFork = Boolean(deps.agentId)
+        const surface = endConversationSurface(isNonInteractive, isFork)
+
+        // densable fork path: agentId set → no-op reflection
+        if (isFork) {
+          logEvent('tengu_end_conversation_tool_call', {
+            surface:
+              surface as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            is_non_interactive: isNonInteractive,
+            phase:
+              'reflect' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+          return {
+            data: {
+              ended: false,
+              message: END_CONVERSATION_FORK_REFLECTION_PROMPT,
+            },
+          }
+        }
+
+        // densable first call: reflection, require second EndConversation in same turn
+        if (!lastAssistantTurnCalledEndConversation(deps.messages())) {
+          logEvent('tengu_end_conversation_tool_call', {
+            surface:
+              surface as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            is_non_interactive: isNonInteractive,
+            phase:
+              'reflect' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+          return {
+            data: {
+              ended: false,
+              message: getEndConversationReflectionPrompt(),
+            },
+          }
+        }
+
+        logEvent('tengu_end_conversation_tool_call', {
+          surface:
+            surface as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          is_non_interactive: isNonInteractive,
+          phase:
+            'end' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+
+        try {
+          const { markSessionEndedByModel } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('src/utils/sessionStorage.js') as typeof import('src/utils/sessionStorage.js')
+          await markSessionEndedByModel(getSessionId())
+        } catch (err) {
+          logForDebugging(
+            `[EndConversation] marker write failed: ${errorMessage(err)}`,
+          )
+        }
+
+        // densable: t.abortController.abort("end_conversation")
+        callCtx.abort('end_conversation')
+
+        if (isNonInteractive) {
+          const { gracefulShutdown } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('src/utils/gracefulShutdown.js') as typeof import('src/utils/gracefulShutdown.js')
+          // densable: o(1,"other",{finalMessage:Sms}) — fire-and-forget exit path
+          void gracefulShutdown(1, 'other', {
+            finalMessage: END_CONVERSATION_FINAL_MESSAGE,
+          })
+          return {
+            data: {
+              ended: true,
+              message: END_CONVERSATION_TOOL_RESULT,
+            },
+          }
+        }
+
+        deps.markEndedByModel()
+        return {
+          data: {
+            ended: true,
+            message: END_CONVERSATION_TOOL_RESULT,
+          },
+        }
       },
     }
   },
-})
+} satisfies ToolDef<InputSchema, EndConversationOutput>)

@@ -126,20 +126,6 @@ export const WebSearchTool = buildTool({
   toAutoClassifierInput(input) {
     return input.query
   },
-  async checkPermissions(_input): Promise<PermissionResult> {
-    return {
-      behavior: 'passthrough',
-      message: 'WebSearchTool requires permission.',
-      suggestions: [
-        {
-          type: 'addRules',
-          rules: [{ toolName: WEB_SEARCH_TOOL_NAME }],
-          behavior: 'allow',
-          destination: 'localSettings',
-        },
-      ],
-    }
-  },
   async prompt() {
     return getWebSearchPrompt()
   },
@@ -149,239 +135,260 @@ export const WebSearchTool = buildTool({
   extractSearchText() {
     return ''
   },
-  async validateInput(input) {
-    const { query, allowed_domains, blocked_domains } = input
-    if (!query.length) {
-      return {
-        result: false,
-        message: 'Error: Missing query',
-        errorCode: 1,
-      }
-    }
-    if (allowed_domains?.length && blocked_domains?.length) {
-      return {
-        result: false,
-        message:
-          'Error: Cannot specify both allowed_domains and blocked_domains in the same request',
-        errorCode: 2,
-      }
-    }
-    return { result: true }
-  },
-  async call(input, context, _canUseTool, _parentMessage, onProgress) {
-    const startTime = performance.now()
-    const { query } = input
-
-    // densable 2.1.212 / 2.1.325: sessionSpawnCaps token-bucket WebSearch budget.
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const {
-        consumeWebSearchBudgetOrCapMessage,
-        resolveMaxWebSearchesPerSession,
-      } =
-        require('src/utils/sessionSpawnCaps.js') as typeof import('src/utils/sessionSpawnCaps.js')
-      const budget = context.taskRegistry?.getWebSearchBudget?.()
-      if (budget) {
-        if (!budget.tryConsume()) {
-          const max = resolveMaxWebSearchesPerSession()
-          const refillsPerHour = budget.refillsPerHour()
-          const msUntilNext = budget.msUntilNextCall()
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            const { logEvent } =
-              require('src/services/analytics/index.js') as typeof import('src/services/analytics/index.js')
-            logEvent('web_search_session_cap', {
-              max_web_searches_per_session: max,
-              web_search_refills_per_hour: refillsPerHour,
-              ...(Number.isFinite(msUntilNext)
-                ? { ms_until_next_web_search: msUntilNext }
-                : {}),
-            })
-          } catch {
-            // analytics optional
-          }
-          const hasRefill = refillsPerHour > 0
-          const limitCount = `${max} WebSearch ${max === 1 ? 'call' : 'calls'}`
-          const limitText = hasRefill
-            ? `limit: ${limitCount} shared by every agent in this session; the budget refills at about ${refillsPerHour} ${refillsPerHour === 1 ? 'call' : 'calls'} per hour, so searching becomes possible again later in the session`
-            : `limit: ${limitCount}, shared by every agent in this session; it does not refill`
-          const continueText = hasRefill
-            ? 'Do not pause or wait for the refill: continue with the information already gathered and say so in your answer'
-            : 'Continue with the information already gathered instead of searching again, and say so in your answer'
-          const message = `Web search was not performed: this session's web search budget is used up (${limitText}). ${continueText}; do not work around the limit by querying search engines with curl or wget from Bash, by querying them in a browser or through a computer-use tool, or by searching or fetching through a third-party reader, proxy or archive service. If more searches are genuinely needed, ask the user to raise CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION.`
+  create(deps) {
+    return {
+      async checkPermissions(_input): Promise<PermissionResult> {
+        return {
+          behavior: 'passthrough',
+          message: 'WebSearchTool requires permission.',
+          suggestions: [
+            {
+              type: 'addRules',
+              rules: [{ toolName: WEB_SEARCH_TOOL_NAME }],
+              behavior: 'allow',
+              destination: 'localSettings',
+            },
+          ],
+        }
+      },
+      async validateInput(input) {
+        const { query, allowed_domains, blocked_domains } = input
+        if (!query.length) {
           return {
-            data: {
-              query,
-              results: [message],
-              durationSeconds: 0,
-            },
+            result: false,
+            message: 'Error: Missing query',
+            errorCode: 1,
           }
         }
-      } else {
-        const cap = consumeWebSearchBudgetOrCapMessage({
-          taskRegistry: context.taskRegistry,
-        })
-        if (cap) {
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            const { logEvent } =
-              require('src/services/analytics/index.js') as typeof import('src/services/analytics/index.js')
-            logEvent('web_search_session_cap', {
-              max_web_searches_per_session: cap.max,
-            })
-          } catch {
-            // analytics optional
-          }
+        if (allowed_domains?.length && blocked_domains?.length) {
           return {
-            data: {
-              query,
-              results: [cap.message],
-              durationSeconds: 0,
-            },
+            result: false,
+            message:
+              'Error: Cannot specify both allowed_domains and blocked_domains in the same request',
+            errorCode: 2,
           }
         }
-      }
-    } catch {
-      // cap module optional — never block search if import fails
-    }
+        return { result: true }
+      },
+      async call(input, callCtx) {
+        const startTime = performance.now()
+        const { query } = input
+        const { signal, onProgress } = callCtx
 
-    // Official X0d/Q0d (2.1.207): firstParty + WEBSEARCH_USE_CCR_PROXY +
-    // CLAUDE_CODE_SESSION_ID (cse_*|session_*) → session worker web-search.
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const {
-        shouldWebSearchUseCcrSessionWorker,
-        searchViaCcrSessionWorker,
-        formatCcrProxyToolError,
-      } =
-        require('src/utils/ccrProxyGates.js') as typeof import('src/utils/ccrProxyGates.js')
-      if (shouldWebSearchUseCcrSessionWorker()) {
-        const ccr = await searchViaCcrSessionWorker({
-          query,
-          signal: context.abortController.signal,
-          allowedDomains: input.allowed_domains,
-          blockedDomains: input.blocked_domains,
-        })
-        const durationSeconds = (performance.now() - startTime) / 1000
-        if (!ccr.ok) {
-          // Official Bn(ke(...), "web-search-ccr-proxy") densable.
-          throw new Error(
-            `${formatCcrProxyToolError(ccr)} [web-search-ccr-proxy]`,
-          )
-        }
-        if (onProgress) {
-          onProgress({
-            toolUseID: 'ccr-proxy-search-1',
-            data: {
-              type: 'search_results_received',
-              resultCount: ccr.results.length,
-              query,
-            },
-          })
-        }
-        const results: (SearchResult | string)[] =
-          ccr.results.length > 0
-            ? [
-                {
-                  tool_use_id: 'ccr-proxy-search-1',
-                  content: ccr.results.map(r => ({
-                    title: r.title,
-                    url: r.url,
-                    snippet: r.snippet,
-                  })),
+        // densable 2.1.212 / 2.1.325: sessionSpawnCaps token-bucket WebSearch budget.
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const {
+            consumeWebSearchBudgetOrCapMessage,
+            resolveMaxWebSearchesPerSession,
+          } =
+            require('src/utils/sessionSpawnCaps.js') as typeof import('src/utils/sessionSpawnCaps.js')
+          const budget = deps.taskRegistry?.getWebSearchBudget?.()
+          if (budget) {
+            if (!budget.tryConsume()) {
+              const max = resolveMaxWebSearchesPerSession()
+              const refillsPerHour = budget.refillsPerHour()
+              const msUntilNext = budget.msUntilNextCall()
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                const { logEvent } =
+                  require('src/services/analytics/index.js') as typeof import('src/services/analytics/index.js')
+                logEvent('web_search_session_cap', {
+                  max_web_searches_per_session: max,
+                  web_search_refills_per_hour: refillsPerHour,
+                  ...(Number.isFinite(msUntilNext)
+                    ? { ms_until_next_web_search: msUntilNext }
+                    : {}),
+                })
+              } catch {
+                // analytics optional
+              }
+              const hasRefill = refillsPerHour > 0
+              const limitCount = `${max} WebSearch ${max === 1 ? 'call' : 'calls'}`
+              const limitText = hasRefill
+                ? `limit: ${limitCount} shared by every agent in this session; the budget refills at about ${refillsPerHour} ${refillsPerHour === 1 ? 'call' : 'calls'} per hour, so searching becomes possible again later in the session`
+                : `limit: ${limitCount}, shared by every agent in this session; it does not refill`
+              const continueText = hasRefill
+                ? 'Do not pause or wait for the refill: continue with the information already gathered and say so in your answer'
+                : 'Continue with the information already gathered instead of searching again, and say so in your answer'
+              const message = `Web search was not performed: this session's web search budget is used up (${limitText}). ${continueText}; do not work around the limit by querying search engines with curl or wget from Bash, by querying them in a browser or through a computer-use tool, or by searching or fetching through a third-party reader, proxy or archive service. If more searches are genuinely needed, ask the user to raise CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION.`
+              return {
+                data: {
+                  query,
+                  results: [message],
+                  durationSeconds: 0,
                 },
-              ]
-            : ['No search results found.']
-        // Official 2.1.328 #594: if the search was aborted (e.g. Send now) and
-        // no real link results arrived, throw AbortError rather than telling
-        // Claude that the search found no results.
+              }
+            }
+          } else {
+            const cap = consumeWebSearchBudgetOrCapMessage({
+              taskRegistry: deps.taskRegistry,
+            })
+            if (cap) {
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                const { logEvent } =
+                  require('src/services/analytics/index.js') as typeof import('src/services/analytics/index.js')
+                logEvent('web_search_session_cap', {
+                  max_web_searches_per_session: cap.max,
+                })
+              } catch {
+                // analytics optional
+              }
+              return {
+                data: {
+                  query,
+                  results: [cap.message],
+                  durationSeconds: 0,
+                },
+              }
+            }
+          }
+        } catch {
+          // cap module optional — never block search if import fails
+        }
+
+        // Official X0d/Q0d (2.1.207): firstParty + WEBSEARCH_USE_CCR_PROXY +
+        // CLAUDE_CODE_SESSION_ID (cse_*|session_*) → session worker web-search.
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const {
+            shouldWebSearchUseCcrSessionWorker,
+            searchViaCcrSessionWorker,
+            formatCcrProxyToolError,
+          } =
+            require('src/utils/ccrProxyGates.js') as typeof import('src/utils/ccrProxyGates.js')
+          if (shouldWebSearchUseCcrSessionWorker()) {
+            const ccr = await searchViaCcrSessionWorker({
+              query,
+              signal,
+              allowedDomains: input.allowed_domains,
+              blockedDomains: input.blocked_domains,
+            })
+            const durationSeconds = (performance.now() - startTime) / 1000
+            if (!ccr.ok) {
+              // Official Bn(ke(...), "web-search-ccr-proxy") densable.
+              throw new Error(
+                `${formatCcrProxyToolError(ccr)} [web-search-ccr-proxy]`,
+              )
+            }
+            if (onProgress) {
+              onProgress({
+                toolUseID: 'ccr-proxy-search-1',
+                data: {
+                  type: 'search_results_received',
+                  resultCount: ccr.results.length,
+                  query,
+                },
+              })
+            }
+            const results: (SearchResult | string)[] =
+              ccr.results.length > 0
+                ? [
+                    {
+                      tool_use_id: 'ccr-proxy-search-1',
+                      content: ccr.results.map(r => ({
+                        title: r.title,
+                        url: r.url,
+                        snippet: r.snippet,
+                      })),
+                    },
+                  ]
+                : ['No search results found.']
+            // Official 2.1.328 #594: if the search was aborted (e.g. Send now) and
+            // no real link results arrived, throw AbortError rather than telling
+            // Claude that the search found no results.
+            if (
+              signal.aborted &&
+              results.every(
+                r => typeof r === 'string' || r.content.length === 0,
+              )
+            ) {
+              throw new AbortError()
+            }
+            return {
+              data: {
+                query,
+                results,
+                durationSeconds,
+              },
+            }
+          }
+        } catch (err) {
+          // Re-throw CCR proxy failures and aborts; only swallow missing densable.
+          if (
+            err instanceof Error &&
+            (err.message.includes('web-search-ccr-proxy') ||
+              err.message.includes('"error_type"') ||
+              err.name === 'AbortError')
+          ) {
+            throw err
+          }
+          // densable optional
+        }
+
+        const adapter = createAdapter()
+        const adapterResults = await withWebSearchDeadline(
+          signal,
+          effectiveSignal =>
+            adapter.search(query, {
+              allowedDomains: input.allowed_domains,
+              blockedDomains: input.blocked_domains,
+              numResults: input.num_results,
+              livecrawl: input.livecrawl,
+              searchType: input.search_type,
+              contextMaxCharacters: input.context_max_characters,
+              signal: effectiveSignal,
+              onProgress(progress) {
+                if (onProgress) {
+                  const toolUseID =
+                    progress.type === 'search_retry'
+                      ? 'search-retry'
+                      : `search-progress-${Date.now()}`
+                  onProgress({
+                    toolUseID,
+                    data: progress,
+                  })
+                }
+              },
+            }),
+        )
+
+        const endTime = performance.now()
+        const durationSeconds = (endTime - startTime) / 1000
+
+        // Convert adapter SearchResult[] to legacy Output format
+        const results: (SearchResult | string)[] = []
+        if (adapterResults.length > 0) {
+          results.push({
+            tool_use_id: 'adapter-search-1',
+            content: adapterResults.map(r => ({
+              title: r.title,
+              url: r.url,
+              snippet: r.snippet,
+            })),
+          })
+        } else {
+          results.push('No search results found.')
+        }
+
+        // Official 2.1.328 #594: do not tell Claude a stopped web search found no
+        // results when the abort signal fired before any results arrived.
         if (
-          context.abortController.signal.aborted &&
+          signal.aborted &&
           results.every(r => typeof r === 'string' || r.content.length === 0)
         ) {
           throw new AbortError()
         }
-        return {
-          data: {
-            query,
-            results,
-            durationSeconds,
-          },
+
+        const data: Output = {
+          query,
+          results,
+          durationSeconds,
         }
-      }
-    } catch (err) {
-      // Re-throw CCR proxy failures and aborts; only swallow missing densable.
-      if (
-        err instanceof Error &&
-        (err.message.includes('web-search-ccr-proxy') ||
-          err.message.includes('"error_type"') ||
-          err.name === 'AbortError')
-      ) {
-        throw err
-      }
-      // densable optional
+        return { data }
+      },
     }
-
-    const adapter = createAdapter()
-    const adapterResults = await withWebSearchDeadline(
-      context.abortController.signal,
-      effectiveSignal =>
-        adapter.search(query, {
-          allowedDomains: input.allowed_domains,
-          blockedDomains: input.blocked_domains,
-          numResults: input.num_results,
-          livecrawl: input.livecrawl,
-          searchType: input.search_type,
-          contextMaxCharacters: input.context_max_characters,
-          signal: effectiveSignal,
-          onProgress(progress) {
-            if (onProgress) {
-              const toolUseID =
-                progress.type === 'search_retry'
-                  ? 'search-retry'
-                  : `search-progress-${Date.now()}`
-              onProgress({
-                toolUseID,
-                data: progress,
-              })
-            }
-          },
-        }),
-    )
-
-    const endTime = performance.now()
-    const durationSeconds = (endTime - startTime) / 1000
-
-    // Convert adapter SearchResult[] to legacy Output format
-    const results: (SearchResult | string)[] = []
-    if (adapterResults.length > 0) {
-      results.push({
-        tool_use_id: 'adapter-search-1',
-        content: adapterResults.map(r => ({
-          title: r.title,
-          url: r.url,
-          snippet: r.snippet,
-        })),
-      })
-    } else {
-      results.push('No search results found.')
-    }
-
-    // Official 2.1.328 #594: do not tell Claude a stopped web search found no
-    // results when the abort signal fired before any results arrived.
-    if (
-      context.abortController.signal.aborted &&
-      results.every(r => typeof r === 'string' || r.content.length === 0)
-    ) {
-      throw new AbortError()
-    }
-
-    const data: Output = {
-      query,
-      results,
-      durationSeconds,
-    }
-    return { data }
   },
   mapToolResultToToolResultBlockParam(output, toolUseID) {
     const { query, results } = output

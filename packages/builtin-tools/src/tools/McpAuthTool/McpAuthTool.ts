@@ -21,7 +21,13 @@ import type {
   McpSSEServerConfig,
   ScopedMcpServerConfig,
 } from 'src/services/mcp/types.js'
-import type { Tool, ToolUseContext } from 'src/Tool.js'
+import {
+  buildTool,
+  type Tool,
+  type ToolDef,
+  type ToolDeps,
+  type ToolInstance,
+} from 'src/Tool.js'
 import { errorMessage } from 'src/utils/errors.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { logMCPDebug, logMCPError } from 'src/utils/log.js'
@@ -51,8 +57,8 @@ export type McpAuthOutput = {
   authUrl?: string
 }
 
-function isUnanswerableForCompleteAuth(context: ToolUseContext): boolean {
-  const permCtx = context.getAppState().toolPermissionContext
+function isUnanswerableForCompleteAuth(deps: ToolDeps): boolean {
+  const permCtx = deps.permissions()
   return (
     permCtx.mode === 'dontAsk' || permCtx.shouldAvoidPermissionPrompts === true
   )
@@ -87,7 +93,9 @@ function getConfigUrl(config: ScopedMcpServerConfig): string | undefined {
 export function createMcpAuthTool(
   serverName: string,
   config: ScopedMcpServerConfig,
-): Tool<InputSchema, McpAuthOutput> {
+): Tool<InputSchema, McpAuthOutput> & {
+  create(deps: ToolDeps): ToolInstance<InputSchema, McpAuthOutput>
+} {
   const url = getConfigUrl(config)
   const transport = config.type ?? 'stdio'
   const location = url ? `${transport} at ${url}` : transport
@@ -97,7 +105,7 @@ export function createMcpAuthTool(
     `Call this tool to start the OAuth flow — you'll receive an authorization URL to share with the user. ` +
     `Once the user completes authorization in their browser, the server's real tools will become available automatically.`
 
-  return {
+  return buildTool({
     name: buildMcpToolName(serverName, 'authenticate'),
     isMcp: true,
     mcpInfo: {
@@ -122,130 +130,136 @@ export function createMcpAuthTool(
     get inputSchema(): InputSchema {
       return inputSchema()
     },
-    async checkPermissions(input): Promise<PermissionDecision> {
-      return { behavior: 'allow', updatedInput: input }
-    },
-    async call(_input, context) {
-      // claude.ai connectors use a separate auth flow (handleClaudeAIAuth in
-      // MCPRemoteServerMenu) that we don't invoke programmatically here —
-      // just point the user at /mcp.
-      if (config.type === 'claudeai-proxy') {
-        return {
-          data: {
-            status: 'unsupported' as const,
-            message: `This is a claude.ai MCP connector. Ask the user to run /mcp and select "${serverName}" to authenticate.`,
-          },
-        }
-      }
-
-      // performMCPOAuthFlow only accepts sse/http. needs-auth state is only
-      // set on HTTP 401 (UnauthorizedError) so other transports shouldn't
-      // reach here, but be defensive.
-      if (config.type !== 'sse' && config.type !== 'http') {
-        return {
-          data: {
-            status: 'unsupported' as const,
-            message: `Server "${serverName}" uses ${transport} transport which does not support OAuth from this tool. Ask the user to run /mcp and authenticate manually.`,
-          },
-        }
-      }
-
-      const sseOrHttpConfig = config as (
-        | McpSSEServerConfig
-        | McpHTTPServerConfig
-      ) & { scope: ScopedMcpServerConfig['scope'] }
-
-      // Mirror cli/print.ts mcp_authenticate: start the flow, capture the
-      // URL via onAuthorizationUrl, return it immediately. The flow's
-      // Promise resolves later when the browser callback fires.
-      let resolveAuthUrl: ((url: string) => void) | undefined
-      const authUrlPromise = new Promise<string>(resolve => {
-        resolveAuthUrl = resolve
-      })
-
-      const controller = new AbortController()
-      const { setAppState } = context
-
-      const oauthPromise = performMCPOAuthFlow(
-        serverName,
-        sseOrHttpConfig,
-        u => resolveAuthUrl?.(u),
-        controller.signal,
-        { skipBrowserOpen: true },
-      )
-      setActiveOAuthPromise(serverName, oauthPromise)
-
-      // Background continuation: once OAuth completes, reconnect and swap
-      // the real tools into appState. Prefix-based replacement removes this
-      // pseudo-tool since it shares the mcp__<server>__ prefix.
-      void oauthPromise
-        .then(async () => {
-          clearMcpAuthCache()
-          const result = await reconnectMcpServerImpl(serverName, config)
-          const prefix = getMcpPrefix(serverName)
-          setAppState(prev => ({
-            ...prev,
-            mcp: {
-              ...prev.mcp,
-              clients: prev.mcp.clients.map(c =>
-                c.name === serverName ? result.client : c,
-              ),
-              tools: [
-                ...reject(prev.mcp.tools, t => t.name?.startsWith(prefix)),
-                ...result.tools,
-              ],
-              commands: [
-                ...reject(prev.mcp.commands, c => c.name?.startsWith(prefix)),
-                ...result.commands,
-              ],
-              resources: result.resources
-                ? { ...prev.mcp.resources, [serverName]: result.resources }
-                : prev.mcp.resources,
-            },
-          }))
-          logMCPDebug(
-            serverName,
-            `OAuth complete, reconnected with ${result.tools.length} tool(s)`,
-          )
-        })
-        .catch(err => {
-          logMCPError(
-            serverName,
-            `OAuth flow failed after tool-triggered start: ${errorMessage(err)}`,
-          )
-        })
-
-      try {
-        // Race: get the URL, or the flow completes without needing one
-        // (e.g. XAA with cached IdP token — silent auth).
-        const authUrl = await Promise.race([
-          authUrlPromise,
-          oauthPromise.then(() => null as string | null),
-        ])
-
-        if (authUrl) {
-          return {
-            data: {
-              status: 'auth_url' as const,
-              authUrl,
-              message: `Ask the user to open this URL in their browser to authorize the ${serverName} MCP server:\n\n${authUrl}\n\nOnce they complete the flow, the server's tools will become available automatically.`,
-            },
+    create(deps) {
+      return {
+        async checkPermissions(input): Promise<PermissionDecision> {
+          return { behavior: 'allow', updatedInput: input }
+        },
+        async call(_input) {
+          // claude.ai connectors use a separate auth flow (handleClaudeAIAuth in
+          // MCPRemoteServerMenu) that we don't invoke programmatically here —
+          // just point the user at /mcp.
+          if (config.type === 'claudeai-proxy') {
+            return {
+              data: {
+                status: 'unsupported' as const,
+                message: `This is a claude.ai MCP connector. Ask the user to run /mcp and select "${serverName}" to authenticate.`,
+              },
+            }
           }
-        }
 
-        return {
-          data: {
-            status: 'auth_url' as const,
-            message: `Authentication completed silently for ${serverName}. The server's tools should now be available.`,
-          },
-        }
-      } catch (err) {
-        return {
-          data: {
-            status: 'error' as const,
-            message: `Failed to start OAuth flow for ${serverName}: ${errorMessage(err)}. Ask the user to run /mcp and authenticate manually.`,
-          },
-        }
+          // performMCPOAuthFlow only accepts sse/http. needs-auth state is only
+          // set on HTTP 401 (UnauthorizedError) so other transports shouldn't
+          // reach here, but be defensive.
+          if (config.type !== 'sse' && config.type !== 'http') {
+            return {
+              data: {
+                status: 'unsupported' as const,
+                message: `Server "${serverName}" uses ${transport} transport which does not support OAuth from this tool. Ask the user to run /mcp and authenticate manually.`,
+              },
+            }
+          }
+
+          const sseOrHttpConfig = config as (
+            | McpSSEServerConfig
+            | McpHTTPServerConfig
+          ) & { scope: ScopedMcpServerConfig['scope'] }
+
+          // Mirror cli/print.ts mcp_authenticate: start the flow, capture the
+          // URL via onAuthorizationUrl, return it immediately. The flow's
+          // Promise resolves later when the browser callback fires.
+          let resolveAuthUrl: ((url: string) => void) | undefined
+          const authUrlPromise = new Promise<string>(resolve => {
+            resolveAuthUrl = resolve
+          })
+
+          const controller = new AbortController()
+          const { setAppState } = deps
+
+          const oauthPromise = performMCPOAuthFlow(
+            serverName,
+            sseOrHttpConfig,
+            u => resolveAuthUrl?.(u),
+            controller.signal,
+            { skipBrowserOpen: true },
+          )
+          setActiveOAuthPromise(serverName, oauthPromise)
+
+          // Background continuation: once OAuth completes, reconnect and swap
+          // the real tools into appState. Prefix-based replacement removes this
+          // pseudo-tool since it shares the mcp__<server>__ prefix.
+          void oauthPromise
+            .then(async () => {
+              clearMcpAuthCache()
+              const result = await reconnectMcpServerImpl(serverName, config)
+              const prefix = getMcpPrefix(serverName)
+              setAppState(prev => ({
+                ...prev,
+                mcp: {
+                  ...prev.mcp,
+                  clients: prev.mcp.clients.map(c =>
+                    c.name === serverName ? result.client : c,
+                  ),
+                  tools: [
+                    ...reject(prev.mcp.tools, t => t.name?.startsWith(prefix)),
+                    ...result.tools,
+                  ],
+                  commands: [
+                    ...reject(prev.mcp.commands, c =>
+                      c.name?.startsWith(prefix),
+                    ),
+                    ...result.commands,
+                  ],
+                  resources: result.resources
+                    ? { ...prev.mcp.resources, [serverName]: result.resources }
+                    : prev.mcp.resources,
+                },
+              }))
+              logMCPDebug(
+                serverName,
+                `OAuth complete, reconnected with ${result.tools.length} tool(s)`,
+              )
+            })
+            .catch(err => {
+              logMCPError(
+                serverName,
+                `OAuth flow failed after tool-triggered start: ${errorMessage(err)}`,
+              )
+            })
+
+          try {
+            // Race: get the URL, or the flow completes without needing one
+            // (e.g. XAA with cached IdP token — silent auth).
+            const authUrl = await Promise.race([
+              authUrlPromise,
+              oauthPromise.then(() => null as string | null),
+            ])
+
+            if (authUrl) {
+              return {
+                data: {
+                  status: 'auth_url' as const,
+                  authUrl,
+                  message: `Ask the user to open this URL in their browser to authorize the ${serverName} MCP server:\n\n${authUrl}\n\nOnce they complete the flow, the server's tools will become available automatically.`,
+                },
+              }
+            }
+
+            return {
+              data: {
+                status: 'auth_url' as const,
+                message: `Authentication completed silently for ${serverName}. The server's tools should now be available.`,
+              },
+            }
+          } catch (err) {
+            return {
+              data: {
+                status: 'error' as const,
+                message: `Failed to start OAuth flow for ${serverName}: ${errorMessage(err)}. Ask the user to run /mcp and authenticate manually.`,
+              },
+            }
+          }
+        },
       }
     },
     mapToolResultToToolResultBlockParam(data, toolUseID) {
@@ -255,7 +269,7 @@ export function createMcpAuthTool(
         content: data.message,
       }
     },
-  } satisfies Tool<InputSchema, McpAuthOutput>
+  } satisfies ToolDef<InputSchema, McpAuthOutput>)
 }
 
 /**
@@ -269,7 +283,9 @@ export function createMcpAuthTool(
 export function createMcpCompleteAuthTool(
   serverName: string,
   config: ScopedMcpServerConfig,
-): Tool<CompleteAuthInputSchema, McpAuthOutput> {
+): Tool<CompleteAuthInputSchema, McpAuthOutput> & {
+  create(deps: ToolDeps): ToolInstance<CompleteAuthInputSchema, McpAuthOutput>
+} {
   const authToolName = buildMcpToolName(serverName, 'authenticate')
   const description =
     `Complete an in-progress OAuth flow for the "${serverName}" MCP server by submitting the callback URL. ` +
@@ -286,7 +302,7 @@ export function createMcpCompleteAuthTool(
     "Invalid callback URL: missing authorization code. Ask the user to paste the full redirect URL from their browser's address bar, including the `?code=...&state=...` query string."
   const stateMismatchMessage = `That callback URL belongs to a different sign-in attempt for ${serverName} (its state does not match the flow in progress), or carries no authorization code. The current flow is still waiting: ask the user for the URL from the page this sign-in opened, then retry.`
 
-  return {
+  return buildTool({
     name: buildMcpToolName(serverName, 'complete_authentication'),
     isMcp: true,
     mcpInfo: {
@@ -313,116 +329,120 @@ export function createMcpCompleteAuthTool(
     get inputSchema(): CompleteAuthInputSchema {
       return completeAuthInputSchema()
     },
-    async validateInput({ callback_url }, context) {
-      if (isUnanswerableForCompleteAuth(context)) {
-        return {
-          result: false,
-          message: unanswerableMessage,
-          errorCode: 3,
-        }
-      }
-      if (!getOAuthCallbackSubmitter(serverName)) {
-        return {
-          result: false,
-          message: noFlowMessage,
-          errorCode: 1,
-        }
-      }
-      if (!hasValidCallbackParams(callback_url)) {
-        return {
-          result: false,
-          message: invalidCallbackMessage,
-          errorCode: 2,
-        }
-      }
-      const expectedState = getOAuthCallbackState(serverName)
-      if (
-        expectedState &&
-        new URL(callback_url).searchParams.get('state') !== expectedState
-      ) {
-        return {
-          result: false,
-          message: stateMismatchMessage,
-          errorCode: 4,
-        }
-      }
-      return { result: true }
-    },
-    async checkPermissions(_input, context): Promise<PermissionDecision> {
-      if (isUnanswerableForCompleteAuth(context)) {
-        return {
-          behavior: 'deny',
-          message: unanswerableMessage,
-          decisionReason: {
-            type: 'safetyCheck',
-            reason: COMPLETE_AUTH_SAFETY_REASON,
-            classifierApprovable: false,
-          },
-        }
-      }
+    create(deps) {
       return {
-        behavior: 'ask',
-        message: `Finish signing in to ${serverName} with a callback URL.`,
-        suggestions: [],
-        decisionReason: {
-          type: 'safetyCheck',
-          reason: COMPLETE_AUTH_SAFETY_REASON,
-          classifierApprovable: false,
+        async validateInput({ callback_url }) {
+          if (isUnanswerableForCompleteAuth(deps)) {
+            return {
+              result: false,
+              message: unanswerableMessage,
+              errorCode: 3,
+            }
+          }
+          if (!getOAuthCallbackSubmitter(serverName)) {
+            return {
+              result: false,
+              message: noFlowMessage,
+              errorCode: 1,
+            }
+          }
+          if (!hasValidCallbackParams(callback_url)) {
+            return {
+              result: false,
+              message: invalidCallbackMessage,
+              errorCode: 2,
+            }
+          }
+          const expectedState = getOAuthCallbackState(serverName)
+          if (
+            expectedState &&
+            new URL(callback_url).searchParams.get('state') !== expectedState
+          ) {
+            return {
+              result: false,
+              message: stateMismatchMessage,
+              errorCode: 4,
+            }
+          }
+          return { result: true }
         },
-      }
-    },
-    async call({ callback_url }) {
-      const submitter = getOAuthCallbackSubmitter(serverName)
-      if (!submitter) {
-        return {
-          data: {
-            status: 'error' as const,
-            message: noFlowMessage,
-          },
-        }
-      }
-      if (!hasValidCallbackParams(callback_url)) {
-        return {
-          data: {
-            status: 'error' as const,
-            message: invalidCallbackMessage,
-          },
-        }
-      }
-      const activePromise = getActiveOAuthPromise(serverName)
-      if (!submitter(callback_url)) {
-        return {
-          data: {
-            status: 'error' as const,
-            message: stateMismatchMessage,
-          },
-        }
-      }
-      try {
-        if (activePromise) {
-          await activePromise
-        }
-        return {
-          data: {
-            status: 'success' as const,
-            message: `Authentication complete for ${serverName}. The server's tools should now be available.`,
-          },
-        }
-      } catch (err) {
-        if (err instanceof AuthenticationCancelledError) {
+        async checkPermissions(_input): Promise<PermissionDecision> {
+          if (isUnanswerableForCompleteAuth(deps)) {
+            return {
+              behavior: 'deny',
+              message: unanswerableMessage,
+              decisionReason: {
+                type: 'safetyCheck',
+                reason: COMPLETE_AUTH_SAFETY_REASON,
+                classifierApprovable: false,
+              },
+            }
+          }
           return {
-            data: {
-              status: 'error' as const,
-              message: `The OAuth flow for ${serverName} was cancelled (a newer attempt may have superseded it). Call \`${authToolName}\` again to restart.`,
+            behavior: 'ask',
+            message: `Finish signing in to ${serverName} with a callback URL.`,
+            suggestions: [],
+            decisionReason: {
+              type: 'safetyCheck',
+              reason: COMPLETE_AUTH_SAFETY_REASON,
+              classifierApprovable: false,
             },
           }
-        }
-        return {
-          data: {
-            status: 'error' as const,
-            message: `Authentication failed for ${serverName}: ${errorMessage(err)}`,
-          },
-        }
+        },
+        async call({ callback_url }) {
+          const submitter = getOAuthCallbackSubmitter(serverName)
+          if (!submitter) {
+            return {
+              data: {
+                status: 'error' as const,
+                message: noFlowMessage,
+              },
+            }
+          }
+          if (!hasValidCallbackParams(callback_url)) {
+            return {
+              data: {
+                status: 'error' as const,
+                message: invalidCallbackMessage,
+              },
+            }
+          }
+          const activePromise = getActiveOAuthPromise(serverName)
+          if (!submitter(callback_url)) {
+            return {
+              data: {
+                status: 'error' as const,
+                message: stateMismatchMessage,
+              },
+            }
+          }
+          try {
+            if (activePromise) {
+              await activePromise
+            }
+            return {
+              data: {
+                status: 'success' as const,
+                message: `Authentication complete for ${serverName}. The server's tools should now be available.`,
+              },
+            }
+          } catch (err) {
+            if (err instanceof AuthenticationCancelledError) {
+              return {
+                data: {
+                  status: 'error' as const,
+                  message: `The OAuth flow for ${serverName} was cancelled (a newer attempt may have superseded it). Call \`${authToolName}\` again to restart.`,
+                },
+              }
+            }
+            return {
+              data: {
+                status: 'error' as const,
+                message: `Authentication failed for ${serverName}: ${errorMessage(err)}`,
+              },
+            }
+          }
+        },
       }
     },
     mapToolResultToToolResultBlockParam(data, toolUseID) {
@@ -432,7 +452,7 @@ export function createMcpCompleteAuthTool(
         content: data.message,
       }
     },
-  } satisfies Tool<CompleteAuthInputSchema, McpAuthOutput>
+  } satisfies ToolDef<CompleteAuthInputSchema, McpAuthOutput>)
 }
 
 /**

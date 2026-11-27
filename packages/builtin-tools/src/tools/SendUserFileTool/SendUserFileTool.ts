@@ -1,6 +1,6 @@
 import { z } from 'zod/v4'
-import type { ToolResultBlockParam } from 'src/Tool.js'
-import { buildTool } from 'src/Tool.js'
+import type { ToolDef, ToolDeps, ToolResultBlockParam } from 'src/Tool.js'
+import { buildTool, sanitizeRemoteWireText } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { SEND_USER_FILE_TOOL_NAME } from './prompt.js'
 import { isBridgeEnabled } from 'src/bridge/bridgeEnabled.js'
@@ -42,6 +42,12 @@ const inputSchema = lazySchema(() =>
       .string()
       .optional()
       .describe('Optional caption shown alongside the sent file(s).'),
+    display: z
+      .enum(['render', 'attach'])
+      .optional()
+      .describe(
+        "Optional display mode for the sent file(s): 'render' inline or 'attach' as a file attachment.",
+      ),
     description: z
       .string()
       .optional()
@@ -120,13 +126,55 @@ export function formatSendUserFileUploadError(
     : uploadError
 }
 
-type SendUserFileOutput = {
-  sent: boolean
-  file_path: string
-  files?: SentFileEntry[]
-  error?: string
-  size?: number
-  file_uuid?: string
+const sentFileEntrySchema = lazySchema(() =>
+  z.object({
+    file_path: z.string(),
+    sent: z.boolean(),
+    size: z.number().optional(),
+    file_uuid: z.string().optional(),
+    error: z.string().optional(),
+  }),
+)
+
+const sentUserFileAttachmentSchema = lazySchema(() =>
+  z.object({
+    path: z.string(),
+    size: z.number().optional(),
+    isImage: z.boolean().optional(),
+    file_uuid: z.string().optional(),
+    error: z.string().optional(),
+  }),
+)
+
+const outputSchema = lazySchema(() =>
+  z.object({
+    sent: z.boolean(),
+    file_path: z.string(),
+    files: z.array(sentFileEntrySchema()).optional(),
+    attachments: z.array(sentUserFileAttachmentSchema()).optional(),
+    error: z.string().optional(),
+    size: z.number().optional(),
+    file_uuid: z.string().optional(),
+    caption: z.string().optional(),
+    display: z.enum(['render', 'attach']).optional(),
+    rendered_locally: z.boolean().optional(),
+  }),
+)
+type OutputSchema = ReturnType<typeof outputSchema>
+export type SentUserFileAttachment = z.infer<
+  ReturnType<typeof sentUserFileAttachmentSchema>
+>
+export type SendUserFileOutput = z.infer<OutputSchema>
+
+const MAX_REMOTE_ATTACHMENT_STRING_CHARS = 2000
+
+type PrivilegedRemoteFields = {
+  pathValidated?: unknown
+  opens_by_path?: unknown
+  upload_error_code?: unknown
+  upload_suspected_limit_bytes?: unknown
+  scaled?: unknown
+  thumbnail?: unknown
 }
 
 /**
@@ -147,8 +195,10 @@ const listedSendUserFileArgsSlot = new RootSessionSlot<
   Map<string, ListedSendUserFileSnapshot>
 >(() => new Map())
 
-function getListedSendUserFileArgs(): Map<string, ListedSendUserFileSnapshot> {
-  return listedSendUserFileArgsSlot.of(getBootstrapSession())
+function getListedSendUserFileArgs(session?: {
+  readonly root: object
+}): Map<string, ListedSendUserFileSnapshot> {
+  return listedSendUserFileArgsSlot.of(session ?? getBootstrapSession())
 }
 
 /**
@@ -176,8 +226,9 @@ function buildListedSendUserFileSnapshot(
 export function recordListedSendUserFileArgs(
   toolUseId: string,
   paths: readonly string[],
+  session?: { readonly root: object },
 ): void {
-  const listedSendUserFileArgsByToolUseId = getListedSendUserFileArgs()
+  const listedSendUserFileArgsByToolUseId = getListedSendUserFileArgs(session)
   listedSendUserFileArgsByToolUseId.set(
     toolUseId,
     buildListedSendUserFileSnapshot(paths),
@@ -197,11 +248,12 @@ export function recordListedSendUserFileArgs(
 export function verifySendUserFileArgsUnchanged(
   toolUseId: string | undefined,
   paths: readonly string[],
+  session?: { readonly root: object },
 ): { ok: true } | { ok: false; error: string } {
   if (!toolUseId) {
     return { ok: true }
   }
-  const listedSendUserFileArgsByToolUseId = getListedSendUserFileArgs()
+  const listedSendUserFileArgsByToolUseId = getListedSendUserFileArgs(session)
   const stashed = listedSendUserFileArgsByToolUseId.get(toolUseId)
   if (stashed === undefined) {
     return { ok: true }
@@ -249,6 +301,173 @@ export const SendUserFileTool = buildTool({
 
   get inputSchema(): InputSchema {
     return inputSchema()
+  },
+  get outputSchema(): OutputSchema {
+    return outputSchema()
+  },
+  fromAnotherProcess(data: SendUserFileOutput, input: SendUserFileInput) {
+    const trustedInputPaths = new Set<string>()
+    if (typeof input.file_path === 'string' && input.file_path.length > 0) {
+      trustedInputPaths.add(input.file_path)
+    }
+    if (typeof input.files === 'string' && input.files.length > 0) {
+      trustedInputPaths.add(input.files)
+    } else if (Array.isArray(input.files)) {
+      for (const p of input.files) {
+        if (typeof p === 'string' && p.length > 0) {
+          trustedInputPaths.add(p)
+        }
+      }
+    }
+    const sanitizeRemotePath = (rawPath: string): string =>
+      trustedInputPaths.has(rawPath)
+        ? rawPath
+        : sanitizeRemoteWireText(rawPath, MAX_REMOTE_ATTACHMENT_STRING_CHARS)
+
+    const {
+      rendered_locally: _untrustedRenderedLocally,
+      caption: _untrustedCaption,
+      display: _untrustedDisplay,
+      pathValidated: _topPathValidated,
+      opens_by_path: _topOpensByPath,
+      upload_error_code: _topUploadErrorCode,
+      upload_suspected_limit_bytes: _topUploadSuspectedLimitBytes,
+      scaled: _topScaled,
+      thumbnail: _topThumbnail,
+      file_path,
+      file_uuid,
+      error,
+      files,
+      attachments,
+      ...rest
+    } = data as SendUserFileOutput & PrivilegedRemoteFields
+    void _untrustedRenderedLocally
+    void _untrustedCaption
+    void _untrustedDisplay
+    void _topPathValidated
+    void _topOpensByPath
+    void _topUploadErrorCode
+    void _topUploadSuspectedLimitBytes
+    void _topScaled
+    void _topThumbnail
+
+    const sanitizedFiles = files?.map(rawEntry => {
+      const {
+        pathValidated: _pathValidated,
+        opens_by_path: _opensByPath,
+        upload_error_code: _uploadErrorCode,
+        upload_suspected_limit_bytes: _uploadSuspectedLimitBytes,
+        scaled: _scaled,
+        thumbnail: _thumbnail,
+        file_path: entryPath,
+        file_uuid: entryUuid,
+        error: entryError,
+        ...entryRest
+      } = rawEntry as SentFileEntry & PrivilegedRemoteFields
+      void _pathValidated
+      void _opensByPath
+      void _uploadErrorCode
+      void _uploadSuspectedLimitBytes
+      void _scaled
+      void _thumbnail
+      return {
+        ...entryRest,
+        file_path: sanitizeRemotePath(entryPath),
+        ...(entryUuid !== undefined
+          ? {
+              file_uuid: sanitizeRemoteWireText(
+                entryUuid,
+                MAX_REMOTE_ATTACHMENT_STRING_CHARS,
+              ),
+            }
+          : {}),
+        ...(entryError !== undefined
+          ? {
+              error: sanitizeRemoteWireText(
+                entryError,
+                MAX_REMOTE_ATTACHMENT_STRING_CHARS,
+              ),
+            }
+          : {}),
+      }
+    })
+
+    const sanitizedAttachments = attachments?.map(rawAtt => {
+      const {
+        pathValidated: _pathValidated,
+        opens_by_path: _opensByPath,
+        upload_error_code: _uploadErrorCode,
+        upload_suspected_limit_bytes: _uploadSuspectedLimitBytes,
+        scaled: _scaled,
+        thumbnail: _thumbnail,
+        path: attPath,
+        file_uuid: attUuid,
+        error: attError,
+        ...attRest
+      } = rawAtt as SentUserFileAttachment & PrivilegedRemoteFields
+      void _pathValidated
+      void _opensByPath
+      void _uploadErrorCode
+      void _uploadSuspectedLimitBytes
+      void _scaled
+      void _thumbnail
+      return {
+        ...attRest,
+        path: sanitizeRemotePath(attPath),
+        ...(attUuid !== undefined
+          ? {
+              file_uuid: sanitizeRemoteWireText(
+                attUuid,
+                MAX_REMOTE_ATTACHMENT_STRING_CHARS,
+              ),
+            }
+          : {}),
+        ...(attError !== undefined
+          ? {
+              error: sanitizeRemoteWireText(
+                attError,
+                MAX_REMOTE_ATTACHMENT_STRING_CHARS,
+              ),
+            }
+          : {}),
+      }
+    })
+
+    const caption =
+      typeof input.caption === 'string' ? input.caption : undefined
+    const display =
+      input.display === 'render' || input.display === 'attach'
+        ? input.display
+        : undefined
+
+    return {
+      data: {
+        ...rest,
+        file_path: sanitizeRemotePath(file_path),
+        ...(file_uuid !== undefined
+          ? {
+              file_uuid: sanitizeRemoteWireText(
+                file_uuid,
+                MAX_REMOTE_ATTACHMENT_STRING_CHARS,
+              ),
+            }
+          : {}),
+        ...(error !== undefined
+          ? {
+              error: sanitizeRemoteWireText(
+                error,
+                MAX_REMOTE_ATTACHMENT_STRING_CHARS,
+              ),
+            }
+          : {}),
+        ...(sanitizedFiles !== undefined ? { files: sanitizedFiles } : {}),
+        ...(sanitizedAttachments !== undefined
+          ? { attachments: sanitizedAttachments }
+          : {}),
+        ...(caption !== undefined ? { caption } : {}),
+        ...(display !== undefined ? { display } : {}),
+      },
+    }
   },
 
   async description() {
@@ -314,225 +533,236 @@ Guidelines:
     }
   },
 
-  async checkPermissions(input: SendUserFileInput, context) {
-    const requestedPaths = normalizeSendUserFilePaths(input)
-    if (context.toolUseId) {
-      recordListedSendUserFileArgs(context.toolUseId, requestedPaths)
-    }
+  create(deps: ToolDeps) {
     return {
-      behavior: 'allow' as const,
-      updatedInput: input,
-    }
-  },
+      async checkPermissions(input: SendUserFileInput, callCtx) {
+        const requestedPaths = normalizeSendUserFilePaths(input)
+        if (callCtx.toolUseId) {
+          recordListedSendUserFileArgs(
+            callCtx.toolUseId,
+            requestedPaths,
+            deps.session,
+          )
+        }
+        return {
+          behavior: 'allow' as const,
+          updatedInput: input,
+        }
+      },
 
-  async call(
-    input: SendUserFileInput,
-    context,
-  ): Promise<{ data: SendUserFileOutput }> {
-    const requestedPaths = normalizeSendUserFilePaths(input)
-    // Official 2.1.331 TOCTOU argument check (`05_send_file_toctou.js` + `SendUserFileTool`):
-    // refuse sending any file if arguments/paths changed after permission check/display.
-    const argCheck = verifySendUserFileArgsUnchanged(
-      context.toolUseId,
-      requestedPaths,
-    )
-    if (!argCheck.ok) {
-      return {
-        data: {
-          sent: false,
-          file_path: requestedPaths[0] ?? '',
-          files: requestedPaths.map(file_path => ({
-            file_path,
-            sent: false,
-            error: argCheck.error,
-          })),
-          error: argCheck.error,
-        },
-      }
-    }
-    if (requestedPaths.length === 0) {
-      return {
-        data: {
-          sent: false,
-          file_path: '',
-          files: [],
-          error:
-            'At least one file path must be provided in `files` or `file_path`.',
-        },
-      }
-    }
-
-    const { readFile, stat } = await import('fs/promises')
-    const appState = context.getAppState()
-    const entries: SentFileEntry[] = []
-
-    for (const file_path of requestedPaths) {
-      // Official 2.1.321 #1898: refuse bidi / control characters in filename
-      if (hasUnsafeFilenameCharacters(file_path)) {
-        entries.push({
-          file_path,
-          sent: false,
-          error: unsafeFilenameRefusalMessage(file_path),
-        })
-        continue
-      }
-
-      // densable publish: Yhe(y)||Jw(y) before filesystem access
-      const expanded = expandPath(file_path)
-      if (
-        isDeviceOrNtNamespacePath(expanded) ||
-        isDeviceOrNtNamespacePath(file_path)
-      ) {
-        entries.push({
-          file_path,
-          sent: false,
-          error:
-            'file_path: device- or NT-namespace paths cannot be published — spell the path plainly',
-        })
-        continue
-      }
-
-      // #1488: In restricted sessions, disallow sending files outside working directories.
-      if (isRestrictedSession()) {
-        const inside = pathInOutsideReadFenceWorkingPath(
-          expanded,
-          appState.toolPermissionContext,
+      async call(
+        input: SendUserFileInput,
+        callCtx,
+      ): Promise<{ data: SendUserFileOutput }> {
+        const requestedPaths = normalizeSendUserFilePaths(input)
+        // Official 2.1.331 TOCTOU argument check (`05_send_file_toctou.js` + `SendUserFileTool`):
+        // refuse sending any file if arguments/paths changed after permission check/display.
+        const argCheck = verifySendUserFileArgsUnchanged(
+          callCtx.toolUseId,
+          requestedPaths,
+          deps.session,
         )
-        if (!inside) {
-          entries.push({
-            file_path,
-            sent: false,
-            error:
-              'Cannot send files outside the working directory in a restricted session.',
-          })
-          continue
+        if (!argCheck.ok) {
+          return {
+            data: {
+              sent: false,
+              file_path: requestedPaths[0] ?? '',
+              files: requestedPaths.map(file_path => ({
+                file_path,
+                sent: false,
+                error: argCheck.error,
+              })),
+              error: argCheck.error,
+            },
+          }
         }
-      }
-
-      // Verify file exists and is readable (use validated `expanded` path — #1768)
-      let fileSize: number
-      try {
-        const fileStat = await stat(expanded)
-        if (!fileStat.isFile()) {
-          entries.push({
-            file_path,
-            sent: false,
-            error: 'Path is not a file.',
-          })
-          continue
+        if (requestedPaths.length === 0) {
+          return {
+            data: {
+              sent: false,
+              file_path: '',
+              files: [],
+              error:
+                'At least one file path must be provided in `files` or `file_path`.',
+            },
+          }
         }
-        fileSize = fileStat.size
-      } catch {
-        entries.push({
-          file_path,
-          sent: false,
-          error: 'File does not exist or is not readable.',
-        })
-        continue
-      }
 
-      // Official 2.1.323 #2146: validate SKILL.md and .skill archives before
-      // cloud/Cowork upload so unsaveable skill files are refused locally.
-      if (isSkillAttachmentPath(expanded)) {
-        try {
-          const bytes = await readFile(expanded)
-          const failure = validateSkillAttachmentForUpload(expanded, bytes)
-          if (failure) {
-            const refusal = formatUnsaveableSkillRefusal(expanded, bytes)
+        const { readFile, stat } = await import('fs/promises')
+        const appState = deps.getAppState()
+        const permissionContext = deps.permissions()
+        const signal = callCtx.signal
+        const entries: SentFileEntry[] = []
+
+        for (const file_path of requestedPaths) {
+          // Official 2.1.321 #1898: refuse bidi / control characters in filename
+          if (hasUnsafeFilenameCharacters(file_path)) {
             entries.push({
               file_path,
               sent: false,
-              size: fileSize,
-              error:
-                refusal?.message ??
-                `not sent: claude.ai would refuse to save it as a skill, because ${failure.why}.`,
+              error: unsafeFilenameRefusalMessage(file_path),
             })
             continue
           }
-        } catch {
-          // If reading fails here, fall through to upload error handling below.
-        }
-      }
 
-      // Attempt bridge upload if available (so web/iOS viewers can download)
-      let fileUuid: string | undefined
-      let uploadError: string | undefined
-      if (appState.replBridgeEnabled) {
-        try {
-          const {
-            formatLargeFileUploadFailure,
-            SUSPECTED_UPLOAD_LIMIT_BYTES,
-            uploadBriefAttachmentWithStatus,
-          } = await import(
-            '@claude-code/builtin-tools/tools/BriefTool/upload.js'
-          )
-          const outcome = await uploadBriefAttachmentWithStatus(
-            expanded,
-            fileSize,
-            {
-              replBridgeEnabled: true,
-              signal: context.abortController.signal,
-            },
-          )
-          if ('fileUuid' in outcome) {
-            fileUuid = outcome.fileUuid
-          } else {
-            uploadError = formatSendUserFileUploadError(outcome.error, {
-              signal: context.abortController.signal,
-              fallbackFormatter: err =>
-                formatLargeFileUploadFailure({
-                  size: fileSize,
-                  uploadError: err,
-                  suspectedLimitBytes:
-                    outcome.suspectedLimitBytes ??
-                    (fileSize > SUSPECTED_UPLOAD_LIMIT_BYTES
-                      ? SUSPECTED_UPLOAD_LIMIT_BYTES
-                      : undefined),
-                }),
+          // densable publish: Yhe(y)||Jw(y) before filesystem access
+          const expanded = expandPath(file_path)
+          if (
+            isDeviceOrNtNamespacePath(expanded) ||
+            isDeviceOrNtNamespacePath(file_path)
+          ) {
+            entries.push({
+              file_path,
+              sent: false,
+              error:
+                'file_path: device- or NT-namespace paths cannot be published — spell the path plainly',
             })
+            continue
           }
-        } catch (e) {
-          const rawMsg = isUploadAbortError(e, context.abortController.signal)
-            ? UPLOAD_ABORTED_ERROR
-            : e instanceof Error
-              ? e.message
-              : String(e)
-          uploadError = formatSendUserFileUploadError(rawMsg, {
-            signal: context.abortController.signal,
+
+          // #1488: In restricted sessions, disallow sending files outside working directories.
+          if (isRestrictedSession()) {
+            const inside = pathInOutsideReadFenceWorkingPath(
+              expanded,
+              permissionContext,
+            )
+            if (!inside) {
+              entries.push({
+                file_path,
+                sent: false,
+                error:
+                  'Cannot send files outside the working directory in a restricted session.',
+              })
+              continue
+            }
+          }
+
+          // Verify file exists and is readable (use validated `expanded` path — #1768)
+          let fileSize: number
+          try {
+            const fileStat = await stat(expanded)
+            if (!fileStat.isFile()) {
+              entries.push({
+                file_path,
+                sent: false,
+                error: 'Path is not a file.',
+              })
+              continue
+            }
+            fileSize = fileStat.size
+          } catch {
+            entries.push({
+              file_path,
+              sent: false,
+              error: 'File does not exist or is not readable.',
+            })
+            continue
+          }
+
+          // Official 2.1.323 #2146: validate SKILL.md and .skill archives before
+          // cloud/Cowork upload so unsaveable skill files are refused locally.
+          if (isSkillAttachmentPath(expanded)) {
+            try {
+              const bytes = await readFile(expanded)
+              const failure = validateSkillAttachmentForUpload(expanded, bytes)
+              if (failure) {
+                const refusal = formatUnsaveableSkillRefusal(expanded, bytes)
+                entries.push({
+                  file_path,
+                  sent: false,
+                  size: fileSize,
+                  error:
+                    refusal?.message ??
+                    `not sent: claude.ai would refuse to save it as a skill, because ${failure.why}.`,
+                })
+                continue
+              }
+            } catch {
+              // If reading fails here, fall through to upload error handling below.
+            }
+          }
+
+          // Attempt bridge upload if available (so web/iOS viewers can download)
+          let fileUuid: string | undefined
+          let uploadError: string | undefined
+          if (appState.replBridgeEnabled) {
+            try {
+              const {
+                formatLargeFileUploadFailure,
+                SUSPECTED_UPLOAD_LIMIT_BYTES,
+                uploadBriefAttachmentWithStatus,
+              } = await import(
+                '@claude-code/builtin-tools/tools/BriefTool/upload.js'
+              )
+              const outcome = await uploadBriefAttachmentWithStatus(
+                expanded,
+                fileSize,
+                {
+                  replBridgeEnabled: true,
+                  signal,
+                },
+              )
+              if ('fileUuid' in outcome) {
+                fileUuid = outcome.fileUuid
+              } else {
+                uploadError = formatSendUserFileUploadError(outcome.error, {
+                  signal,
+                  fallbackFormatter: err =>
+                    formatLargeFileUploadFailure({
+                      size: fileSize,
+                      uploadError: err,
+                      suspectedLimitBytes:
+                        outcome.suspectedLimitBytes ??
+                        (fileSize > SUSPECTED_UPLOAD_LIMIT_BYTES
+                          ? SUSPECTED_UPLOAD_LIMIT_BYTES
+                          : undefined),
+                    }),
+                })
+              }
+            } catch (e) {
+              const rawMsg = isUploadAbortError(e, signal)
+                ? UPLOAD_ABORTED_ERROR
+                : e instanceof Error
+                  ? e.message
+                  : String(e)
+              uploadError = formatSendUserFileUploadError(rawMsg, {
+                signal,
+              })
+            }
+          }
+
+          const delivered = !appState.replBridgeEnabled || Boolean(fileUuid)
+          entries.push({
+            file_path,
+            sent: delivered,
+            size: fileSize,
+            ...(fileUuid ? { file_uuid: fileUuid } : {}),
+            ...(!delivered
+              ? {
+                  error:
+                    uploadError ??
+                    'Bridge upload failed. File available at local path.',
+                }
+              : {}),
           })
         }
-      }
 
-      const delivered = !appState.replBridgeEnabled || Boolean(fileUuid)
-      entries.push({
-        file_path,
-        sent: delivered,
-        size: fileSize,
-        ...(fileUuid ? { file_uuid: fileUuid } : {}),
-        ...(!delivered
-          ? {
-              error:
-                uploadError ??
-                'Bridge upload failed. File available at local path.',
-            }
-          : {}),
-      })
-    }
-
-    const first = entries[0]!
-    const allSent = entries.every(e => e.sent)
-    const firstError = entries.find(e => !e.sent)?.error
-    return {
-      data: {
-        sent: allSent,
-        file_path: first.file_path,
-        files: entries,
-        ...(first.size !== undefined ? { size: first.size } : {}),
-        ...(first.file_uuid !== undefined
-          ? { file_uuid: first.file_uuid }
-          : {}),
-        ...(firstError !== undefined ? { error: firstError } : {}),
+        const first = entries[0]!
+        const allSent = entries.every(e => e.sent)
+        const firstError = entries.find(e => !e.sent)?.error
+        return {
+          data: {
+            sent: allSent,
+            file_path: first.file_path,
+            files: entries,
+            ...(first.size !== undefined ? { size: first.size } : {}),
+            ...(first.file_uuid !== undefined
+              ? { file_uuid: first.file_uuid }
+              : {}),
+            ...(firstError !== undefined ? { error: firstError } : {}),
+          },
+        }
       },
     }
   },
-})
+} satisfies ToolDef<InputSchema, SendUserFileOutput>)

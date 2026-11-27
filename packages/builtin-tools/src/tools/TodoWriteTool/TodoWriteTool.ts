@@ -1,6 +1,6 @@
 import { z } from 'zod/v4'
 import { getSessionId } from 'src/bootstrap/state.js'
-import { buildTool, type ToolDef } from 'src/Tool.js'
+import { buildTool, type ToolDef, type ToolDeps } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { isTodoWriteToolEnabled } from 'src/utils/tasks.js'
 import { TodoListSchema } from 'src/utils/todo/types.js'
@@ -52,32 +52,29 @@ export const TodoWriteTool = buildTool({
   toAutoClassifierInput(input) {
     return `${input.todos.length} items`
   },
-  async checkPermissions(input) {
-    // No permission checks required for todo operations
-    return { behavior: 'allow', updatedInput: input }
-  },
   renderToolUseMessage() {
     return null
   },
-  async call({ todos }, context) {
-    const appState = context.getAppState()
-    const todoKey = context.agentId ?? getSessionId()
-    const oldTodos = appState.todos[todoKey] ?? []
-    const allDone = todos.every(_ => _.status === 'completed')
-    const newTodos = allDone ? [] : todos
-
-    context.setAppState(prev => ({
-      ...prev,
-      todos: {
-        ...prev.todos,
-        [todoKey]: newTodos,
-      },
-    }))
-
+  create(deps: ToolDeps) {
     return {
-      data: {
-        oldTodos,
-        newTodos: todos,
+      async checkPermissions(input) {
+        // No permission checks required for todo operations
+        return { behavior: 'allow', updatedInput: input }
+      },
+      async call({ todos }) {
+        const todoKey = deps.agentId ?? getSessionId()
+        const oldTodos = deps.todos.get(todoKey) ?? []
+        const allDone = todos.every(_ => _.status === 'completed')
+        const newTodos = allDone ? [] : todos
+
+        deps.todos.set(todoKey, newTodos)
+
+        return {
+          data: {
+            oldTodos,
+            newTodos: todos,
+          },
+        }
       },
     }
   },

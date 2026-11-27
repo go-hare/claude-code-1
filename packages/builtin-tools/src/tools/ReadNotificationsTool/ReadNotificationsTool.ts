@@ -14,7 +14,9 @@ import {
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import {
   buildTool,
+  resolveToolUseContext,
   type ToolDef,
+  type ToolDeps,
   type ToolResultBlockParam,
   type ToolUseContext,
 } from 'src/Tool.js'
@@ -154,31 +156,37 @@ export const ReadNotificationsTool = buildTool({
     return output.notifications.map(n => n.content).join('\n')
   },
 
-  async call(_input: ReadNotificationsInput, context: ToolUseContext) {
-    if (context.agentId !== undefined) {
-      throw new Error(
-        'ReadNotifications can only be called from the main conversation — subagents must not drain the session notification buffer.',
-      )
-    }
-
-    const readAt = new Date().toISOString()
-    const registry =
-      (context as ContextWithNotificationRegistry)
-        .queuedNotificationsRegistry ?? getDefaultQueuedNotificationsRegistry()
-
-    const { notifications, remaining } = registry.drain()
-
+  create(deps: ToolDeps) {
     return {
-      data: {
-        notifications: notifications.map(n => ({
-          notification_id: n.notificationId,
-          origin: n.origin,
-          queued_at: n.queuedAt,
-          content: n.content,
-          ...(n.arrivedAt !== undefined ? { arrived_at: n.arrivedAt } : {}),
-        })),
-        remaining,
-        read_at: readAt,
+      async call(_input: ReadNotificationsInput, callCtx) {
+        if (deps.agentId !== undefined) {
+          throw new Error(
+            'ReadNotifications can only be called from the main conversation — subagents must not drain the session notification buffer.',
+          )
+        }
+
+        const readAt = new Date().toISOString()
+        const ctx = resolveToolUseContext(deps, callCtx)
+        const registry =
+          (ctx as ContextWithNotificationRegistry)
+            .queuedNotificationsRegistry ??
+          getDefaultQueuedNotificationsRegistry()
+
+        const { notifications, remaining } = registry.drain()
+
+        return {
+          data: {
+            notifications: notifications.map(n => ({
+              notification_id: n.notificationId,
+              origin: n.origin,
+              queued_at: n.queuedAt,
+              content: n.content,
+              ...(n.arrivedAt !== undefined ? { arrived_at: n.arrivedAt } : {}),
+            })),
+            remaining,
+            read_at: readAt,
+          },
+        }
       },
     }
   },

@@ -1,5 +1,5 @@
 import { z } from 'zod/v4'
-import { buildTool, type ToolDef, type ToolUseContext } from 'src/Tool.js'
+import { buildTool, resolveToolUseContext, type ToolDef } from 'src/Tool.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -234,240 +234,367 @@ function assertWebFetchAllowed(): void {
   }
 }
 
-export const WebFetchTool = Object.assign(
-  buildTool({
-    name: WEB_FETCH_TOOL_NAME,
-    searchHint: 'fetch and extract content from a URL',
-    backgrounding: 'detach',
-    // 100K chars - tool result persistence threshold
-    maxResultSizeChars: 100_000,
-    shouldDefer: true,
-    async description(input) {
-      const { url } = input as { url: string }
-      try {
-        const hostname = new URL(url).hostname
-        return `Claude wants to fetch content from ${hostname}`
-      } catch {
-        return `Claude wants to fetch content from this URL`
-      }
-    },
-    userFacingName() {
-      return 'Fetch'
-    },
-    getToolUseSummary,
-    getActivityDescription(input) {
-      const summary = getToolUseSummary(input)
-      return summary ? `Fetching ${summary}` : 'Fetching web page'
-    },
-    get inputSchema(): InputSchema {
-      return inputSchema()
-    },
-    coerceInput(input) {
-      const coerced = coerceWebFetchInputRaw(input)
-      if (coerced === null) return null
-      const parsed = inputSchema().safeParse(coerced.input)
-      return parsed.success ? { ...coerced, input: parsed.data } : null
-    },
-    get outputSchema(): OutputSchema {
-      return outputSchema()
-    },
-    // 2.1.323 #2065 (SEA `isEnabled(){return!i.CLAUDE_CODE_DISABLE_WEB_FETCH&&yn(fkt)}`)
-    isEnabled() {
-      return getWebFetchDisabledReason() === null
-    },
-    isConcurrencySafe() {
-      return true
-    },
-    isReadOnly() {
-      return true
-    },
-    toAutoClassifierInput(input) {
-      return input.prompt ? `${input.url}: ${input.prompt}` : input.url
-    },
-    async checkPermissions(input, context): Promise<PermissionDecision> {
-      const appState = context.getAppState()
-      const permissionContext = appState.toolPermissionContext
+export const WebFetchTool = buildTool({
+  name: WEB_FETCH_TOOL_NAME,
+  searchHint: 'fetch and extract content from a URL',
+  backgrounding: 'detach',
+  // 100K chars - tool result persistence threshold
+  maxResultSizeChars: 100_000,
+  shouldDefer: true,
+  async description(input) {
+    const { url } = input as { url: string }
+    try {
+      const hostname = new URL(url).hostname
+      return `Claude wants to fetch content from ${hostname}`
+    } catch {
+      return `Claude wants to fetch content from this URL`
+    }
+  },
+  userFacingName() {
+    return 'Fetch'
+  },
+  getToolUseSummary,
+  getActivityDescription(input) {
+    const summary = getToolUseSummary(input)
+    return summary ? `Fetching ${summary}` : 'Fetching web page'
+  },
+  get inputSchema(): InputSchema {
+    return inputSchema()
+  },
+  coerceInput(input) {
+    const coerced = coerceWebFetchInputRaw(input)
+    if (coerced === null) return null
+    const parsed = inputSchema().safeParse(coerced.input)
+    return parsed.success ? { ...coerced, input: parsed.data } : null
+  },
+  get outputSchema(): OutputSchema {
+    return outputSchema()
+  },
+  // 2.1.323 #2065 (SEA `isEnabled(){return!i.CLAUDE_CODE_DISABLE_WEB_FETCH&&yn(fkt)}`)
+  isEnabled() {
+    return getWebFetchDisabledReason() === null
+  },
+  isConcurrencySafe() {
+    return true
+  },
+  isReadOnly() {
+    return true
+  },
+  toAutoClassifierInput(input) {
+    return input.prompt ? `${input.url}: ${input.prompt}` : input.url
+  },
+  async prompt(options) {
+    const model = options?.model
+    const tools = options?.tools
+    const leanPrompt = (options as { leanPrompt?: boolean } | undefined)
+      ?.leanPrompt
+    const enabled = await isWebFetchArtifactExceptionEnabled(tools)
+    const hasArtifactTool =
+      enabled &&
+      (tools?.some(tool => tool.name === OFFICIAL_ARTIFACT_TOOL_NAME) ?? false)
+    return getWebFetchPrompt(
+      model,
+      hasArtifactTool ? 'artifact-tool' : enabled ? 'webfetch' : 'none',
+      leanPrompt,
+    )
+  },
+  renderToolUseMessage,
+  renderToolUseProgressMessage,
+  renderToolResultMessage,
+  create(deps) {
+    return {
+      async checkPermissions(input): Promise<PermissionDecision> {
+        const permissionContext = deps.permissions()
 
-      // Check for a rule specific to the tool input (matching hostname)
-      const ruleContent = webFetchToolInputToPermissionRuleContent(input)
+        // Check for a rule specific to the tool input (matching hostname)
+        const ruleContent = webFetchToolInputToPermissionRuleContent(input)
 
-      const denyRule = getRuleByContentsForTool(
-        permissionContext,
-        WebFetchTool,
-        'deny',
-      ).get(ruleContent)
-      if (denyRule) {
-        return {
-          behavior: 'deny',
-          message: `${WebFetchTool.name} denied access to ${ruleContent}.`,
-          decisionReason: {
-            type: 'rule',
-            rule: denyRule,
-          },
+        const denyRule = getRuleByContentsForTool(
+          permissionContext,
+          WebFetchTool,
+          'deny',
+        ).get(ruleContent)
+        if (denyRule) {
+          return {
+            behavior: 'deny',
+            message: `${WebFetchTool.name} denied access to ${ruleContent}.`,
+            decisionReason: {
+              type: 'rule',
+              rule: denyRule,
+            },
+          }
         }
-      }
 
-      const askRule = getRuleByContentsForTool(
-        permissionContext,
-        WebFetchTool,
-        'ask',
-      ).get(ruleContent)
-      if (askRule) {
+        const askRule = getRuleByContentsForTool(
+          permissionContext,
+          WebFetchTool,
+          'ask',
+        ).get(ruleContent)
+        if (askRule) {
+          return {
+            behavior: 'ask',
+            message: `Claude requested permissions to use ${WebFetchTool.name}, but you haven't granted it yet.`,
+            decisionReason: {
+              type: 'rule',
+              rule: askRule,
+            },
+            suggestions: buildSuggestions(ruleContent),
+          }
+        }
+
+        const allowRule = getRuleByContentsForTool(
+          permissionContext,
+          WebFetchTool,
+          'allow',
+        ).get(ruleContent)
+        if (allowRule) {
+          return {
+            behavior: 'allow',
+            updatedInput: input,
+            decisionReason: {
+              type: 'rule',
+              rule: allowRule,
+            },
+          }
+        }
+
+        // Check if the hostname is in the preapproved list (after explicit rules,
+        // and disabled under CLAUDE_CODE_EVAL_CONFINED)
+        if (!isEnvTruthy(process.env.CLAUDE_CODE_EVAL_CONFINED)) {
+          try {
+            const { url } = input as { url: string }
+            const parsedUrl = new URL(url)
+            if (isPreapprovedHost(parsedUrl.hostname, parsedUrl.pathname)) {
+              return {
+                behavior: 'allow',
+                updatedInput: input,
+                decisionReason: { type: 'other', reason: 'Preapproved host' },
+              }
+            }
+          } catch {
+            // If URL parsing fails, continue with normal permission checks
+          }
+        }
+
         return {
           behavior: 'ask',
           message: `Claude requested permissions to use ${WebFetchTool.name}, but you haven't granted it yet.`,
-          decisionReason: {
-            type: 'rule',
-            rule: askRule,
-          },
           suggestions: buildSuggestions(ruleContent),
         }
-      }
-
-      const allowRule = getRuleByContentsForTool(
-        permissionContext,
-        WebFetchTool,
-        'allow',
-      ).get(ruleContent)
-      if (allowRule) {
+      },
+      permissionCheckFailureDecision(
+        input: unknown,
+      ): PermissionDecision | undefined {
+        if (
+          typeof input !== 'object' ||
+          input === null ||
+          Array.isArray(input) ||
+          !Object.keys(input).some(
+            k => k !== 'url' && k !== 'prompt' && k !== 'offset',
+          )
+        ) {
+          return undefined
+        }
         return {
-          behavior: 'allow',
-          updatedInput: input,
+          behavior: 'deny',
+          message:
+            'Nothing was fetched. A PermissionRequest hook approved this fetch with arguments attached that WebFetch cannot check. Have the hook approve without sending arguments back, or send back only url, prompt and offset.',
           decisionReason: {
-            type: 'rule',
-            rule: allowRule,
+            type: 'safetyCheck',
+            reason:
+              'A PermissionRequest hook approved this fetch with arguments WebFetch cannot check, so the fetch did not run.',
+            classifierApprovable: false,
           },
         }
-      }
-
-      // Check if the hostname is in the preapproved list (after explicit rules,
-      // and disabled under CLAUDE_CODE_EVAL_CONFINED)
-      if (!isEnvTruthy(process.env.CLAUDE_CODE_EVAL_CONFINED)) {
-        try {
-          const { url } = input as { url: string }
-          const parsedUrl = new URL(url)
-          if (isPreapprovedHost(parsedUrl.hostname, parsedUrl.pathname)) {
-            return {
-              behavior: 'allow',
-              updatedInput: input,
-              decisionReason: { type: 'other', reason: 'Preapproved host' },
-            }
+      },
+      async validateInput(input) {
+        // 2.1.323 #2065 (SEA `GDn` @291284600): recheck env & org policy per call
+        const disabledReason = getWebFetchDisabledReason()
+        if (disabledReason !== null) {
+          return {
+            result: false,
+            message: disabledReason,
+            meta: { reason: 'refused' },
+            errorCode: 2,
           }
+        }
+        const { url } = input
+        try {
+          new URL(url)
         } catch {
-          // If URL parsing fails, continue with normal permission checks
+          return {
+            result: false,
+            message: `Error: Invalid URL "${url}". The URL provided could not be parsed.`,
+            meta: { reason: 'invalid_url' },
+            errorCode: 1,
+          }
         }
-      }
+        return { result: true }
+      },
+      async call({ url, prompt, offset = 0 }, callCtx) {
+        // 2.1.323 #2065 (SEA `$Dn` @291284850): enforce env & org policy at call time
+        assertWebFetchAllowed()
+        const { abortController } = callCtx
+        const { isNonInteractiveSession, tools } = deps
+        const start = Date.now()
+        const artifactFail = await tryArtifactWebFetchFail(
+          url,
+          tools,
+          isWebFetchAgentRuntimeContext(getAgentContext() ?? {}),
+          start,
+          getDenyRuleForTool(deps.permissions(), {
+            name: OFFICIAL_ARTIFACT_TOOL_NAME,
+          }) !== null,
+        )
+        if (artifactFail) return artifactFail
 
-      return {
-        behavior: 'ask',
-        message: `Claude requested permissions to use ${WebFetchTool.name}, but you haven't granted it yet.`,
-        suggestions: buildSuggestions(ruleContent),
-      }
-    },
-    async prompt(options) {
-      const model = options?.model
-      const tools = options?.tools
-      const leanPrompt = (options as { leanPrompt?: boolean } | undefined)
-        ?.leanPrompt
-      const enabled = await isWebFetchArtifactExceptionEnabled(tools)
-      const hasArtifactTool =
-        enabled &&
-        (tools?.some(tool => tool.name === OFFICIAL_ARTIFACT_TOOL_NAME) ??
-          false)
-      return getWebFetchPrompt(
-        model,
-        hasArtifactTool ? 'artifact-tool' : enabled ? 'webfetch' : 'none',
-        leanPrompt,
-      )
-    },
-    async validateInput(input) {
-      // 2.1.323 #2065 (SEA `GDn` @291284600): recheck env & org policy per call
-      const disabledReason = getWebFetchDisabledReason()
-      if (disabledReason !== null) {
-        return {
-          result: false,
-          message: disabledReason,
-          meta: { reason: 'refused' },
-          errorCode: 2,
+        // Official 325 #1755: claude.ai shared-chat URLs render in the browser;
+        // plain fetch only returns the app shell. Return Not Fetched guidance.
+        const sharedChat = parseClaudeAiShareUrl(url)
+        if (sharedChat !== null) {
+          const shareMessage = `https://claude.ai/share/${sharedChat.snapshotId} is a shared claude.ai chat. Its content is rendered in the browser, so it is not fetchable from here — a plain fetch returns only the claude.ai app shell. The user can paste or export the conversation instead.`
+          return {
+            data: {
+              bytes: Buffer.byteLength(shareMessage),
+              code: 0,
+              codeText: 'Not Fetched',
+              result: shareMessage,
+              durationMs: Date.now() - start,
+              url,
+            },
+          }
         }
-      }
-      const { url } = input
-      try {
-        new URL(url)
-      } catch {
-        return {
-          result: false,
-          message: `Error: Invalid URL "${url}". The URL provided could not be parsed.`,
-          meta: { reason: 'invalid_url' },
-          errorCode: 1,
-        }
-      }
-      return { result: true }
-    },
-    renderToolUseMessage,
-    renderToolUseProgressMessage,
-    renderToolResultMessage,
-    async call({ url, prompt, offset = 0 }, context) {
-      // 2.1.323 #2065 (SEA `$Dn` @291284850): enforce env & org policy at call time
-      assertWebFetchAllowed()
-      const {
-        abortController,
-        options: { isNonInteractiveSession, tools },
-      } = context
-      const start = Date.now()
-      const artifactFail = await tryArtifactWebFetchFail(
-        url,
-        tools,
-        isWebFetchAgentRuntimeContext(getAgentContext() ?? {}),
-        start,
-        getDenyRuleForTool(context.getAppState().toolPermissionContext, {
-          name: OFFICIAL_ARTIFACT_TOOL_NAME,
-        }) !== null,
-      )
-      if (artifactFail) return artifactFail
 
-      // Official 325 #1755: claude.ai shared-chat URLs render in the browser;
-      // plain fetch only returns the app shell. Return Not Fetched guidance.
-      const sharedChat = parseClaudeAiShareUrl(url)
-      if (sharedChat !== null) {
-        const shareMessage = `https://claude.ai/share/${sharedChat.snapshotId} is a shared claude.ai chat. Its content is rendered in the browser, so it is not fetchable from here — a plain fetch returns only the claude.ai app shell. The user can paste or export the conversation instead.`
-        return {
-          data: {
-            bytes: Buffer.byteLength(shareMessage),
-            code: 0,
-            codeText: 'Not Fetched',
-            result: shareMessage,
-            durationMs: Date.now() - start,
-            url,
-          },
-        }
-      }
+        // Select backend: settings.webFetchAdapter → default 'tavily'
+        const settings = getSettings_DEPRECATED()
+        const backend = settings.webFetchAdapter ?? 'tavily'
 
-      // Select backend: settings.webFetchAdapter → default 'tavily'
-      const settings = getSettings_DEPRECATED()
-      const backend = settings.webFetchAdapter ?? 'tavily'
+        // Tavily path: /extract returns Markdown directly — skip turndown + queryHaiku
+        if (backend === 'tavily') {
+          const response = await fetchContentWithTavily(url, abortController)
 
-      // Tavily path: /extract returns Markdown directly — skip turndown + queryHaiku
-      if (backend === 'tavily') {
-        const response = await fetchContentWithTavily(url, abortController)
-
-        if ('type' in response && response.type === 'redirect') {
-          const statusText = 'See Other'
-          const message = `REDIRECT DETECTED: The URL redirects to a different host.
+          if ('type' in response && response.type === 'redirect') {
+            const statusText = 'See Other'
+            const message = `REDIRECT DETECTED: The URL redirects to a different host.
 Original URL: ${(response as { originalUrl: string }).originalUrl}
 Redirect URL: ${(response as { redirectUrl: string }).redirectUrl}
 
 Please use WebFetch again with the redirect URL.`
 
+            const output: Output = {
+              bytes: Buffer.byteLength(message),
+              code: 302,
+              codeText: statusText,
+              result: message,
+              durationMs: Date.now() - start,
+              url,
+            }
+            return { data: output }
+          }
+
+          const {
+            content,
+            bytes,
+            code,
+            codeText,
+            contentType,
+            persistedPath,
+            persistedSize,
+          } = response as FetchedContent
+
+          const layerCtx = resolveToolUseContext(deps, callCtx)
+          const callerOptions = {
+            callerModel: getMainLoopModelFromLayers(layerCtx),
+            callerEffort: getEffortValueFromLayers(layerCtx),
+          }
+
+          const result = prompt
+            ? await formatFetchedWebResult({
+                url,
+                prompt,
+                offset,
+                content,
+                contentType,
+                code,
+                bytes,
+                persistedPath,
+                persistedSize,
+                abortController,
+                isNonInteractiveSession,
+                callerOptions,
+              })
+            : content
+
+          const output: Output = {
+            bytes,
+            code,
+            codeText,
+            result,
+            durationMs: Date.now() - start,
+            url,
+          }
+          return { data: output }
+        }
+
+        // HTTP direct path (original behavior): fetch + turndown + queryHaiku
+        let response: Awaited<ReturnType<typeof getURLMarkdownContent>>
+        try {
+          response = await getURLMarkdownContent(url, abortController)
+        } catch (err) {
+          const siteErrorType = extractCcrSiteAnswerErrorType(err)
+          if (siteErrorType === undefined) {
+            throw err
+          }
+          logEvent('tengu_web_fetch_site_answer', {
+            error_type:
+              siteErrorType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+          const siteResult = `Not fetched: ${url} failed at its site (${siteErrorType}), and nothing of the page was retrieved.`
+          return {
+            data: {
+              bytes: Buffer.byteLength(siteResult),
+              code: 0,
+              codeText: 'Not Fetched',
+              result: siteResult,
+              durationMs: Date.now() - start,
+              url,
+            },
+          }
+        }
+
+        // Check if we got a redirect to a different host
+        if ('type' in response && response.type === 'redirect') {
+          const statusText =
+            response.statusCode === 301
+              ? 'Moved Permanently'
+              : response.statusCode === 308
+                ? 'Permanent Redirect'
+                : response.statusCode === 307
+                  ? 'Temporary Redirect'
+                  : 'Found'
+
+          const message = `REDIRECT DETECTED: The URL redirects to a different host.
+
+Original URL: ${response.originalUrl}
+Redirect URL: ${response.redirectUrl}
+Status: ${response.statusCode} ${statusText}
+
+To complete your request, I need to fetch content from the redirected URL. Please use WebFetch again with these parameters:
+- url: "${response.redirectUrl}"
+- prompt: "${prompt}"${offset > 0 ? `\n- offset: ${offset}` : ''}`
+
           const output: Output = {
             bytes: Buffer.byteLength(message),
-            code: 302,
+            code: response.statusCode,
             codeText: statusText,
             result: message,
             durationMs: Date.now() - start,
             url,
           }
-          return { data: output }
+
+          return {
+            data: output,
+          }
         }
 
         const {
@@ -480,27 +607,24 @@ Please use WebFetch again with the redirect URL.`
           persistedSize,
         } = response as FetchedContent
 
-        const callerOptions = {
-          callerModel: getMainLoopModelFromLayers(context),
-          callerEffort: getEffortValueFromLayers(context),
-        }
-
-        const result = prompt
-          ? await formatFetchedWebResult({
-              url,
-              prompt,
-              offset,
-              content,
-              contentType,
-              code,
-              bytes,
-              persistedPath,
-              persistedSize,
-              abortController,
-              isNonInteractiveSession,
-              callerOptions,
-            })
-          : content
+        const layerCtx = resolveToolUseContext(deps, callCtx)
+        const result = await formatFetchedWebResult({
+          url,
+          prompt,
+          offset,
+          content,
+          contentType,
+          code,
+          bytes,
+          persistedPath,
+          persistedSize,
+          abortController,
+          isNonInteractiveSession,
+          callerOptions: {
+            callerModel: getMainLoopModelFromLayers(layerCtx),
+            callerEffort: getEffortValueFromLayers(layerCtx),
+          },
+        })
 
         const output: Output = {
           bytes,
@@ -510,148 +634,21 @@ Please use WebFetch again with the redirect URL.`
           durationMs: Date.now() - start,
           url,
         }
-        return { data: output }
-      }
-
-      // HTTP direct path (original behavior): fetch + turndown + queryHaiku
-      let response: Awaited<ReturnType<typeof getURLMarkdownContent>>
-      try {
-        response = await getURLMarkdownContent(url, abortController)
-      } catch (err) {
-        const siteErrorType = extractCcrSiteAnswerErrorType(err)
-        if (siteErrorType === undefined) {
-          throw err
-        }
-        logEvent('tengu_web_fetch_site_answer', {
-          error_type:
-            siteErrorType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        })
-        const siteResult = `Not fetched: ${url} failed at its site (${siteErrorType}), and nothing of the page was retrieved.`
-        return {
-          data: {
-            bytes: Buffer.byteLength(siteResult),
-            code: 0,
-            codeText: 'Not Fetched',
-            result: siteResult,
-            durationMs: Date.now() - start,
-            url,
-          },
-        }
-      }
-
-      // Check if we got a redirect to a different host
-      if ('type' in response && response.type === 'redirect') {
-        const statusText =
-          response.statusCode === 301
-            ? 'Moved Permanently'
-            : response.statusCode === 308
-              ? 'Permanent Redirect'
-              : response.statusCode === 307
-                ? 'Temporary Redirect'
-                : 'Found'
-
-        const message = `REDIRECT DETECTED: The URL redirects to a different host.
-
-Original URL: ${response.originalUrl}
-Redirect URL: ${response.redirectUrl}
-Status: ${response.statusCode} ${statusText}
-
-To complete your request, I need to fetch content from the redirected URL. Please use WebFetch again with these parameters:
-- url: "${response.redirectUrl}"
-- prompt: "${prompt}"${offset > 0 ? `\n- offset: ${offset}` : ''}`
-
-        const output: Output = {
-          bytes: Buffer.byteLength(message),
-          code: response.statusCode,
-          codeText: statusText,
-          result: message,
-          durationMs: Date.now() - start,
-          url,
-        }
 
         return {
           data: output,
         }
-      }
-
-      const {
-        content,
-        bytes,
-        code,
-        codeText,
-        contentType,
-        persistedPath,
-        persistedSize,
-      } = response as FetchedContent
-
-      const result = await formatFetchedWebResult({
-        url,
-        prompt,
-        offset,
-        content,
-        contentType,
-        code,
-        bytes,
-        persistedPath,
-        persistedSize,
-        abortController,
-        isNonInteractiveSession,
-        callerOptions: {
-          callerModel: getMainLoopModelFromLayers(context),
-          callerEffort: getEffortValueFromLayers(context),
-        },
-      })
-
-      const output: Output = {
-        bytes,
-        code,
-        codeText,
-        result,
-        durationMs: Date.now() - start,
-        url,
-      }
-
-      return {
-        data: output,
-      }
-    },
-    mapToolResultToToolResultBlockParam({ result }, toolUseID) {
-      return {
-        tool_use_id: toolUseID,
-        type: 'tool_result',
-        content: result,
-      }
-    },
-  } satisfies ToolDef<InputSchema, Output>),
-  {
-    permissionCheckFailureDecision(
-      input: unknown,
-      _context?: ToolUseContext,
-    ): PermissionDecision | undefined {
-      if (
-        typeof input !== 'object' ||
-        input === null ||
-        Array.isArray(input) ||
-        !Object.keys(input).some(
-          k => k !== 'url' && k !== 'prompt' && k !== 'offset',
-        )
-      ) {
-        return undefined
-      }
-      return {
-        behavior: 'deny',
-        message:
-          'Nothing was fetched. A PermissionRequest hook approved this fetch with arguments attached that WebFetch cannot check. Have the hook approve without sending arguments back, or send back only url, prompt and offset.',
-        decisionReason: {
-          type: 'safetyCheck',
-          reason:
-            'A PermissionRequest hook approved this fetch with arguments WebFetch cannot check, so the fetch did not run.',
-          classifierApprovable: false,
-        },
-      }
-    },
+      },
+    }
   },
-)
+  mapToolResultToToolResultBlockParam({ result }, toolUseID) {
+    return {
+      tool_use_id: toolUseID,
+      type: 'tool_result',
+      content: result,
+    }
+  },
+} satisfies ToolDef<InputSchema, Output>)
 
 export async function formatFetchedWebResult({
   url,

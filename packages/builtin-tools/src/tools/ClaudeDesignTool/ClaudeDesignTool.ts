@@ -5,8 +5,12 @@
 import axios from 'axios'
 import { z } from 'zod/v4'
 import { getOauthConfig } from 'src/constants/oauth.js'
-import type { ToolUseContext } from 'src/Tool.js'
-import { buildTool } from 'src/Tool.js'
+import {
+  buildTool,
+  resolveToolUseContext,
+  type ToolDef,
+  type ToolDeps,
+} from 'src/Tool.js'
 import type { PermissionResult } from 'src/types/permissions.js'
 import {
   DESIGN_CONSENT_DECISION_REASON,
@@ -293,383 +297,408 @@ export const ClaudeDesignTool = buildTool({
     const op = input?.operation
     return op ? `Claude Design: ${op}` : 'Claude Design'
   },
-  async validateInput(input) {
-    const argsError = validateWriteOpArgs(input.operation, input.arguments)
-    if (argsError) {
-      return { result: false as const, message: argsError, errorCode: 1 }
-    }
-    if (input.operation === 'finalize_plan') {
-      const projectError = validateFinalizePlanProjectId(
-        input.arguments?.project_id,
-      )
-      if (projectError) {
-        return { result: false as const, message: projectError, errorCode: 1 }
-      }
-    }
-    return { result: true as const }
-  },
-  async checkPermissions(input, context): Promise<PermissionResult<Input>> {
-    const grantState = designSessionState(context)
-    const args = input.arguments ?? {}
-    if (input.operation === 'finalize_plan' && args.scope === 'project') {
-      return safetyDeny(
-        'ClaudeDesign finalize_plan: scope "project" is no longer supported by this client. Write files directly without plan_token — the first write to a project asks for a one-time durable approval — or use finalize_plan with writes/deletes for path-scoped plans and deletes.',
-        'finalize_plan scope:"project" is superseded by the durable per-project write grant',
-      )
-    }
-    if (
-      input.operation === 'copy_files' &&
-      !(typeof args.plan_token === 'string' && args.plan_token.length > 0)
-    ) {
-      return safetyDeny(
-        'ClaudeDesign copy_files: copying without a plan_token always requires per-batch approval — use finalize_plan declaring every destination in writes, then pass the returned plan_token.',
-        'tokenless copy_files is per-batch-only — its destinations have no reserved-path or render-integrity gate',
-      )
-    }
-    const missingConsent =
-      input.operation === CLAUDE_DESIGN_LIST_OPERATION
-        ? null
-        : await missingDesignConsentBit(grantState, context.credentials)
-    const askCanReachUser = designAskCanReachUser(context)
-    const stamped = {
-      ...input,
-      __consentBitShown: missingConsent,
-      __consentAskCanReachUser: askCanReachUser,
-      __projectGrantAskShown: undefined,
-      __projectGrantServerObserved: undefined,
-      __reservedTargetsAskShown: undefined,
-      __finalizePlanAskShown: undefined,
-    } as Input
-    const readOnly =
-      input.operation === CLAUDE_DESIGN_LIST_OPERATION ||
-      isDesignOperationReadOnly(input.operation)
-    if (missingConsent !== null) {
-      const blocked = designConsentBlockedWrite(input.operation, args)
-      if (blocked !== null) return safetyDeny(blocked.message, blocked.reason)
-      const writeLine = readOnly
-        ? ''
-        : `Design ${input.operation} writes to claude.ai/design.`
-      const finalizeExtra =
-        input.operation === 'finalize_plan' ? DESIGN_FINALIZE_PLAN_ASK : ''
-      return {
-        behavior: 'ask',
-        message: [getDesignConsentPrompt(), writeLine, finalizeExtra]
-          .filter(part => part.length > 0)
-          .join(' '),
-        updatedInput:
-          input.operation === 'finalize_plan'
-            ? ({ ...stamped, __finalizePlanAskShown: true } as Input)
-            : stamped,
-        localDisplayOnly: true,
-        decisionReason: {
-          type: 'safetyCheck',
-          reason: DESIGN_CONSENT_DECISION_REASON,
-          classifierApprovable: false,
-        },
-      }
-    }
-    if (readOnly) {
-      return { behavior: 'allow', updatedInput: stamped }
-    }
-    if (allowApprovedDesignPlan(input.operation, args, context)) {
-      return { behavior: 'allow', updatedInput: stamped }
-    }
-    if (input.operation === 'finalize_plan') {
-      return {
-        behavior: 'ask',
-        message: `Design finalize_plan writes to claude.ai/design. ${DESIGN_FINALIZE_PLAN_ASK}`,
-        updatedInput: { ...stamped, __finalizePlanAskShown: true } as Input,
-        localDisplayOnly: true,
-        decisionReason: {
-          type: 'safetyCheck',
-          reason:
-            'finalize_plan — the human is the path-review boundary; approval also grants prompt-free writes to these paths for 15 min',
-          classifierApprovable: false,
-        },
-      }
-    }
-    const grant = await decideTokenlessProjectWrite(
-      input.operation,
-      args,
-      context,
-    )
-    if (grant.kind === 'allow') {
-      return { behavior: 'allow', updatedInput: stamped }
-    }
-    if (grant.kind === 'deny') return safetyDeny(grant.message, grant.reason)
-    if (grant.kind === 'ask-grant') {
-      return {
-        behavior: 'ask',
-        message: grant.message,
-        updatedInput: {
-          ...stamped,
-          __projectGrantAskShown: grant.projectId,
-        } as Input,
-        localDisplayOnly: true,
-        serverApprovalWatch: {
-          kind: 'design_project_grant',
-          projectId: grant.projectId,
-        },
-        decisionReason: {
-          type: 'safetyCheck',
-          reason:
-            'first write under a project grant — approval mints a durable write grant for this project, revocable at claude.ai/design settings',
-          classifierApprovable: false,
-        },
-      }
-    }
-    const hints = getOperationHints(input.operation)
-    const destructive = hints === undefined || hints.destructive !== false
-    const reserved = grant.kind === 'ask-reserved'
+  create(deps: ToolDeps) {
     return {
-      behavior: 'ask',
-      message: `Design ${input.operation} writes to claude.ai/design.`,
-      updatedInput: reserved
-        ? ({ ...stamped, __reservedTargetsAskShown: true } as Input)
-        : stamped,
-      localDisplayOnly: true,
-      decisionReason: {
-        type: 'safetyCheck',
-        reason: destructive
-          ? hints
-            ? 'destructive — model-generated arguments'
-            : 'unknown operation — fail-closed to destructive write'
-          : 'remote write — model-generated arguments',
-        classifierApprovable: false,
+      async validateInput(input: Input) {
+        const argsError = validateWriteOpArgs(input.operation, input.arguments)
+        if (argsError) {
+          return { result: false as const, message: argsError, errorCode: 1 }
+        }
+        if (input.operation === 'finalize_plan') {
+          const projectError = validateFinalizePlanProjectId(
+            input.arguments?.project_id,
+          )
+          if (projectError) {
+            return {
+              result: false as const,
+              message: projectError,
+              errorCode: 1,
+            }
+          }
+        }
+        return { result: true as const }
       },
-    }
-  },
-  async call(input: Input, context: ToolUseContext) {
-    const stamped = input as Input & {
-      __consentBitShown?: string | null
-      __consentAskCanReachUser?: boolean
-      __projectGrantAskShown?: string
-      __projectGrantServerObserved?: boolean
-      __finalizePlanAskShown?: boolean
-    }
-    const grantState = designSessionState(context)
-    if (
-      input.operation === 'finalize_plan' &&
-      stamped.__consentAskCanReachUser === true
-    ) {
-      const projectId = input.arguments?.project_id
-      if (typeof projectId === 'string' && projectId.length > 0) {
-        dropApprovedDesignPlansForProject(grantState, projectId)
-      }
-    }
-    noteDesignProjectMembershipChange(
-      grantState,
-      input.operation,
-      input.arguments?.project_id,
-    )
-    const token = await designAccessToken(context.credentials)
-    if (!token) {
-      return errorResult(
-        input.operation,
-        'No design-capable credential. Run /design login to authorize Claude Design.',
-      )
-    }
-    const argsError = validateWriteOpArgs(input.operation, input.arguments)
-    if (argsError) {
-      return errorResult(input.operation, argsError)
-    }
-    const url = `${getOauthConfig().BASE_API_URL}/v1/design/mcp`
-    const method =
-      input.operation === CLAUDE_DESIGN_LIST_OPERATION
-        ? 'tools/list'
-        : 'tools/call'
-    const params =
-      method === 'tools/list'
-        ? {}
-        : { name: input.operation, arguments: input.arguments ?? {} }
-    const shown = stamped.__consentBitShown ?? null
-    const askCanReachUser =
-      stamped.__consentAskCanReachUser === true &&
-      designAskCanReachUser(context)
-    const postRpc = () =>
-      axios.post(
-        url,
-        { jsonrpc: '2.0', id: 1, method, params },
-        {
-          headers: designHeaders(token),
-          timeout: 60_000,
-          validateStatus: () => true,
-          signal: context.abortController.signal,
-        },
-      )
-    let consentPosted = false
-    let grantPosted = false
-    let res = await postRpc()
-    for (;;) {
-      const contentType = headerContentType(res.headers)
-      if (
-        typeof contentType === 'string' &&
-        contentType.toLowerCase().startsWith('text/event-stream')
-      ) {
-        return errorResult(
-          input.operation,
-          'Claude Design returned a text/event-stream response; this client only handles JSON.',
-        )
-      }
-      if (res.status === 401) {
-        return errorResult(
-          input.operation,
-          'No design-capable credential. Run /design login to authorize Claude Design.',
-        )
-      }
-      if (res.status !== 403) break
-      const body = parseJsonObject(res.data)
-      if (body?.error === 'needs_project_grant') {
-        const projectId = acceptedDesignProjectId(body)
-        if (projectId === null) break
-        const shownGrant = stamped.__projectGrantAskShown
+      async checkPermissions(
+        input: Input,
+        callCtx,
+      ): Promise<PermissionResult<Input>> {
+        const ctx = resolveToolUseContext(deps, callCtx)
+        const grantState = designSessionState(ctx)
+        const args = input.arguments ?? {}
+        if (input.operation === 'finalize_plan' && args.scope === 'project') {
+          return safetyDeny(
+            'ClaudeDesign finalize_plan: scope "project" is no longer supported by this client. Write files directly without plan_token — the first write to a project asks for a one-time durable approval — or use finalize_plan with writes/deletes for path-scoped plans and deletes.',
+            'finalize_plan scope:"project" is superseded by the durable per-project write grant',
+          )
+        }
         if (
-          projectId !== shownGrant ||
-          stamped.__projectGrantServerObserved === true
+          input.operation === 'copy_files' &&
+          !(typeof args.plan_token === 'string' && args.plan_token.length > 0)
         ) {
-          return errorResult(
-            input.operation,
-            designProjectGrantNotShownMessage({
-              operation: input.operation,
-              nonInteractive: context.options?.isNonInteractiveSession === true,
-            }),
+          return safetyDeny(
+            'ClaudeDesign copy_files: copying without a plan_token always requires per-batch approval — use finalize_plan declaring every destination in writes, then pass the returned plan_token.',
+            'tokenless copy_files is per-batch-only — its destinations have no reserved-path or render-integrity gate',
           )
         }
-        if (!askCanReachUser) {
+        const missingConsent =
+          input.operation === CLAUDE_DESIGN_LIST_OPERATION
+            ? null
+            : await missingDesignConsentBit(grantState, deps.credentials)
+        const askCanReachUser = designAskCanReachUser(ctx)
+        const stamped = {
+          ...input,
+          __consentBitShown: missingConsent,
+          __consentAskCanReachUser: askCanReachUser,
+          __projectGrantAskShown: undefined,
+          __projectGrantServerObserved: undefined,
+          __reservedTargetsAskShown: undefined,
+          __finalizePlanAskShown: undefined,
+        } as Input
+        const readOnly =
+          input.operation === CLAUDE_DESIGN_LIST_OPERATION ||
+          isDesignOperationReadOnly(input.operation)
+        if (missingConsent !== null) {
+          const blocked = designConsentBlockedWrite(input.operation, args)
+          if (blocked !== null)
+            return safetyDeny(blocked.message, blocked.reason)
+          const writeLine = readOnly
+            ? ''
+            : `Design ${input.operation} writes to claude.ai/design.`
+          const finalizeExtra =
+            input.operation === 'finalize_plan' ? DESIGN_FINALIZE_PLAN_ASK : ''
+          return {
+            behavior: 'ask',
+            message: [getDesignConsentPrompt(), writeLine, finalizeExtra]
+              .filter(part => part.length > 0)
+              .join(' '),
+            updatedInput:
+              input.operation === 'finalize_plan'
+                ? ({ ...stamped, __finalizePlanAskShown: true } as Input)
+                : stamped,
+            localDisplayOnly: true,
+            decisionReason: {
+              type: 'safetyCheck',
+              reason: DESIGN_CONSENT_DECISION_REASON,
+              classifierApprovable: false,
+            },
+          }
+        }
+        if (readOnly) {
+          return { behavior: 'allow', updatedInput: stamped }
+        }
+        if (allowApprovedDesignPlan(input.operation, args, ctx)) {
+          return { behavior: 'allow', updatedInput: stamped }
+        }
+        if (input.operation === 'finalize_plan') {
+          return {
+            behavior: 'ask',
+            message: `Design finalize_plan writes to claude.ai/design. ${DESIGN_FINALIZE_PLAN_ASK}`,
+            updatedInput: {
+              ...stamped,
+              __finalizePlanAskShown: true,
+            } as Input,
+            localDisplayOnly: true,
+            decisionReason: {
+              type: 'safetyCheck',
+              reason:
+                'finalize_plan — the human is the path-review boundary; approval also grants prompt-free writes to these paths for 15 min',
+              classifierApprovable: false,
+            },
+          }
+        }
+        const grant = await decideTokenlessProjectWrite(
+          input.operation,
+          args,
+          ctx,
+        )
+        if (grant.kind === 'allow') {
+          return { behavior: 'allow', updatedInput: stamped }
+        }
+        if (grant.kind === 'deny')
+          return safetyDeny(grant.message, grant.reason)
+        if (grant.kind === 'ask-grant') {
+          return {
+            behavior: 'ask',
+            message: grant.message,
+            updatedInput: {
+              ...stamped,
+              __projectGrantAskShown: grant.projectId,
+            } as Input,
+            localDisplayOnly: true,
+            serverApprovalWatch: {
+              kind: 'design_project_grant',
+              projectId: grant.projectId,
+            },
+            decisionReason: {
+              type: 'safetyCheck',
+              reason:
+                'first write under a project grant — approval mints a durable write grant for this project, revocable at claude.ai/design settings',
+              classifierApprovable: false,
+            },
+          }
+        }
+        const hints = getOperationHints(input.operation)
+        const destructive = hints === undefined || hints.destructive !== false
+        const reserved = grant.kind === 'ask-reserved'
+        return {
+          behavior: 'ask',
+          message: `Design ${input.operation} writes to claude.ai/design.`,
+          updatedInput: reserved
+            ? ({ ...stamped, __reservedTargetsAskShown: true } as Input)
+            : stamped,
+          localDisplayOnly: true,
+          decisionReason: {
+            type: 'safetyCheck',
+            reason: destructive
+              ? hints
+                ? 'destructive — model-generated arguments'
+                : 'unknown operation — fail-closed to destructive write'
+              : 'remote write — model-generated arguments',
+            classifierApprovable: false,
+          },
+        }
+      },
+      async call(input: Input, callCtx) {
+        const ctx = resolveToolUseContext(deps, callCtx)
+        const stamped = input as Input & {
+          __consentBitShown?: string | null
+          __consentAskCanReachUser?: boolean
+          __projectGrantAskShown?: string
+          __projectGrantServerObserved?: boolean
+          __finalizePlanAskShown?: boolean
+        }
+        const grantState = designSessionState(ctx)
+        if (
+          input.operation === 'finalize_plan' &&
+          stamped.__consentAskCanReachUser === true
+        ) {
+          const projectId = input.arguments?.project_id
+          if (typeof projectId === 'string' && projectId.length > 0) {
+            dropApprovedDesignPlansForProject(grantState, projectId)
+          }
+        }
+        noteDesignProjectMembershipChange(
+          grantState,
+          input.operation,
+          input.arguments?.project_id,
+        )
+        const token = await designAccessToken(deps.credentials)
+        if (!token) {
           return errorResult(
             input.operation,
-            designProjectGrantNoPromptMessage(),
+            'No design-capable credential. Run /design login to authorize Claude Design.',
           )
         }
-        if (grantPosted) {
-          return errorResult(
-            input.operation,
-            new DesignNeedsProjectGrantError().message,
-          )
+        const argsError = validateWriteOpArgs(input.operation, input.arguments)
+        if (argsError) {
+          return errorResult(input.operation, argsError)
         }
-        try {
-          await postDesignProjectGrant(projectId, context.credentials)
-          rememberDesignProjectGrant(grantState, projectId)
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          if (message.includes('cannot hold a durable write grant')) {
-            markDesignGrantIneligible(grantState, projectId)
+        const url = `${getOauthConfig().BASE_API_URL}/v1/design/mcp`
+        const method =
+          input.operation === CLAUDE_DESIGN_LIST_OPERATION
+            ? 'tools/list'
+            : 'tools/call'
+        const params =
+          method === 'tools/list'
+            ? {}
+            : { name: input.operation, arguments: input.arguments ?? {} }
+        const shown = stamped.__consentBitShown ?? null
+        const askCanReachUser =
+          stamped.__consentAskCanReachUser === true &&
+          designAskCanReachUser(ctx)
+        const postRpc = () =>
+          axios.post(
+            url,
+            { jsonrpc: '2.0', id: 1, method, params },
+            {
+              headers: designHeaders(token),
+              timeout: 60_000,
+              validateStatus: () => true,
+              signal: callCtx.signal,
+            },
+          )
+        let consentPosted = false
+        let grantPosted = false
+        let res = await postRpc()
+        for (;;) {
+          const contentType = headerContentType(res.headers)
+          if (
+            typeof contentType === 'string' &&
+            contentType.toLowerCase().startsWith('text/event-stream')
+          ) {
+            return errorResult(
+              input.operation,
+              'Claude Design returned a text/event-stream response; this client only handles JSON.',
+            )
+          }
+          if (res.status === 401) {
+            return errorResult(
+              input.operation,
+              'No design-capable credential. Run /design login to authorize Claude Design.',
+            )
+          }
+          if (res.status !== 403) break
+          const body = parseJsonObject(res.data)
+          if (body?.error === 'needs_project_grant') {
+            const projectId = acceptedDesignProjectId(body)
+            if (projectId === null) break
+            const shownGrant = stamped.__projectGrantAskShown
+            if (
+              projectId !== shownGrant ||
+              stamped.__projectGrantServerObserved === true
+            ) {
+              return errorResult(
+                input.operation,
+                designProjectGrantNotShownMessage({
+                  operation: input.operation,
+                  nonInteractive: deps.isNonInteractiveSession,
+                }),
+              )
+            }
+            if (!askCanReachUser) {
+              return errorResult(
+                input.operation,
+                designProjectGrantNoPromptMessage(),
+              )
+            }
+            if (grantPosted) {
+              return errorResult(
+                input.operation,
+                new DesignNeedsProjectGrantError().message,
+              )
+            }
+            try {
+              await postDesignProjectGrant(projectId, deps.credentials)
+              rememberDesignProjectGrant(grantState, projectId)
+            } catch (error) {
+              const message =
+                error instanceof Error ? error.message : String(error)
+              if (message.includes('cannot hold a durable write grant')) {
+                markDesignGrantIneligible(grantState, projectId)
+              }
+              return errorResult(
+                input.operation,
+                message === 'no-auth'
+                  ? designProjectGrantAuthMessage()
+                  : message,
+              )
+            }
+            grantPosted = true
+            res = await postRpc()
+            continue
+          }
+          if (body?.error === 'needs_design_scopes') {
+            return errorResult(
+              input.operation,
+              new DesignNeedsScopesError(deps.isNonInteractiveSession).message,
+            )
+          }
+          if (body?.error !== 'needs_consent') break
+          const bodyConsent =
+            typeof body.consent === 'string' ? body.consent : null
+          const action = designConsentRetryAction({
+            shown,
+            askCanReachUser,
+            bodyConsent,
+          })
+          if (action === 'post_and_retry' && !consentPosted) {
+            try {
+              await postDesignConsent(grantState, deps.credentials)
+            } catch (error) {
+              return errorResult(
+                input.operation,
+                error instanceof Error ? error.message : String(error),
+              )
+            }
+            consentPosted = true
+            res = await postRpc()
+            continue
+          }
+          if (action === 'not_shown') {
+            writeDesignConsentBit(
+              grantState,
+              bodyConsent ?? DESIGN_CONSENT_BIT,
+              false,
+            )
+            return errorResult(input.operation, designConsentNotShownMessage())
+          }
+          if (action === 'no_prompt') {
+            writeDesignConsentBit(
+              grantState,
+              bodyConsent ?? DESIGN_CONSENT_BIT,
+              false,
+            )
+            return errorResult(input.operation, designConsentNoPromptMessage())
           }
           return errorResult(
             input.operation,
-            message === 'no-auth' ? designProjectGrantAuthMessage() : message,
+            new DesignNeedsConsentError().message,
           )
         }
-        grantPosted = true
-        res = await postRpc()
-        continue
-      }
-      if (body?.error === 'needs_design_scopes') {
-        return errorResult(
-          input.operation,
-          new DesignNeedsScopesError(
-            context.options?.isNonInteractiveSession === true,
-          ).message,
-        )
-      }
-      if (body?.error !== 'needs_consent') break
-      const bodyConsent = typeof body.consent === 'string' ? body.consent : null
-      const action = designConsentRetryAction({
-        shown,
-        askCanReachUser,
-        bodyConsent,
-      })
-      if (action === 'post_and_retry' && !consentPosted) {
-        try {
-          await postDesignConsent(grantState, context.credentials)
-        } catch (error) {
+        if (res.status < 200 || res.status >= 300) {
           return errorResult(
             input.operation,
-            error instanceof Error ? error.message : String(error),
+            redactDesignOauthToken(
+              `Claude Design ${input.operation} failed: HTTP ${res.status} ${stringifyUnknown(res.data)}`,
+              token,
+            ),
           )
         }
-        consentPosted = true
-        res = await postRpc()
-        continue
-      }
-      if (action === 'not_shown') {
-        writeDesignConsentBit(
-          grantState,
-          bodyConsent ?? DESIGN_CONSENT_BIT,
-          false,
-        )
-        return errorResult(input.operation, designConsentNotShownMessage())
-      }
-      if (action === 'no_prompt') {
-        writeDesignConsentBit(
-          grantState,
-          bodyConsent ?? DESIGN_CONSENT_BIT,
-          false,
-        )
-        return errorResult(input.operation, designConsentNoPromptMessage())
-      }
-      return errorResult(input.operation, new DesignNeedsConsentError().message)
-    }
-    if (res.status < 200 || res.status >= 300) {
-      return errorResult(
-        input.operation,
-        redactDesignOauthToken(
-          `Claude Design ${input.operation} failed: HTTP ${res.status} ${stringifyUnknown(res.data)}`,
-          token,
-        ),
-      )
-    }
-    const body = res.data as {
-      error?: { message?: string; data?: unknown }
-      result?: { content?: unknown; isError?: boolean; tools?: unknown }
-    }
-    maybeRecordDiscovery(body)
-    maybeRecordDiscovery(body.result)
-    if (body.error) {
-      return errorResult(
-        input.operation,
-        redactDesignOauthToken(
-          String(body.error.message ?? 'error') +
-            (body.error.data ? ` — ${stringifyUnknown(body.error.data)}` : ''),
-          token,
-        ),
-      )
-    }
-    if (
-      input.operation === 'finalize_plan' &&
-      stamped.__finalizePlanAskShown === true &&
-      stamped.__consentAskCanReachUser === true &&
-      designAskCanReachUser(context) &&
-      designGrantAskReachesUser(context) &&
-      body.result?.isError !== true
-    ) {
-      const args = input.arguments ?? {}
-      const parsed = planFromFinalizeContent(body.result?.content)
-      if (
-        parsed !== null &&
-        typeof args.project_id === 'string' &&
-        args.scope !== 'project'
-      ) {
-        recordFinalizedDesignPlan(grantState, parsed.token, {
-          projectId: args.project_id,
-          writes: stringList(args.writes),
-          deletes: stringList(args.deletes),
-          serverExpiresAtMs: parsed.expiresAtMs ?? undefined,
-        })
-      }
-    }
-    if (
-      typeof stamped.__consentBitShown === 'string' &&
-      stamped.__consentBitShown.length > 0 &&
-      body.result?.isError !== true
-    ) {
-      writeDesignConsentBit(grantState, stamped.__consentBitShown, true)
-    }
-    return {
-      data: {
-        operation: input.operation,
-        content: body.result?.content ?? body,
-        isError: body.result?.isError,
+        const body = res.data as {
+          error?: { message?: string; data?: unknown }
+          result?: { content?: unknown; isError?: boolean; tools?: unknown }
+        }
+        maybeRecordDiscovery(body)
+        maybeRecordDiscovery(body.result)
+        if (body.error) {
+          return errorResult(
+            input.operation,
+            redactDesignOauthToken(
+              String(body.error.message ?? 'error') +
+                (body.error.data
+                  ? ` — ${stringifyUnknown(body.error.data)}`
+                  : ''),
+              token,
+            ),
+          )
+        }
+        if (
+          input.operation === 'finalize_plan' &&
+          stamped.__finalizePlanAskShown === true &&
+          stamped.__consentAskCanReachUser === true &&
+          designAskCanReachUser(ctx) &&
+          designGrantAskReachesUser(ctx) &&
+          body.result?.isError !== true
+        ) {
+          const args = input.arguments ?? {}
+          const parsed = planFromFinalizeContent(body.result?.content)
+          if (
+            parsed !== null &&
+            typeof args.project_id === 'string' &&
+            args.scope !== 'project'
+          ) {
+            recordFinalizedDesignPlan(grantState, parsed.token, {
+              projectId: args.project_id,
+              writes: stringList(args.writes),
+              deletes: stringList(args.deletes),
+              serverExpiresAtMs: parsed.expiresAtMs ?? undefined,
+            })
+          }
+        }
+        if (
+          typeof stamped.__consentBitShown === 'string' &&
+          stamped.__consentBitShown.length > 0 &&
+          body.result?.isError !== true
+        ) {
+          writeDesignConsentBit(grantState, stamped.__consentBitShown, true)
+        }
+        return {
+          data: {
+            operation: input.operation,
+            content: body.result?.content ?? body,
+            isError: body.result?.isError,
+          },
+        }
       },
     }
   },
@@ -687,4 +716,4 @@ export const ClaudeDesignTool = buildTool({
   renderToolUseMessage(input) {
     return `Claude Design: ${input.operation ?? ''}`
   },
-})
+} satisfies ToolDef<InputSchema, Output>)

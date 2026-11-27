@@ -1,5 +1,10 @@
 import { z } from 'zod/v4'
-import { buildTool, type ToolCallProgress, type ToolDef } from 'src/Tool.js'
+import {
+  buildTool,
+  resolveToolUseContext,
+  type ToolDef,
+  type ToolDeps,
+} from 'src/Tool.js'
 import {
   executeTaskCreatedHooks,
   getTaskCreatedHookMessage,
@@ -251,59 +256,58 @@ export const TaskCreateTool = buildTool({
   renderToolUseMessage() {
     return null
   },
-  async call(
-    { subject, description, activeForm, metadata },
-    context,
-    _canUseTool,
-    _parentMessage,
-    onProgress?: ToolCallProgress,
-  ) {
-    const taskId = await createTask(getTaskListId(), {
-      subject,
-      description,
-      activeForm,
-      status: 'pending',
-      owner: undefined,
-      blocks: [],
-      blockedBy: [],
-      metadata,
-    })
-
-    const blockingErrors: string[] = []
-    const generator = executeTaskCreatedHooks(
-      taskId,
-      subject,
-      description,
-      getAgentName(),
-      getTeamName(),
-      undefined,
-      context?.abortController?.signal,
-      undefined,
-      context,
-    )
-    for await (const result of generator) {
-      if (result.blockingError) {
-        blockingErrors.push(getTaskCreatedHookMessage(result.blockingError))
-      }
-    }
-
-    if (blockingErrors.length > 0) {
-      await deleteTask(getTaskListId(), taskId)
-      throw new Error(blockingErrors.join('\n'))
-    }
-
-    // densable: 5th-arg onProgress({type:"set_expanded_view"}). Host drops it.
-    onProgress?.({
-      type: 'set_expanded_view',
-      expandedView: 'tasks',
-    })
-
+  create(deps: ToolDeps) {
     return {
-      data: {
-        task: {
-          id: taskId,
+      async call({ subject, description, activeForm, metadata }, callCtx) {
+        const taskId = await createTask(getTaskListId(), {
           subject,
-        },
+          description,
+          activeForm,
+          status: 'pending',
+          owner: undefined,
+          blocks: [],
+          blockedBy: [],
+          metadata,
+        })
+
+        const blockingErrors: string[] = []
+        const hookContext = resolveToolUseContext(deps, callCtx)
+        const generator = executeTaskCreatedHooks(
+          taskId,
+          subject,
+          description,
+          getAgentName(),
+          getTeamName(),
+          undefined,
+          callCtx.signal,
+          undefined,
+          hookContext,
+        )
+        for await (const result of generator) {
+          if (result.blockingError) {
+            blockingErrors.push(getTaskCreatedHookMessage(result.blockingError))
+          }
+        }
+
+        if (blockingErrors.length > 0) {
+          await deleteTask(getTaskListId(), taskId)
+          throw new Error(blockingErrors.join('\n'))
+        }
+
+        // densable: 5th-arg onProgress({type:"set_expanded_view"}). Host drops it.
+        callCtx.onProgress?.({
+          type: 'set_expanded_view',
+          expandedView: 'tasks',
+        })
+
+        return {
+          data: {
+            task: {
+              id: taskId,
+              subject,
+            },
+          },
+        }
       },
     }
   },

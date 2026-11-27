@@ -1,6 +1,7 @@
 import { isUtf8 } from 'buffer'
 import { createHash } from 'crypto'
 import { isAbsolute, sep } from 'path'
+import { z } from 'zod/v4'
 import { validateCoordinatorWriteAccess } from 'src/coordinator/writeGuard.js'
 import { logEvent } from 'src/services/analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
@@ -10,8 +11,15 @@ import { getLspServerManager } from 'src/services/lsp/manager.js'
 import { notifyVscodeFileUpdated } from 'src/services/mcp/vscodeSdkMcp.js'
 import { checkTeamMemSecrets } from 'src/services/teamMemorySync/teamMemSecretGuard.js'
 import { discoverAndActivateSkillsForFilePath } from 'src/skills/loadSkillsDir.js'
-import type { ToolUseContext } from 'src/Tool.js'
-import { buildTool, type ToolDef } from 'src/Tool.js'
+import {
+  buildTool,
+  isNativeToolDisabledInThisProcess,
+  resolveToolUseContext,
+  type ToolDef,
+  type ToolDeps,
+  type ToolResult,
+  type ToolUseContext,
+} from 'src/Tool.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { countLinesChanged, getPatchForDisplay } from 'src/utils/diff.js'
@@ -47,6 +55,7 @@ import {
 import { formatFileSize } from 'src/utils/format.js'
 import { getFsImplementation } from 'src/utils/fsOperations.js'
 import { fetchSingleFileGitDiff, type ToolUseDiff } from 'src/utils/gitDiff.js'
+import { lazySchema } from 'src/utils/lazySchema.js'
 import { logError } from 'src/utils/log.js'
 import { stampNewMemoryContent } from 'src/memdir/stampNewMemoryContent.js'
 import { expandPath } from 'src/utils/path.js'
@@ -109,6 +118,15 @@ import {
 // that prevents OOM without being unnecessarily restrictive.
 const MAX_EDIT_FILE_SIZE = 1024 * 1024 * 1024 // 1 GiB (stat bytes)
 
+const outputSchemaAcrossProcesses = lazySchema(() =>
+  outputSchema().extend({
+    filePath: z.string().optional(),
+    userModified: z.boolean().optional(),
+    staleRecovered: z.boolean().optional().catch(undefined),
+    contentNotInModelContext: z.boolean().optional().catch(undefined),
+  }),
+)
+
 export const FileEditTool = buildTool({
   name: FILE_EDIT_TOOL_NAME,
   searchHint: 'modify file contents in place',
@@ -143,6 +161,18 @@ export const FileEditTool = buildTool({
   get outputSchema() {
     return outputSchema()
   },
+  get outputSchemaAcrossProcesses() {
+    return outputSchemaAcrossProcesses()
+  },
+  fromAnotherProcess(data, input, opts) {
+    return {
+      data: {
+        ...data,
+        filePath: String(input.file_path ?? data.filePath ?? ''),
+        userModified: opts?.userModified === true,
+      },
+    }
+  },
   toAutoClassifierInput(input) {
     // Official xXn/awu editRemovalVisibility: when on, project adds+removes
     // (capped by editRemovalCap) so the classifier sees what was deleted.
@@ -169,7 +199,10 @@ export const FileEditTool = buildTool({
   backfillObservableInput(input) {
     // hooks.mdx documents file_path as absolute; expand so hook allowlists
     // can't be bypassed via ~ or relative paths.
-    if (typeof input.file_path === 'string') {
+    if (
+      typeof input.file_path === 'string' &&
+      !isNativeToolDisabledInThisProcess(FILE_EDIT_TOOL_NAME)
+    ) {
       input.file_path = expandPath(input.file_path)
     }
   },
@@ -177,414 +210,19 @@ export const FileEditTool = buildTool({
     // densable hqe: allow-style single-segment dir/** is cwd-only (#44)
     return pattern => matchesPathRule(pattern, file_path)
   },
-  async checkPermissions(input, context): Promise<PermissionDecision> {
-    noteApprovedFileToolPath(input.file_path, context.toolUseId)
-    const appState = context.getAppState()
-    return checkWritePermissionForTool(
-      FileEditTool,
-      input,
-      appState.toolPermissionContext,
-    )
-  },
   renderToolUseMessage,
   renderToolResultMessage,
   renderToolUseRejectedMessage,
   renderToolUseErrorMessage,
-  async validateInput(input: FileEditInput, toolUseContext: ToolUseContext) {
-    // densable BT() && xd(n) — named host is not forwarded (errorCode 14)
-    const hostRefusal = remoteHostForwardRefusal(input, FILE_EDIT_TOOL_NAME)
-    if (hostRefusal) return { ...hostRefusal, errorCode: 14 }
-    const { file_path, old_string, new_string, replace_all = false } = input
-    // Use expandPath for consistent path normalization (especially on Windows
-    // where "/" vs "\" can cause readFileState lookup mismatches)
-    const fullFilePath = expandPath(file_path)
-
-    // Official 2.1.326 #307 / #309: refuse edits to Claude sign-in files or
-    // blocked device/process files even before permission prompts.
-    if (isClaudeSignInFilePath(fullFilePath)) {
-      return {
-        result: false,
-        message: `Cannot edit Claude Code sign-in file ${fullFilePath}. Sign-in files such as .credentials.json are protected from modification.`,
-        errorCode: 15,
-      }
-    }
-    if (isBlockedDeviceOrProcessPath(fullFilePath)) {
-      return {
-        result: false,
-        message: `Cannot edit device or process file ${fullFilePath}.`,
-        errorCode: 16,
-      }
-    }
-
-    // densable 2.1.217 #5 hsr — bg / worktree isolation containment (errorCode 12)
-    const isolationBlock = checkBgIsolationWriteBlock(fullFilePath, {
-      agentId: toolUseContext.agentId,
-      agentWorktree: toolUseContext.agentWorktree,
-    })
-    if (isolationBlock) {
-      return { result: false, message: isolationBlock, errorCode: 12 }
-    }
-
-    // Reject edits to team memory files that introduce secrets
-    const secretError = checkTeamMemSecrets(fullFilePath, new_string)
-    if (secretError) {
-      return { result: false, message: secretError, errorCode: 0 }
-    }
-    if (old_string === new_string) {
-      return {
-        result: false,
-        behavior: 'ask',
-        message:
-          'No changes to make: old_string and new_string are exactly the same.',
-        errorCode: 1,
-      }
-    }
-
-    // Check if path should be ignored based on permission settings
-    const appState = toolUseContext.getAppState()
-    const denyRule = matchingRuleForInput(
-      fullFilePath,
-      appState.toolPermissionContext,
-      'edit',
-      'deny',
-    )
-    if (denyRule !== null) {
-      return {
-        result: false,
-        behavior: 'ask',
-        message:
-          'File is in a directory that is denied by your permission settings.',
-        errorCode: 2,
-      }
-    }
-
-    // densable l8t — Read deny covers this path/tool → dedicated edit copy
-    // (errorCode 13), not the generic "has not been read yet" unread message.
-    if (
-      isPathCoveredByReadDenyRule(fullFilePath, appState.toolPermissionContext)
-    ) {
-      return {
-        result: false,
-        behavior: 'ask',
-        message: FILE_READ_DENY_CANNOT_EDIT,
-        errorCode: 13,
-      }
-    }
-
-    // SECURITY: Skip filesystem operations for UNC paths to prevent NTLM credential leaks.
-    // On Windows, fs.existsSync() on UNC paths triggers SMB authentication which could
-    // leak credentials to malicious servers. Let the permission check handle UNC paths.
-    if (fullFilePath.startsWith('\\\\') || fullFilePath.startsWith('//')) {
-      return { result: true }
-    }
-
-    const fs = getFsImplementation()
-    const notRegularFileResult = {
-      result: false as const,
-      message: `${file_path} exists but is not a regular file (a device, FIFO or socket). Edit only changes regular files.`,
-      errorCode: 16,
-    }
-
-    // 预检：防止 OOM（超大文件 / 0字节 /proc 文件）+ 防止编辑目录/设备/FIFO/socket
-    let isUnsizedOrMissing = false
-    try {
-      const fileStat = await fs.stat(fullFilePath)
-      // 预检：如果路径已是一个存在的目录，及时拒绝并给出指引
-      // 避免 AI 模型传入目录路径后 Edit 工具读取文件时抛 EISDIR。
-      if (fileStat.isDirectory()) {
-        return {
-          result: false,
-          behavior: 'ask',
-          message: `Cannot edit '${file_path}': the specified path is an existing directory. Use Bash ls to list files in this directory, or specify a filename path to edit a specific file.`,
-          errorCode: 10,
-        }
-      }
-      if (fileStat.size > MAX_EDIT_FILE_SIZE) {
-        return {
-          result: false,
-          behavior: 'ask',
-          message: `File is too large to edit (${formatFileSize(fileStat.size)}). Maximum editable file size is ${formatFileSize(MAX_EDIT_FILE_SIZE)}.`,
-          errorCode: 10,
-        }
-      }
-      // 2.1.323 #1985 (SEA @293963177): refuse devices, FIFOs, and sockets
-      if (!fileStat.isFile()) {
-        return notRegularFileResult
-      }
-      assertRegularFileStat(fileStat, fullFilePath)
-      isUnsizedOrMissing = fileStat.size === 0
-    } catch (e) {
-      if (!isENOENT(e)) {
-        throw e
-      }
-      isUnsizedOrMissing = true
-    }
-
-    // Read the file as bytes first so we can detect encoding and invalid UTF-8
-    // from the buffer instead of calling detectFileEncoding (which does its own
-    // sync readSync and would fail with a wasted ENOENT when the file doesn't exist).
-    // 2.1.323 #1985: for 0-byte synthetic (/proc) or freshly-appearing files,
-    // use non-blocking bounded readUnsizedFileBytes (`btr`) so Edit never hangs
-    // on FIFOs/devices or OOMs on /proc files.
-    let fileContent: string | null
-    let notText: NonTextReason | undefined
-    let refusedByNameMessage: string | undefined
-    try {
-      const fileBuffer = isUnsizedOrMissing
-        ? ((await readUnsizedFileBytes(fullFilePath, {
-            refusesName: resolved => {
-              refusedByNameMessage = checkDeviceOrProcPathRefusal(
-                file_path,
-                resolved,
-              )
-              return refusedByNameMessage !== undefined
-            },
-            maxSizedBytes: MAX_EDIT_FILE_SIZE,
-          })) ?? Buffer.alloc(0))
-        : await fs.readFileBytes(fullFilePath)
-      const detected = detectBufferTextEncoding(fileBuffer)
-      notText = detected.notText
-      fileContent = fileBuffer
-        .toString(detected.encoding)
-        .replaceAll('\r\n', '\n')
-    } catch (e) {
-      if (isFileTooLargeError(e)) {
-        return {
-          result: false,
-          message:
-            e.maxBytes === MAX_UNSIZED_FILE_BYTES
-              ? `File is too large to edit: it reports a size of 0 bytes and holds more than ${formatFileSize(MAX_UNSIZED_FILE_BYTES)}.`
-              : `File is too large to edit. Maximum editable file size is ${formatFileSize(MAX_EDIT_FILE_SIZE)}.`,
-          errorCode: 10,
-        }
-      }
-      if (isNotRegularFileError(e)) {
-        return refusedByNameMessage === undefined
-          ? notRegularFileResult
-          : {
-              result: false,
-              message: refusedByNameMessage,
-              errorCode: 16,
-            }
-      }
-      if (isUnsizedOrMissing && getErrnoCode(e) === 'EAGAIN') {
-        return {
-          result: false,
-          message: `${file_path} has nothing more to read yet, so it may be a stream. Edit only changes regular files.`,
-          errorCode: 16,
-        }
-      }
-      if (isENOENT(e)) {
-        fileContent = null
-      } else {
-        throw e
-      }
-    }
-
-    // File doesn't exist
-    if (fileContent === null) {
-      // Empty old_string on nonexistent file means new file creation — valid
-      if (old_string === '') {
-        return validateCoordinatorWriteAccess({
-          filePath: fullFilePath,
-          sourceTool: 'FileEditTool',
-        })
-      }
-      // Try to find a similar file with a different extension
-      const similarFilename = await findSimilarFile(fullFilePath)
-      const cwdSuggestion = await suggestPathUnderCwd(fullFilePath)
-      let message = `File does not exist. ${FILE_NOT_FOUND_CWD_NOTE} ${getCwd()}.`
-
-      if (cwdSuggestion) {
-        message += ` Did you mean ${cwdSuggestion}?`
-      } else if (similarFilename) {
-        message += ` Did you mean ${similarFilename}?`
-      }
-
-      return {
-        result: false,
-        behavior: 'ask',
-        message,
-        errorCode: 4,
-      }
-    }
-
-    // File exists with empty old_string — only valid if file is empty
-    if (old_string === '') {
-      // Only reject if the file has content (for file creation attempt)
-      if (fileContent.trim() !== '') {
-        return {
-          result: false,
-          behavior: 'ask',
-          message: 'Cannot create new file - file already exists.',
-          errorCode: 3,
-        }
-      }
-
-      // Empty file with empty old_string is valid - we're replacing empty with content
-      return validateCoordinatorWriteAccess({
-        filePath: fullFilePath,
-        sourceTool: 'FileEditTool',
-      })
-    }
-
-    if (fullFilePath.endsWith('.ipynb')) {
-      return {
-        result: false,
-        behavior: 'ask',
-        message: `File is a Jupyter Notebook. Use the ${NOTEBOOK_EDIT_TOOL_NAME} to edit this file.`,
-        errorCode: 5,
-      }
-    }
-
-    // densable 2.1.228 #17 Edit: !p || p.isPartialView → not-read (errorCode 6)
-    // unless guardSkipped = !J4t(model) && MCt(Edit, path, ...)
-    // Official 2.1.327 (#413): also allow editing unchanged files outside the
-    // project that Claude had already read in full before compaction.
-    const readTimestamp = toolUseContext.readFileState.get(fullFilePath)
-    const reliesOnCompactedRead =
-      !readTimestamp &&
-      hasUnchangedReadBeforeCompaction(
-        toolUseContext,
-        fullFilePath,
-        fileContent,
-      )
-    if (
-      (!readTimestamp || readTimestamp.isPartialView) &&
-      !reliesOnCompactedRead
-    ) {
-      const guardSkipped = shouldSkipEditUnreadGate(
-        fullFilePath,
-        toolUseContext,
-      )
-      logEvent('tengu_edit_tool_not_read_hypothetical', {
-        isPartialView: readTimestamp?.isPartialView === true,
-        isFilePathAbsolute: isAbsolute(file_path),
-        guardSkipped,
-      })
-      if (!guardSkipped) {
-        return {
-          result: false,
-          behavior: 'ask',
-          message:
-            'File has not been read yet. Read it first before writing to it.',
-          meta: {
-            isFilePathAbsolute: String(isAbsolute(file_path)),
-          },
-          errorCode: 6,
-        }
-      }
-    }
-
-    // densable: if (p) { mtime > timestamp → HOe && xOe bypass, else stale errorCode 7 }
-    // Also check content/baseline even when mtime did not advance (#430 wKe),
-    // and treat entries refreshed behind the model's back (#413 `lHo`) as stale.
-    if (readTimestamp) {
-      if (readTimestamp.refreshedBehindModel === true) {
-        logEvent('tengu_edit_tool_stale_read', {})
-        return {
-          result: false,
-          behavior: 'ask',
-          message:
-            'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
-          errorCode: 7,
-        }
-      }
-      const lastWriteTime = getFileModificationTime(fullFilePath)
-      const normalizedContent = stripBom(fileContent)
-      const matchesBaseline = matchesReadStateOrBaseline(
-        readTimestamp,
-        normalizedContent,
-      )
-      if (lastWriteTime > readTimestamp.timestamp) {
-        if (!(isFullEnoughFileRead(readTimestamp) && matchesBaseline)) {
-          logEvent('tengu_edit_tool_stale_read', {})
-          return {
-            result: false,
-            behavior: 'ask',
-            message:
-              'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
-            errorCode: 7,
-          }
-        }
-      } else if (isFullEnoughFileRead(readTimestamp) && !matchesBaseline) {
-        logEvent('tengu_edit_tool_stale_read', {})
-        return {
-          result: false,
-          behavior: 'ask',
-          message:
-            'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
-          errorCode: 7,
-        }
-      }
-    }
-
-    if (notText) {
-      return {
-        result: false,
-        message: formatNonTextFileRefusal(notText),
-        errorCode: 15,
-      }
-    }
-
-    const file = fileContent
-
-    // Use findActualString to find exact match
-    const actualOldString = findActualString(file, old_string)
-    if (!actualOldString) {
-      return {
-        result: false,
-        behavior: 'ask',
-        message: `String to replace not found in file.\nString: ${old_string}`,
-        meta: {
-          isFilePathAbsolute: String(isAbsolute(file_path)),
-        },
-        errorCode: 8,
-      }
-    }
-
-    const matches = file.split(actualOldString).length - 1
-
-    // Check if we have multiple matches but replace_all is false
-    if (matches > 1 && !replace_all) {
-      return {
-        result: false,
-        behavior: 'ask',
-        message: `Found ${matches} matches of the string to replace, but replace_all is false. To replace all occurrences, set replace_all to true. To replace only one occurrence, please provide more context to uniquely identify the instance.\nString: ${old_string}`,
-        meta: {
-          isFilePathAbsolute: String(isAbsolute(file_path)),
-          actualOldString,
-        },
-        errorCode: 9,
-      }
-    }
-
-    // Additional validation for Claude settings files
-    const settingsValidationResult = validateInputForSettingsFileEdit(
-      fullFilePath,
-      file,
-      () => {
-        // Simulate the edit to get the final content using the exact same logic as the tool
-        // (avoids String.prototype.replace $$ / $& corruption and matches trailing-newline cleanup).
-        return applyEditToFile(file, actualOldString, new_string, replace_all)
-      },
-    )
-
-    if (settingsValidationResult !== null) {
-      return settingsValidationResult
-    }
-
-    const coordinatorWriteValidation = validateCoordinatorWriteAccess({
-      filePath: fullFilePath,
-      sourceTool: 'FileEditTool',
-    })
-    if (!coordinatorWriteValidation.result) {
-      return coordinatorWriteValidation
-    }
-
-    return { result: true, meta: { actualOldString } }
-  },
   inputsEquivalent(input1, input2) {
+    if (isNativeToolDisabledInThisProcess(FILE_EDIT_TOOL_NAME)) {
+      return (
+        input1.file_path === input2.file_path &&
+        input1.old_string === input2.old_string &&
+        input1.new_string === input2.new_string &&
+        (input1.replace_all ?? false) === (input2.replace_all ?? false)
+      )
+    }
     return areFileEditsInputsEquivalent(
       {
         file_path: input1.file_path,
@@ -608,325 +246,749 @@ export const FileEditTool = buildTool({
       },
     )
   },
-  async call(
-    input: FileEditInput,
-    toolUseContext: ToolUseContext,
-    _,
-    parentMessage,
-  ) {
-    const {
-      readFileState,
-      userModified,
-      updateFileHistoryState,
-      dynamicSkillDirTriggers,
-    } = toolUseContext
-    const { file_path, old_string, new_string, replace_all = false } = input
-
-    const absoluteFilePath = expandPath(file_path)
-
-    const toolPermissionContext =
-      toolUseContext.getAppState?.()?.toolPermissionContext
-    if (toolPermissionContext) {
-      const outsideWriteBlock = checkBlockWritesOutsideWorkingDirectories(
-        absoluteFilePath,
-        toolPermissionContext,
-      )
-      if (outsideWriteBlock !== undefined) {
-        throw new Error(outsideWriteBlock)
-      }
-
-      // 2.1.323 #2023 defense-in-depth: also enforce Read deny rules at call()
-      // time across all resolved path spellings (symlinks / realpath).
-      if (
-        isPathCoveredByReadDenyRule(absoluteFilePath, toolPermissionContext)
-      ) {
-        throw new Error(FILE_READ_DENY_CANNOT_EDIT)
-      }
-    }
-
-    // Discover skills from this file's path (official 2.1.328 BJ).
-    // Skip in bare mode - no skills available.
-    if (!isBareMode()) {
-      await discoverAndActivateSkillsForFilePath(
-        absoluteFilePath,
-        dynamicSkillDirTriggers,
-      )
-    }
-
-    await diagnosticTracker.beforeFileEdited(absoluteFilePath)
-
-    const approved = takeApprovedFileToolPath(
-      absoluteFilePath,
-      toolUseContext.toolUseId,
-      'write',
-    )
-    const openedWrite = await openApprovedWrite(absoluteFilePath, approved, {
-      // densable DH: Edit replaces the leaf — recheck ao(dirname).map(join leaf)
-      createParents: true,
-      leaf: 'replace',
-    })
-    let openedRead: ApprovedRead | null = null
-    let originalFileContents = ''
-    let fileExists = false
-    let encoding: BufferEncoding = 'utf8'
-    let endings: LineEndingType = 'LF'
-    let actualOldString = old_string
-    let patchForDisplay: ReturnType<typeof getPatchForDisplay> = []
-    let updatedFile = ''
-    let reliesOnCompactedRead = false
-    try {
-      if (fileHistoryEnabled()) {
-        await fileHistoryTrackEdit(
-          updateFileHistoryState,
-          absoluteFilePath,
-          parentMessage.uuid,
+  create(deps: ToolDeps) {
+    return {
+      async checkPermissions(input, callCtx): Promise<PermissionDecision> {
+        noteApprovedFileToolPath(input.file_path, callCtx.toolUseId)
+        return checkWritePermissionForTool(
+          FileEditTool,
+          input,
+          deps.permissions(),
         )
-      }
+      },
+      async validateInput(input: FileEditInput, callCtx) {
+        // densable BT() && xd(n) — named host is not forwarded (errorCode 14)
+        const hostRefusal = remoteHostForwardRefusal(input, FILE_EDIT_TOOL_NAME)
+        if (hostRefusal) return { ...hostRefusal, errorCode: 14 }
+        const { file_path, old_string, new_string, replace_all = false } = input
+        // Use expandPath for consistent path normalization (especially on Windows
+        // where "/" vs "\" can cause readFileState lookup mismatches)
+        const fullFilePath = expandPath(file_path)
 
-      try {
-        openedRead = await openApprovedRead(absoluteFilePath, approved)
-        // 2.1.323 #1985: guard call() against non-regular files and 0-byte /proc OOM
-        const openedStat = await openedRead.handle.stat()
-        assertRegularFileStat(openedStat, absoluteFilePath, MAX_EDIT_FILE_SIZE)
-        if (openedStat.size === 0) {
-          const rawBytes =
-            (await readUnsizedFileBytes(openedRead.ioPath, {
-              refusesName: resolved =>
-                checkDeviceOrProcPathRefusal(file_path, resolved) !== undefined,
-              maxSizedBytes: MAX_EDIT_FILE_SIZE,
-            })) ?? Buffer.alloc(0)
-          const detected = detectBufferTextEncoding(rawBytes)
-          if (detected.notText) {
-            throw new Error(formatNonTextFileRefusal(detected.notText))
-          }
-          const raw = rawBytes.toString(detected.encoding)
-          originalFileContents = raw.replaceAll('\r\n', '\n')
-          fileExists = true
-          encoding = detected.encoding
-          endings = detectLineEndingsForString(raw.slice(0, 4096))
-        } else {
-          const rawBytes = await openedRead.handle.readFile()
-          const detected = detectBufferTextEncoding(rawBytes)
-          if (detected.notText) {
-            throw new Error(formatNonTextFileRefusal(detected.notText))
-          }
-          const raw = rawBytes.toString(detected.encoding)
-          originalFileContents = raw.replaceAll('\r\n', '\n')
-          fileExists = true
-          encoding = detected.encoding
-          endings = detectLineEndingsForString(raw.slice(0, 4096))
-        }
-      } catch (e) {
-        if (!isENOENT(e)) throw e
-      }
-
-      if (fileExists) {
-        // Official 2.1.321 #1855 (`BPs` + `jPs`): network paths (UNC shares,
-        // WSL folders, `/net` mounts) skip disk checks in validateInput(), so
-        // call() MUST re-check empty old_string overwrite, `.ipynb` refusal,
-        // and unique match when replace_all is false.
-        if (old_string === '' && originalFileContents.trim() !== '') {
-          const err = new Error('Cannot create new file - file already exists.')
-          err.name = 'ToolExecutionError'
-          throw err
-        }
-        if (old_string !== '' && absoluteFilePath.endsWith('.ipynb')) {
-          const err = new Error(
-            'File is a Jupyter Notebook. Use the NotebookEdit to edit this file.',
-          )
-          err.name = 'ToolExecutionError'
-          throw err
-        }
-        const lastWriteTime = getFileModificationTime(absoluteFilePath)
-        const lastRead = readFileState.get(absoluteFilePath)
-        const normalizedContent = stripBom(originalFileContents)
-        reliesOnCompactedRead =
-          !lastRead &&
-          hasUnchangedReadBeforeCompaction(
-            toolUseContext,
-            absoluteFilePath,
-            originalFileContents,
-          )
-        // densable 2.1.228 #17 call-path: missing/partial may pass when the same
-        // guardSkipped as validateInput would; true staleness still throws.
-        if ((!lastRead || lastRead.isPartialView) && !reliesOnCompactedRead) {
-          if (
-            !shouldAllowCallDespiteMissingOrPartialRead(
-              'edit',
-              absoluteFilePath,
-              toolUseContext,
-              lastRead,
-            )
-          ) {
-            throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
-          }
-        } else if (
-          lastRead &&
-          (lastRead.refreshedBehindModel === true ||
-            lastWriteTime > lastRead.timestamp ||
-            isFullEnoughFileRead(lastRead)) &&
-          !(
-            lastRead.refreshedBehindModel !== true &&
-            isFullEnoughFileRead(lastRead) &&
-            matchesReadStateOrBaseline(lastRead, normalizedContent)
-          )
-        ) {
-          if (
-            lastRead.refreshedBehindModel === true ||
-            lastWriteTime > lastRead.timestamp ||
-            isFullEnoughFileRead(lastRead)
-          ) {
-            throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
+        // Official 2.1.326 #307 / #309: refuse edits to Claude sign-in files or
+        // blocked device/process files even before permission prompts.
+        if (isClaudeSignInFilePath(fullFilePath)) {
+          return {
+            result: false,
+            message: `Cannot edit Claude Code sign-in file ${fullFilePath}. Sign-in files such as .credentials.json are protected from modification.`,
+            errorCode: 15,
           }
         }
-      }
+        if (isBlockedDeviceOrProcessPath(fullFilePath)) {
+          return {
+            result: false,
+            message: `Cannot edit device or process file ${fullFilePath}.`,
+            errorCode: 16,
+          }
+        }
 
-      actualOldString =
-        findActualString(originalFileContents, old_string) || old_string
+        // densable 2.1.217 #5 hsr — bg / worktree isolation containment (errorCode 12)
+        // Official 2.1.331: deps.agentWorktree (projected from toolUseContext.agentWorktree)
+        const isolationBlock = checkBgIsolationWriteBlock(fullFilePath, {
+          agentId: deps.agentId,
+          agentWorktree: deps.agentWorktree,
+        })
+        if (isolationBlock) {
+          return { result: false, message: isolationBlock, errorCode: 12 }
+        }
 
-      // Official 2.1.321 #1855 (`jPs`): enforce unique match in call() too
-      // (network paths skip validateInput disk read).
-      if (fileExists && !replace_all && actualOldString !== '') {
-        const firstIdx = originalFileContents.indexOf(actualOldString)
+        // Reject edits to team memory files that introduce secrets
+        const secretError = checkTeamMemSecrets(fullFilePath, new_string)
+        if (secretError) {
+          return { result: false, message: secretError, errorCode: 0 }
+        }
+        if (old_string === new_string) {
+          return {
+            result: false,
+            behavior: 'ask',
+            message:
+              'No changes to make: old_string and new_string are exactly the same.',
+            errorCode: 1,
+          }
+        }
+
+        // Check if path should be ignored based on permission settings
+        const permissionContext = deps.permissions()
+        const denyRule = matchingRuleForInput(
+          fullFilePath,
+          permissionContext,
+          'edit',
+          'deny',
+        )
+        if (denyRule !== null) {
+          return {
+            result: false,
+            behavior: 'ask',
+            message:
+              'File is in a directory that is denied by your permission settings.',
+            errorCode: 2,
+          }
+        }
+
+        // densable l8t — Read deny covers this path/tool → dedicated edit copy
+        // (errorCode 13), not the generic "has not been read yet" unread message.
+        if (isPathCoveredByReadDenyRule(fullFilePath, permissionContext)) {
+          return {
+            result: false,
+            behavior: 'ask',
+            message: FILE_READ_DENY_CANNOT_EDIT,
+            errorCode: 13,
+          }
+        }
+
+        // SECURITY: Skip filesystem operations for UNC paths to prevent NTLM credential leaks.
+        // On Windows, fs.existsSync() on UNC paths triggers SMB authentication which could
+        // leak credentials to malicious servers. Let the permission check handle UNC paths.
+        if (fullFilePath.startsWith('\\\\') || fullFilePath.startsWith('//')) {
+          return { result: true }
+        }
+
+        const fs = getFsImplementation()
+        const notRegularFileResult = {
+          result: false as const,
+          message: `${file_path} exists but is not a regular file (a device, FIFO or socket). Edit only changes regular files.`,
+          errorCode: 16,
+        }
+
+        // 预检：防止 OOM（超大文件 / 0字节 /proc 文件）+ 防止编辑目录/设备/FIFO/socket
+        let isUnsizedOrMissing = false
+        try {
+          const fileStat = await fs.stat(fullFilePath)
+          // 预检：如果路径已是一个存在的目录，及时拒绝并给出指引
+          // 避免 AI 模型传入目录路径后 Edit 工具读取文件时抛 EISDIR。
+          if (fileStat.isDirectory()) {
+            return {
+              result: false,
+              behavior: 'ask',
+              message: `Cannot edit '${file_path}': the specified path is an existing directory. Use Bash ls to list files in this directory, or specify a filename path to edit a specific file.`,
+              errorCode: 10,
+            }
+          }
+          if (fileStat.size > MAX_EDIT_FILE_SIZE) {
+            return {
+              result: false,
+              behavior: 'ask',
+              message: `File is too large to edit (${formatFileSize(fileStat.size)}). Maximum editable file size is ${formatFileSize(MAX_EDIT_FILE_SIZE)}.`,
+              errorCode: 10,
+            }
+          }
+          // 2.1.323 #1985 (SEA @293963177): refuse devices, FIFOs, and sockets
+          if (!fileStat.isFile()) {
+            return notRegularFileResult
+          }
+          assertRegularFileStat(fileStat, fullFilePath)
+          isUnsizedOrMissing = fileStat.size === 0
+        } catch (e) {
+          if (!isENOENT(e)) {
+            throw e
+          }
+          isUnsizedOrMissing = true
+        }
+
+        // Read the file as bytes first so we can detect encoding and invalid UTF-8
+        // from the buffer instead of calling detectFileEncoding (which does its own
+        // sync readSync and would fail with a wasted ENOENT when the file doesn't exist).
+        // 2.1.323 #1985: for 0-byte synthetic (/proc) or freshly-appearing files,
+        // use non-blocking bounded readUnsizedFileBytes (`btr`) so Edit never hangs
+        // on FIFOs/devices or OOMs on /proc files.
+        let fileContent: string | null
+        let notText: NonTextReason | undefined
+        let refusedByNameMessage: string | undefined
+        try {
+          const fileBuffer = isUnsizedOrMissing
+            ? ((await readUnsizedFileBytes(fullFilePath, {
+                refusesName: resolved => {
+                  refusedByNameMessage = checkDeviceOrProcPathRefusal(
+                    file_path,
+                    resolved,
+                  )
+                  return refusedByNameMessage !== undefined
+                },
+                maxSizedBytes: MAX_EDIT_FILE_SIZE,
+              })) ?? Buffer.alloc(0))
+            : await fs.readFileBytes(fullFilePath)
+          const detected = detectBufferTextEncoding(fileBuffer)
+          notText = detected.notText
+          fileContent = fileBuffer
+            .toString(detected.encoding)
+            .replaceAll('\r\n', '\n')
+        } catch (e) {
+          if (isFileTooLargeError(e)) {
+            return {
+              result: false,
+              message:
+                e.maxBytes === MAX_UNSIZED_FILE_BYTES
+                  ? `File is too large to edit: it reports a size of 0 bytes and holds more than ${formatFileSize(MAX_UNSIZED_FILE_BYTES)}.`
+                  : `File is too large to edit. Maximum editable file size is ${formatFileSize(MAX_EDIT_FILE_SIZE)}.`,
+              errorCode: 10,
+            }
+          }
+          if (isNotRegularFileError(e)) {
+            return refusedByNameMessage === undefined
+              ? notRegularFileResult
+              : {
+                  result: false,
+                  message: refusedByNameMessage,
+                  errorCode: 16,
+                }
+          }
+          if (isUnsizedOrMissing && getErrnoCode(e) === 'EAGAIN') {
+            return {
+              result: false,
+              message: `${file_path} has nothing more to read yet, so it may be a stream. Edit only changes regular files.`,
+              errorCode: 16,
+            }
+          }
+          if (isENOENT(e)) {
+            fileContent = null
+          } else {
+            throw e
+          }
+        }
+
+        // File doesn't exist
+        if (fileContent === null) {
+          // Empty old_string on nonexistent file means new file creation — valid
+          if (old_string === '') {
+            return validateCoordinatorWriteAccess({
+              filePath: fullFilePath,
+              sourceTool: 'FileEditTool',
+            })
+          }
+          // Try to find a similar file with a different extension
+          const similarFilename = await findSimilarFile(fullFilePath)
+          const cwdSuggestion = await suggestPathUnderCwd(fullFilePath)
+          let message = `File does not exist. ${FILE_NOT_FOUND_CWD_NOTE} ${getCwd()}.`
+
+          if (cwdSuggestion) {
+            message += ` Did you mean ${cwdSuggestion}?`
+          } else if (similarFilename) {
+            message += ` Did you mean ${similarFilename}?`
+          }
+
+          return {
+            result: false,
+            behavior: 'ask',
+            message,
+            errorCode: 4,
+          }
+        }
+
+        // File exists with empty old_string — only valid if file is empty
+        if (old_string === '') {
+          // Only reject if the file has content (for file creation attempt)
+          if (fileContent.trim() !== '') {
+            return {
+              result: false,
+              behavior: 'ask',
+              message: 'Cannot create new file - file already exists.',
+              errorCode: 3,
+            }
+          }
+
+          // Empty file with empty old_string is valid - we're replacing empty with content
+          return validateCoordinatorWriteAccess({
+            filePath: fullFilePath,
+            sourceTool: 'FileEditTool',
+          })
+        }
+
+        if (fullFilePath.endsWith('.ipynb')) {
+          return {
+            result: false,
+            behavior: 'ask',
+            message: `File is a Jupyter Notebook. Use the ${NOTEBOOK_EDIT_TOOL_NAME} to edit this file.`,
+            errorCode: 5,
+          }
+        }
+
+        // densable 2.1.228 #17 Edit: !p || p.isPartialView → not-read (errorCode 6)
+        // unless guardSkipped = !J4t(model) && MCt(Edit, path, ...)
+        // Official 2.1.327 (#413): also allow editing unchanged files outside the
+        // project that Claude had already read in full before compaction.
+        const readTimestamp = deps.readFileState.get(fullFilePath)
+        const reliesOnCompactedRead =
+          !readTimestamp &&
+          hasUnchangedReadBeforeCompaction(deps, fullFilePath, fileContent)
         if (
-          firstIdx !== -1 &&
-          originalFileContents.indexOf(
-            actualOldString,
-            firstIdx + actualOldString.length,
-          ) !== -1
+          (!readTimestamp || readTimestamp.isPartialView) &&
+          !reliesOnCompactedRead
         ) {
-          const matchCount =
-            originalFileContents.split(actualOldString).length - 1
-          const err = new Error(
-            `Found ${matchCount} matches of the string to replace, but replace_all is false. To replace all occurrences, set replace_all to true. To replace only one occurrence, please provide more context to uniquely identify the instance.\nString: ${old_string}`,
+          const guardSkipped = shouldSkipEditUnreadGate(
+            fullFilePath,
+            resolveToolUseContext(deps, callCtx),
           )
-          err.name = 'ToolExecutionError'
-          throw err
+          logEvent('tengu_edit_tool_not_read_hypothetical', {
+            isPartialView: readTimestamp?.isPartialView === true,
+            isFilePathAbsolute: isAbsolute(file_path),
+            guardSkipped,
+          })
+          if (!guardSkipped) {
+            return {
+              result: false,
+              behavior: 'ask',
+              message:
+                'File has not been read yet. Read it first before writing to it.',
+              meta: {
+                isFilePathAbsolute: String(isAbsolute(file_path)),
+              },
+              errorCode: 6,
+            }
+          }
         }
-      }
 
-      const { patch, updatedFile: editedFile } = getPatchForEdit({
-        filePath: absoluteFilePath,
-        fileContents: originalFileContents,
-        oldString: actualOldString,
-        newString: new_string,
-        replaceAll: replace_all,
-      })
+        // densable: if (p) { mtime > timestamp → HOe && xOe bypass, else stale errorCode 7 }
+        // Also check content/baseline even when mtime did not advance (#430 wKe),
+        // and treat entries refreshed behind the model's back (#413 `lHo`) as stale.
+        if (readTimestamp) {
+          if (readTimestamp.refreshedBehindModel === true) {
+            logEvent('tengu_edit_tool_stale_read', {})
+            return {
+              result: false,
+              behavior: 'ask',
+              message:
+                'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
+              errorCode: 7,
+            }
+          }
+          const lastWriteTime = getFileModificationTime(fullFilePath)
+          const normalizedContent = stripBom(fileContent)
+          const matchesBaseline = matchesReadStateOrBaseline(
+            readTimestamp,
+            normalizedContent,
+          )
+          if (lastWriteTime > readTimestamp.timestamp) {
+            if (!(isFullEnoughFileRead(readTimestamp) && matchesBaseline)) {
+              logEvent('tengu_edit_tool_stale_read', {})
+              return {
+                result: false,
+                behavior: 'ask',
+                message:
+                  'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
+                errorCode: 7,
+              }
+            }
+          } else if (isFullEnoughFileRead(readTimestamp) && !matchesBaseline) {
+            logEvent('tengu_edit_tool_stale_read', {})
+            return {
+              result: false,
+              behavior: 'ask',
+              message:
+                'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
+              errorCode: 7,
+            }
+          }
+        }
 
-      updatedFile = stampNewMemoryContent(absoluteFilePath, editedFile)
-      const memdirStamped = updatedFile !== editedFile
-      patchForDisplay = !memdirStamped
-        ? patch
-        : getFastPatchFromContents({
-            oldContent: originalFileContents,
-            newContent: updatedFile,
-            convertTabs: true,
+        if (notText) {
+          return {
+            result: false,
+            message: formatNonTextFileRefusal(notText),
+            errorCode: 15,
+          }
+        }
+
+        const file = fileContent
+
+        // Use findActualString to find exact match
+        const actualOldString = findActualString(file, old_string)
+        if (!actualOldString) {
+          return {
+            result: false,
+            behavior: 'ask',
+            message: `String to replace not found in file.\nString: ${old_string}`,
+            meta: {
+              isFilePathAbsolute: String(isAbsolute(file_path)),
+            },
+            errorCode: 8,
+          }
+        }
+
+        const matches = file.split(actualOldString).length - 1
+
+        // Check if we have multiple matches but replace_all is false
+        if (matches > 1 && !replace_all) {
+          return {
+            result: false,
+            behavior: 'ask',
+            message: `Found ${matches} matches of the string to replace, but replace_all is false. To replace all occurrences, set replace_all to true. To replace only one occurrence, please provide more context to uniquely identify the instance.\nString: ${old_string}`,
+            meta: {
+              isFilePathAbsolute: String(isAbsolute(file_path)),
+              actualOldString,
+            },
+            errorCode: 9,
+          }
+        }
+
+        // Additional validation for Claude settings files
+        const settingsValidationResult = validateInputForSettingsFileEdit(
+          fullFilePath,
+          file,
+          () => {
+            // Simulate the edit to get the final content using the exact same logic as the tool
+            // (avoids String.prototype.replace $$ / $& corruption and matches trailing-newline cleanup).
+            return applyEditToFile(
+              file,
+              actualOldString,
+              new_string,
+              replace_all,
+            )
+          },
+        )
+
+        if (settingsValidationResult !== null) {
+          return settingsValidationResult
+        }
+
+        const coordinatorWriteValidation = validateCoordinatorWriteAccess({
+          filePath: fullFilePath,
+          sourceTool: 'FileEditTool',
+        })
+        if (!coordinatorWriteValidation.result) {
+          return coordinatorWriteValidation
+        }
+
+        return { result: true, meta: { actualOldString } }
+      },
+      async call(
+        input: FileEditInput,
+        callCtx,
+      ): Promise<ToolResult<FileEditOutput>> {
+        const {
+          readFileState,
+          updateFileHistoryState,
+          dynamicSkillDirTriggers,
+        } = deps
+        const { userModified, parentMessage, toolUseId } = callCtx
+        const { file_path, old_string, new_string, replace_all = false } = input
+
+        const absoluteFilePath = expandPath(file_path)
+
+        const toolPermissionContext = deps.permissions()
+        const outsideWriteBlock = checkBlockWritesOutsideWorkingDirectories(
+          absoluteFilePath,
+          toolPermissionContext,
+        )
+        if (outsideWriteBlock !== undefined) {
+          throw new Error(outsideWriteBlock)
+        }
+
+        // 2.1.323 #2023 defense-in-depth: also enforce Read deny rules at call()
+        // time across all resolved path spellings (symlinks / realpath).
+        if (
+          isPathCoveredByReadDenyRule(absoluteFilePath, toolPermissionContext)
+        ) {
+          throw new Error(FILE_READ_DENY_CANNOT_EDIT)
+        }
+
+        // Discover skills from this file's path (official 2.1.328 BJ).
+        // Skip in bare mode - no skills available.
+        if (!isBareMode()) {
+          await discoverAndActivateSkillsForFilePath(
+            absoluteFilePath,
+            dynamicSkillDirTriggers,
+          )
+        }
+
+        await diagnosticTracker.beforeFileEdited(absoluteFilePath)
+
+        const approved = takeApprovedFileToolPath(
+          absoluteFilePath,
+          toolUseId,
+          'write',
+        )
+        const openedWrite = await openApprovedWrite(
+          absoluteFilePath,
+          approved,
+          {
+            // densable DH: Edit replaces the leaf — recheck ao(dirname).map(join leaf)
+            createParents: true,
+            leaf: 'replace',
+          },
+        )
+        let openedRead: ApprovedRead | null = null
+        let originalFileContents = ''
+        let fileExists = false
+        let encoding: BufferEncoding = 'utf8'
+        let endings: LineEndingType = 'LF'
+        let actualOldString = old_string
+        let patchForDisplay: ReturnType<typeof getPatchForDisplay> = []
+        let updatedFile = ''
+        let reliesOnCompactedRead = false
+        try {
+          if (
+            fileHistoryEnabled() &&
+            updateFileHistoryState &&
+            parentMessage?.uuid
+          ) {
+            await fileHistoryTrackEdit(
+              updateFileHistoryState,
+              absoluteFilePath,
+              parentMessage.uuid,
+            )
+          }
+
+          try {
+            openedRead = await openApprovedRead(absoluteFilePath, approved)
+            // 2.1.323 #1985: guard call() against non-regular files and 0-byte /proc OOM
+            const openedStat = await openedRead.handle.stat()
+            assertRegularFileStat(
+              openedStat,
+              absoluteFilePath,
+              MAX_EDIT_FILE_SIZE,
+            )
+            if (openedStat.size === 0) {
+              const rawBytes =
+                (await readUnsizedFileBytes(openedRead.ioPath, {
+                  refusesName: resolved =>
+                    checkDeviceOrProcPathRefusal(file_path, resolved) !==
+                    undefined,
+                  maxSizedBytes: MAX_EDIT_FILE_SIZE,
+                })) ?? Buffer.alloc(0)
+              const detected = detectBufferTextEncoding(rawBytes)
+              if (detected.notText) {
+                throw new Error(formatNonTextFileRefusal(detected.notText))
+              }
+              const raw = rawBytes.toString(detected.encoding)
+              originalFileContents = raw.replaceAll('\r\n', '\n')
+              fileExists = true
+              encoding = detected.encoding
+              endings = detectLineEndingsForString(raw.slice(0, 4096))
+            } else {
+              const rawBytes = await openedRead.handle.readFile()
+              const detected = detectBufferTextEncoding(rawBytes)
+              if (detected.notText) {
+                throw new Error(formatNonTextFileRefusal(detected.notText))
+              }
+              const raw = rawBytes.toString(detected.encoding)
+              originalFileContents = raw.replaceAll('\r\n', '\n')
+              fileExists = true
+              encoding = detected.encoding
+              endings = detectLineEndingsForString(raw.slice(0, 4096))
+            }
+          } catch (e) {
+            if (!isENOENT(e)) throw e
+          }
+
+          if (fileExists) {
+            // Official 2.1.321 #1855 (`BPs` + `jPs`): network paths (UNC shares,
+            // WSL folders, `/net` mounts) skip disk checks in validateInput(), so
+            // call() MUST re-check empty old_string overwrite, `.ipynb` refusal,
+            // and unique match when replace_all is false.
+            if (old_string === '' && originalFileContents.trim() !== '') {
+              const err = new Error(
+                'Cannot create new file - file already exists.',
+              )
+              err.name = 'ToolExecutionError'
+              throw err
+            }
+            if (old_string !== '' && absoluteFilePath.endsWith('.ipynb')) {
+              const err = new Error(
+                'File is a Jupyter Notebook. Use the NotebookEdit to edit this file.',
+              )
+              err.name = 'ToolExecutionError'
+              throw err
+            }
+            const lastWriteTime = getFileModificationTime(absoluteFilePath)
+            const lastRead = readFileState.get(absoluteFilePath)
+            const normalizedContent = stripBom(originalFileContents)
+            reliesOnCompactedRead =
+              !lastRead &&
+              hasUnchangedReadBeforeCompaction(
+                deps,
+                absoluteFilePath,
+                originalFileContents,
+              )
+            // densable 2.1.228 #17 call-path: missing/partial may pass when the same
+            // guardSkipped as validateInput would; true staleness still throws.
+            if (!lastRead || lastRead.isPartialView) {
+              if (
+                !reliesOnCompactedRead &&
+                !shouldAllowCallDespiteMissingOrPartialRead(
+                  'edit',
+                  absoluteFilePath,
+                  resolveToolUseContext(deps, callCtx),
+                  lastRead,
+                )
+              ) {
+                throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
+              }
+            } else if (
+              lastRead &&
+              (lastRead.refreshedBehindModel === true ||
+                lastWriteTime > lastRead.timestamp ||
+                isFullEnoughFileRead(lastRead)) &&
+              !(
+                lastRead.refreshedBehindModel !== true &&
+                isFullEnoughFileRead(lastRead) &&
+                matchesReadStateOrBaseline(lastRead, normalizedContent)
+              )
+            ) {
+              if (
+                lastRead.refreshedBehindModel === true ||
+                lastWriteTime > lastRead.timestamp ||
+                isFullEnoughFileRead(lastRead)
+              ) {
+                throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
+              }
+            }
+          }
+
+          actualOldString =
+            findActualString(originalFileContents, old_string) || old_string
+
+          // Official 2.1.321 #1855 (`jPs`): enforce unique match in call() too
+          // (network paths skip validateInput disk read).
+          if (fileExists && !replace_all && actualOldString !== '') {
+            const firstIdx = originalFileContents.indexOf(actualOldString)
+            if (
+              firstIdx !== -1 &&
+              originalFileContents.indexOf(
+                actualOldString,
+                firstIdx + actualOldString.length,
+              ) !== -1
+            ) {
+              const matchCount =
+                originalFileContents.split(actualOldString).length - 1
+              const err = new Error(
+                `Found ${matchCount} matches of the string to replace, but replace_all is false. To replace all occurrences, set replace_all to true. To replace only one occurrence, please provide more context to uniquely identify the instance.\nString: ${old_string}`,
+              )
+              err.name = 'ToolExecutionError'
+              throw err
+            }
+          }
+
+          const { patch, updatedFile: editedFile } = getPatchForEdit({
+            filePath: absoluteFilePath,
+            fileContents: originalFileContents,
+            oldString: actualOldString,
+            newString: new_string,
+            replaceAll: replace_all,
           })
 
-      await openedWrite.recheckBeforeWrite()
-      writeTextContent(openedWrite.ioPath, updatedFile, encoding, endings)
-    } finally {
-      await openedRead?.close()
-      await openedWrite.close()
-    }
+          updatedFile = stampNewMemoryContent(absoluteFilePath, editedFile)
+          const memdirStamped = updatedFile !== editedFile
+          patchForDisplay = !memdirStamped
+            ? patch
+            : getFastPatchFromContents({
+                oldContent: originalFileContents,
+                newContent: updatedFile,
+                convertTabs: true,
+              })
 
-    // Notify LSP servers about file modification (didChange) and save (didSave)
-    const lspManager = getLspServerManager()
-    if (lspManager) {
-      // Clear previously delivered diagnostics so new ones will be shown
-      clearDeliveredDiagnosticsForFile(`file://${absoluteFilePath}`)
-      // didChange: Content has been modified
-      lspManager
-        .changeFile(absoluteFilePath, updatedFile)
-        .catch((err: Error) => {
-          logForDebugging(
-            `LSP: Failed to notify server of file change for ${absoluteFilePath}: ${err.message}`,
-          )
-          logError(err)
-        })
-      // didSave: File has been saved to disk (triggers diagnostics in TypeScript server)
-      lspManager.saveFile(absoluteFilePath).catch((err: Error) => {
-        logForDebugging(
-          `LSP: Failed to notify server of file save for ${absoluteFilePath}: ${err.message}`,
+          await openedWrite.recheckBeforeWrite()
+          writeTextContent(openedWrite.ioPath, updatedFile, encoding, endings)
+        } finally {
+          await openedRead?.close()
+          await openedWrite.close()
+        }
+
+        // Notify LSP servers about file modification (didChange) and save (didSave)
+        const lspManager = getLspServerManager()
+        if (lspManager) {
+          // Clear previously delivered diagnostics so new ones will be shown
+          clearDeliveredDiagnosticsForFile(`file://${absoluteFilePath}`)
+          // didChange: Content has been modified
+          lspManager
+            .changeFile(absoluteFilePath, updatedFile)
+            .catch((err: Error) => {
+              logForDebugging(
+                `LSP: Failed to notify server of file change for ${absoluteFilePath}: ${err.message}`,
+              )
+              logError(err)
+            })
+          // didSave: File has been saved to disk (triggers diagnostics in TypeScript server)
+          lspManager.saveFile(absoluteFilePath).catch((err: Error) => {
+            logForDebugging(
+              `LSP: Failed to notify server of file save for ${absoluteFilePath}: ${err.message}`,
+            )
+            logError(err)
+          })
+        }
+
+        // Notify VSCode about the file change for diff view
+        notifyVscodeFileUpdated(
+          absoluteFilePath,
+          originalFileContents,
+          updatedFile,
         )
-        logError(err)
-      })
-    }
 
-    // Notify VSCode about the file change for diff view
-    notifyVscodeFileUpdated(absoluteFilePath, originalFileContents, updatedFile)
+        // 6. Update read timestamp, to invalidate stale writes
+        readFileState.set(absoluteFilePath, {
+          content: updatedFile,
+          timestamp: getFileModificationTime(absoluteFilePath),
+          offset: undefined,
+          limit: undefined,
+        })
+        if (reliesOnCompactedRead) {
+          readFileState.renewReadBeforeCompaction(absoluteFilePath)
+        }
 
-    // 6. Update read timestamp, to invalidate stale writes
-    readFileState.set(absoluteFilePath, {
-      content: updatedFile,
-      timestamp: getFileModificationTime(absoluteFilePath),
-      offset: undefined,
-      limit: undefined,
-    })
-    if (reliesOnCompactedRead) {
-      readFileState.renewReadBeforeCompaction(absoluteFilePath)
-    }
+        // 7. Log events
+        if (absoluteFilePath.endsWith(`${sep}CLAUDE.md`)) {
+          logEvent('tengu_write_claudemd', {})
+        }
+        if (
+          patchForDisplay.length === 0 &&
+          originalFileContents !== updatedFile
+        ) {
+          countLinesChanged([], updatedFile, originalFileContents)
+        } else {
+          countLinesChanged(patchForDisplay)
+        }
 
-    // 7. Log events
-    if (absoluteFilePath.endsWith(`${sep}CLAUDE.md`)) {
-      logEvent('tengu_write_claudemd', {})
-    }
-    if (patchForDisplay.length === 0 && originalFileContents !== updatedFile) {
-      countLinesChanged([], updatedFile, originalFileContents)
-    } else {
-      countLinesChanged(patchForDisplay)
-    }
+        logFileOperation({
+          operation: 'edit',
+          tool: 'FileEditTool',
+          filePath: absoluteFilePath,
+        })
 
-    logFileOperation({
-      operation: 'edit',
-      tool: 'FileEditTool',
-      filePath: absoluteFilePath,
-    })
+        logEvent('tengu_edit_string_lengths', {
+          oldStringBytes: Buffer.byteLength(old_string, 'utf8'),
+          newStringBytes: Buffer.byteLength(new_string, 'utf8'),
+          replaceAll: replace_all,
+        })
 
-    logEvent('tengu_edit_string_lengths', {
-      oldStringBytes: Buffer.byteLength(old_string, 'utf8'),
-      newStringBytes: Buffer.byteLength(new_string, 'utf8'),
-      replaceAll: replace_all,
-    })
+        let gitDiff: ToolUseDiff | undefined
+        // Official REMOTE densable for remote git-diff side channel.
+        let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+        try {
+          const { isRemoteEnvEnabled } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
+          isRemote = isRemoteEnvEnabled()
+        } catch {
+          // keep raw env fallback
+        }
+        if (
+          isRemote &&
+          getFeatureValue_CACHED_MAY_BE_STALE('tengu_quartz_lantern', false)
+        ) {
+          const startTime = Date.now()
+          const diff = await fetchSingleFileGitDiff(absoluteFilePath)
+          if (diff) gitDiff = diff
+          logEvent('tengu_tool_use_diff_computed', {
+            isEditTool: true,
+            durationMs: Date.now() - startTime,
+            hasDiff: !!diff,
+          })
+        }
 
-    let gitDiff: ToolUseDiff | undefined
-    // Official REMOTE densable for remote git-diff side channel.
-    let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
-    try {
-      const { isRemoteEnvEnabled } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
-      isRemote = isRemoteEnvEnabled()
-    } catch {
-      // keep raw env fallback
-    }
-    if (
-      isRemote &&
-      getFeatureValue_CACHED_MAY_BE_STALE('tengu_quartz_lantern', false)
-    ) {
-      const startTime = Date.now()
-      const diff = await fetchSingleFileGitDiff(absoluteFilePath)
-      if (diff) gitDiff = diff
-      logEvent('tengu_tool_use_diff_computed', {
-        isEditTool: true,
-        durationMs: Date.now() - startTime,
-        hasDiff: !!diff,
-      })
-    }
-
-    // 8. Yield result
-    const data = {
-      filePath: file_path,
-      oldString: actualOldString,
-      newString: new_string,
-      originalFile: originalFileContents,
-      structuredPatch: patchForDisplay,
-      userModified: userModified ?? false,
-      replaceAll: replace_all,
-      ...(gitDiff && { gitDiff }),
-    }
-    return {
-      data,
+        // 8. Yield result
+        const data = {
+          filePath: file_path,
+          oldString: actualOldString,
+          newString: new_string,
+          originalFile: originalFileContents,
+          structuredPatch: patchForDisplay,
+          userModified: userModified ?? false,
+          replaceAll: replace_all,
+          ...(gitDiff && { gitDiff }),
+        }
+        return {
+          data,
+        }
+      },
     }
   },
   mapToolResultToToolResultBlockParam(data: FileEditOutput, toolUseID) {

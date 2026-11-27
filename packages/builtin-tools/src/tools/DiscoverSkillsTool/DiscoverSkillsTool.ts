@@ -1,6 +1,5 @@
 import { z } from 'zod/v4'
-import type { ToolResultBlockParam } from 'src/Tool.js'
-import { buildTool } from 'src/Tool.js'
+import { buildTool, type ToolDef, type ToolResultBlockParam } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import {
   DISCOVER_SKILLS_TOOL_NAME,
@@ -83,25 +82,30 @@ export const DiscoverSkillsTool = buildTool({
     }
   },
 
-  async call(input: DiscoverInput, context) {
-    const { getSkillIndex, searchSkills } = await import(
-      'src/services/skillSearch/localSearch.js'
-    )
-    const { getCwd } = await import('src/utils/cwd.js')
-    const cwd = getCwd()
-
-    const index = await getSkillIndex(cwd)
-    const results = searchSkills(input.description, index, input.limit ?? 5)
-
+  create(deps) {
     return {
-      data: {
-        results: results.map(r => ({
-          name: r.name,
-          description: r.description,
-          score: r.score,
-        })),
-        count: results.length,
+      async call(input: DiscoverInput) {
+        const { getSkillIndex, searchSkills } = await import(
+          'src/services/skillSearch/localSearch.js'
+        )
+        const cwd = deps.cwd
+          ? deps.cwd()
+          : (await import('src/utils/cwd.js')).getCwd()
+
+        const index = await getSkillIndex(cwd)
+        const results = searchSkills(input.description, index, input.limit ?? 5)
+
+        return {
+          data: {
+            results: results.map(r => ({
+              name: r.name,
+              description: r.description,
+              score: r.score,
+            })),
+            count: results.length,
+          },
+        }
       },
     }
   },
-})
+} satisfies ToolDef<InputSchema, DiscoverOutput>)

@@ -8,8 +8,19 @@
 
 import { z } from 'zod/v4'
 import { getLoopChainStartedAt } from 'src/bootstrap/state.js'
-import type { ToolResultBlockParam } from 'src/Tool.js'
-import { buildTool, type ToolDef } from 'src/Tool.js'
+import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js'
+import {
+  buildTool,
+  resolveToolUseContext,
+  type ToolCallExecutionOptions,
+  type ToolCallProgress,
+  type ToolDef,
+  type ToolProgressData,
+  type ToolResult,
+  type ToolResultBlockParam,
+  type ToolUseContext,
+} from 'src/Tool.js'
+import type { AssistantMessage } from 'src/types/message.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import {
   isKairosLoopDynamicEnabled,
@@ -260,7 +271,15 @@ const outputSchema = lazySchema(() =>
 type OutputSchema = ReturnType<typeof outputSchema>
 export type ScheduleWakeupOutput = z.infer<OutputSchema>
 
-export const ScheduleWakeupTool = buildTool({
+type ScheduleWakeupLegacyContext =
+  | ToolUseContext
+  | {
+      hookCaller?: string
+      pluginUnnamed?: boolean
+      toolUseId?: string
+    }
+
+const builtScheduleWakeupTool = buildTool({
   name: SCHEDULE_WAKEUP_TOOL_NAME,
   // densable searchHint via EU / CronDelete
   searchHint: `self-pace the dynamic /loop: pick a delay before the next tick, or stop/end/cancel the dynamic loop with stop:true (a fixed-interval /loop is a recurring cron — cancel it with ${CRON_DELETE_TOOL_NAME})`,
@@ -308,126 +327,128 @@ export const ScheduleWakeupTool = buildTool({
     return `wake in ${input.delaySeconds}s: ${input.prompt}`
   },
 
-  async checkPermissions(input, context) {
-    // densable: if(bn(t).mode==="auto") return passthrough
-    if (context.getAppState().toolPermissionContext.mode === 'auto') {
-      return {
-        behavior: 'passthrough' as const,
-        message: 'Scheduling a /loop wakeup requires classifier review.',
-      }
-    }
-    return { behavior: 'allow' as const, updatedInput: input }
-  },
-
   // densable renderToolUseMessage(){return null}
   renderToolUseMessage() {
     return null
   },
 
-  async call(
-    input: ScheduleWakeupInput,
-    context?: {
-      hookCaller?: string
-      pluginUnnamed?: boolean
-      toolUseId?: string
-    },
-    _canUseTool?: unknown,
-    parentMessage?: { message?: { content?: unknown } },
-  ) {
-    const { delaySeconds, reason, prompt, stop } = input
-    const refusal =
-      stop !== true && isUnnamedPluginScheduleRefused(context)
-        ? UNNAMED_PLUGIN_SCHEDULE_REFUSAL
-        : undefined
-    if (refusal !== undefined) {
-      try {
-        const { logForDebugging } =
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          require('src/utils/debug.js') as typeof import('src/utils/debug.js')
-        logForDebugging(`ScheduleWakeup refused: ${refusal}`)
-      } catch {
-        // debug log optional
-      }
-      throw new ScheduleWakeupInputError(refusal)
-    }
-    const wakeupState = getScheduleWakeupSessionState()
-    // densable stop path → QKu
-    if (stop === true) {
-      const cancelledWakeups = stopDynamicLoop()
-      wakeupState.lastArmedWakeupMeta = undefined
-      await persistPendingWakeupBestEffort(undefined)
-      return {
-        data: {
-          scheduledFor: 0,
-          clampedDelaySeconds: 0,
-          wasClamped: false,
-          stopped: true,
-          cancelledWakeups,
-        },
-      }
-    }
-    if (delaySeconds === undefined || reason === undefined) {
-      throw new ScheduleWakeupInputError(
-        '`delaySeconds` and `reason` are required when `stop` is not true.',
-      )
-    }
-    if (prompt === undefined) {
-      throw new ScheduleWakeupInputError(
-        '`prompt` is required when `stop` is not true.',
-      )
-    }
-    // densable !jKe → $$t("gate_off") + zeros
-    if (!isKairosLoopDynamicEnabled()) {
-      markLoopEnded('gate_off')
-      wakeupState.lastArmedWakeupMeta = undefined
-      await persistPendingWakeupBestEffort(undefined)
-      return {
-        data: {
-          scheduledFor: 0,
-          clampedDelaySeconds: 0,
-          wasClamped: false,
-        },
-      }
-    }
-    // densable JKu(t,n,r)
-    const scheduled = scheduleModelWakeup(delaySeconds, prompt, reason)
-    if (scheduled === null) {
-      wakeupState.lastArmedWakeupMeta = undefined
-      await persistPendingWakeupBestEffort(undefined)
-      return {
-        data: {
-          scheduledFor: 0,
-          clampedDelaySeconds: 0,
-          wasClamped: false,
-        },
-      }
-    }
-    const chainStartedAt =
-      getLoopChainStartedAt(prompt)?.startedAt ?? Date.now()
-    const toolUseId = resolveWakeupToolUseId(context, parentMessage)
-    if (toolUseId !== undefined) {
-      wakeupState.lastArmedWakeupMeta = {
-        scheduledFor: scheduled.scheduledFor,
-        chainStartedAt,
-        persisted: true,
-      }
-      await persistPendingWakeupBestEffort({
-        toolUseId,
-        scheduledFor: scheduled.scheduledFor,
-        chainStartedAt,
-      })
-    } else {
-      wakeupState.lastArmedWakeupMeta = {
-        scheduledFor: scheduled.scheduledFor,
-        chainStartedAt,
-        persisted: false,
-      }
-    }
+  create(deps) {
     return {
-      data: {
-        scheduledFor: scheduled.scheduledFor,
-        clampedDelaySeconds: scheduled.clampedDelaySeconds,
-        wasClamped: scheduled.wasClamped,
+      async checkPermissions(input) {
+        // densable: if(bn(t).mode==="auto") return passthrough
+        if (deps.permissions().mode === 'auto') {
+          return {
+            behavior: 'passthrough' as const,
+            message: 'Scheduling a /loop wakeup requires classifier review.',
+          }
+        }
+        return { behavior: 'allow' as const, updatedInput: input }
+      },
+      async call(input: ScheduleWakeupInput, callCtx) {
+        const { delaySeconds, reason, prompt, stop } = input
+        const rawCtx = resolveToolUseContext(deps, callCtx) as {
+          hookCaller?: string
+          pluginUnnamed?: boolean
+        }
+        const pluginCtx = {
+          hookCaller: deps.hookCaller ?? rawCtx.hookCaller,
+          pluginUnnamed: rawCtx.pluginUnnamed,
+        }
+        const refusal =
+          stop !== true && isUnnamedPluginScheduleRefused(pluginCtx)
+            ? UNNAMED_PLUGIN_SCHEDULE_REFUSAL
+            : undefined
+        if (refusal !== undefined) {
+          try {
+            const { logForDebugging } =
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              require('src/utils/debug.js') as typeof import('src/utils/debug.js')
+            logForDebugging(`ScheduleWakeup refused: ${refusal}`)
+          } catch {
+            // debug log optional
+          }
+          throw new ScheduleWakeupInputError(refusal)
+        }
+        const wakeupState = getScheduleWakeupSessionState()
+        // densable stop path → QKu
+        if (stop === true) {
+          const cancelledWakeups = stopDynamicLoop()
+          wakeupState.lastArmedWakeupMeta = undefined
+          await persistPendingWakeupBestEffort(undefined)
+          return {
+            data: {
+              scheduledFor: 0,
+              clampedDelaySeconds: 0,
+              wasClamped: false,
+              stopped: true,
+              cancelledWakeups,
+            },
+          }
+        }
+        if (delaySeconds === undefined || reason === undefined) {
+          throw new ScheduleWakeupInputError(
+            '`delaySeconds` and `reason` are required when `stop` is not true.',
+          )
+        }
+        if (prompt === undefined) {
+          throw new ScheduleWakeupInputError(
+            '`prompt` is required when `stop` is not true.',
+          )
+        }
+        // densable !jKe → $$t("gate_off") + zeros
+        if (!isKairosLoopDynamicEnabled()) {
+          markLoopEnded('gate_off')
+          wakeupState.lastArmedWakeupMeta = undefined
+          await persistPendingWakeupBestEffort(undefined)
+          return {
+            data: {
+              scheduledFor: 0,
+              clampedDelaySeconds: 0,
+              wasClamped: false,
+            },
+          }
+        }
+        // densable JKu(t,n,r)
+        const scheduled = scheduleModelWakeup(delaySeconds, prompt, reason)
+        if (scheduled === null) {
+          wakeupState.lastArmedWakeupMeta = undefined
+          await persistPendingWakeupBestEffort(undefined)
+          return {
+            data: {
+              scheduledFor: 0,
+              clampedDelaySeconds: 0,
+              wasClamped: false,
+            },
+          }
+        }
+        const chainStartedAt =
+          getLoopChainStartedAt(prompt)?.startedAt ?? Date.now()
+        const toolUseId = resolveWakeupToolUseId(callCtx, callCtx.parentMessage)
+        if (toolUseId !== undefined) {
+          wakeupState.lastArmedWakeupMeta = {
+            scheduledFor: scheduled.scheduledFor,
+            chainStartedAt,
+            persisted: true,
+          }
+          await persistPendingWakeupBestEffort({
+            toolUseId,
+            scheduledFor: scheduled.scheduledFor,
+            chainStartedAt,
+          })
+        } else {
+          wakeupState.lastArmedWakeupMeta = {
+            scheduledFor: scheduled.scheduledFor,
+            chainStartedAt,
+            persisted: false,
+          }
+        }
+        return {
+          data: {
+            scheduledFor: scheduled.scheduledFor,
+            clampedDelaySeconds: scheduled.clampedDelaySeconds,
+            wasClamped: scheduled.wasClamped,
+          },
+        }
       },
     }
   },
@@ -512,3 +533,29 @@ export const ScheduleWakeupTool = buildTool({
     }
   },
 } satisfies ToolDef<InputSchema, ScheduleWakeupOutput> & { whenToUse: string })
+
+export const ScheduleWakeupTool: Omit<
+  typeof builtScheduleWakeupTool,
+  'call'
+> & {
+  call(
+    args: ScheduleWakeupInput,
+    context?: ScheduleWakeupLegacyContext,
+    canUseTool?: CanUseToolFn,
+    parentMessage?: AssistantMessage,
+    onProgress?: ToolCallProgress<ToolProgressData>,
+    opts?: ToolCallExecutionOptions,
+  ): Promise<ToolResult<ScheduleWakeupOutput>>
+} = builtScheduleWakeupTool as unknown as Omit<
+  typeof builtScheduleWakeupTool,
+  'call'
+> & {
+  call(
+    args: ScheduleWakeupInput,
+    context?: ScheduleWakeupLegacyContext,
+    canUseTool?: CanUseToolFn,
+    parentMessage?: AssistantMessage,
+    onProgress?: ToolCallProgress<ToolProgressData>,
+    opts?: ToolCallExecutionOptions,
+  ): Promise<ToolResult<ScheduleWakeupOutput>>
+}

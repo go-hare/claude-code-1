@@ -7,8 +7,7 @@ import {
 } from 'src/bootstrap/state.js'
 import { clearSystemPromptSections } from 'src/constants/systemPromptSections.js'
 import { logEvent } from 'src/services/analytics/index.js'
-import type { Tool } from 'src/Tool.js'
-import { buildTool, type ToolDef } from 'src/Tool.js'
+import { buildTool, type ToolDef, type ToolDeps } from 'src/Tool.js'
 import { clearMemoryFileCaches } from 'src/utils/claudemd.js'
 import { getCwd, hasScopedCwd } from 'src/utils/cwd.js'
 import { findCanonicalGitRoot } from 'src/utils/git.js'
@@ -73,7 +72,7 @@ const outputSchema = lazySchema(() =>
 type OutputSchema = ReturnType<typeof outputSchema>
 export type Output = z.infer<OutputSchema>
 
-export const EnterWorktreeTool: Tool<InputSchema, Output> = buildTool({
+export const EnterWorktreeTool = buildTool({
   name: ENTER_WORKTREE_TOOL_NAME,
   searchHint: 'create an isolated git worktree and switch into it',
   maxResultSizeChars: 100_000,
@@ -96,200 +95,217 @@ export const EnterWorktreeTool: Tool<InputSchema, Output> = buildTool({
   toAutoClassifierInput(input) {
     return input.path ?? input.name ?? ''
   },
-  async validateInput(input) {
-    if (getCurrentWorktreeSession() && !input.path) {
-      return {
-        result: false,
-        message:
-          'Already in a worktree session. Pass `path` to switch into another existing worktree, or use ExitWorktree to leave this one before creating a new worktree.',
-        errorCode: 2,
-      }
-    }
-    return { result: true }
-  },
-  /**
-   * Official 2.1.206/207: entering a model-supplied path outside
-   * `.claude/worktrees/` relocates the permission root — force a confirm.
-   * Managed Claude worktrees auto-allow.
-   */
-  async checkPermissions(input) {
-    if (!input.path) {
-      return { behavior: 'allow', updatedInput: input }
-    }
-    const classified = await classifyManagedClaudeWorktree(input.path)
-    if (classified.managed) {
-      return {
-        behavior: 'allow',
-        updatedInput: { ...input, path: classified.targetReal },
-      }
-    }
-    const resolved = resolve(getCwd(), input.path)
-    return {
-      behavior: 'ask',
-      message:
-        `Enter the worktree at "${resolved}"? This moves the session's ` +
-        `working directory and write access there, and loads project ` +
-        `configuration (CLAUDE.md, settings) from that location.`,
-      updatedInput: { ...input, path: resolved },
-      decisionReason: {
-        type: 'safetyCheck',
-        reason: `permission-root relocation to "${resolved}" — a model-supplied worktree outside .claude/worktrees/`,
-        classifierApprovable: false,
-      },
-    }
-  },
   renderToolUseMessage,
   renderToolResultMessage,
-  async call(input) {
-    const preEnterCwd = getCwd()
-    const launchProjectRoot = getOriginalCwd()
-    const priorWorktree = getCurrentWorktreeSession() as
-      | (ReturnType<typeof getCurrentWorktreeSession> & {
-          extensionRoot?: string
-        })
-      | null
-    const preservedExtensionRoot =
-      priorWorktree?.extensionRoot ??
-      (preEnterCwd === launchProjectRoot ? launchProjectRoot : undefined)
-
-    if (input.path) {
-      const classified = await classifyManagedClaudeWorktree(input.path)
-      const target = classified.managed
-        ? classified.targetReal
-        : resolve(preEnterCwd, input.path)
-
-      const worktreeSession = await enterExistingWorktreeSession(
-        target,
-        getSessionId(),
-      )
-      // Official 325 #1871: preserve original extensionRoot so project skills,
-      // commands, and agents stay visible in SDK / Desktop menus after entering a worktree.
-      if (
-        preservedExtensionRoot !== undefined &&
-        !(worktreeSession as { nestedRepoRoot?: string }).nestedRepoRoot
-      ) {
-        ;(
-          worktreeSession as typeof worktreeSession & { extensionRoot?: string }
-        ).extensionRoot = preservedExtensionRoot
-      }
-
-      // Official 2.1.326 #299: hold sandbox across worktree root moves so
-      // entering a worktree whose repo settings lack sandbox.enabled cannot
-      // silently weaken or drop an active sandbox.
-      captureSandboxRootMoveHold()
-      if (!hasActiveSessionAls() && !hasScopedCwd()) {
-        process.chdir(worktreeSession.worktreePath)
-      }
-      setCwd(worktreeSession.worktreePath)
-      setOriginalCwd(getCwd())
-      // densable tNt after chdir+mN — soft fail (Cin) so enter still succeeds
-      try {
-        await relocateSessionTranscript()
-      } catch (e) {
-        logForDebugging(`EnterWorktree: transcript relocation failed: ${e}`, {
-          level: 'error',
-        })
-        logError(e)
-      }
-      saveWorktreeState(worktreeSession)
-      clearSystemPromptSections()
-      clearMemoryFileCaches()
-      getPlansDirectory.cache.clear?.()
-
-      logEvent('tengu_worktree_entered_existing', {
-        mid_session: true,
-      })
-
-      const branchInfo = worktreeSession.worktreeBranch
-        ? ` on branch ${worktreeSession.worktreeBranch}`
-        : ''
-
-      return {
-        data: {
-          worktreePath: worktreeSession.worktreePath,
-          worktreeBranch: worktreeSession.worktreeBranch,
-          message:
-            `Entered worktree at ${worktreeSession.worktreePath}${branchInfo}. ` +
-            `This agent's working directory and write access now point at the worktree; ` +
-            `the previous directory was left untouched.`,
-        },
-        contextLayers: [
-          {
-            kind: 'working_directory',
-            directory: worktreeSession.worktreePath,
-          },
-        ],
-      }
-    }
-
-    // Validate not already in a worktree created by this session
-    if (getCurrentWorktreeSession()) {
-      throw new Error('Already in a worktree session')
-    }
-
-    // Resolve to main repo root so worktree creation works from within a worktree
-    const mainRepoRoot = findCanonicalGitRoot(preEnterCwd)
-    const sameRepoRoot =
-      mainRepoRoot !== null &&
-      mainRepoRoot === findCanonicalGitRoot(launchProjectRoot)
-    // Official 2.1.326 #299: capture sandbox hold before moving across root.
-    captureSandboxRootMoveHold()
-    if (mainRepoRoot && mainRepoRoot !== getCwd()) {
-      if (!hasActiveSessionAls() && !hasScopedCwd()) {
-        process.chdir(mainRepoRoot)
-      }
-      setCwd(mainRepoRoot)
-    }
-
-    const slug = input.name ?? getPlanSlug()
-
-    const worktreeSession = await createWorktreeForSession(getSessionId(), slug)
-    // Official 325 #1871: record extensionRoot when entering from the launch project root.
-    if (preservedExtensionRoot !== undefined && sameRepoRoot) {
-      ;(
-        worktreeSession as typeof worktreeSession & { extensionRoot?: string }
-      ).extensionRoot = preservedExtensionRoot
-    }
-
-    captureSandboxRootMoveHold()
-    if (!hasActiveSessionAls() && !hasScopedCwd()) {
-      process.chdir(worktreeSession.worktreePath)
-    }
-    setCwd(worktreeSession.worktreePath)
-    setOriginalCwd(getCwd())
-    // densable tNt after chdir+mN — soft fail (Cin)
-    try {
-      await relocateSessionTranscript()
-    } catch (e) {
-      logForDebugging(`EnterWorktree: transcript relocation failed: ${e}`, {
-        level: 'error',
-      })
-      logError(e)
-    }
-    saveWorktreeState(worktreeSession)
-    // Clear cached system prompt sections so env_info_simple recomputes with worktree context
-    clearSystemPromptSections()
-    // Clear memoized caches that depend on CWD
-    clearMemoryFileCaches()
-    getPlansDirectory.cache.clear?.()
-
-    logEvent('tengu_worktree_created', {
-      mid_session: true,
-    })
-
-    const branchInfo = worktreeSession.worktreeBranch
-      ? ` on branch ${worktreeSession.worktreeBranch}`
-      : ''
-
+  create(deps: ToolDeps) {
     return {
-      data: {
-        worktreePath: worktreeSession.worktreePath,
-        worktreeBranch: worktreeSession.worktreeBranch,
-        message: `Created worktree at ${worktreeSession.worktreePath}${branchInfo}. The session is now working in the worktree. Use ExitWorktree to leave mid-session, or exit the session to be prompted.`,
+      async validateInput(input) {
+        if (getCurrentWorktreeSession() && !input.path) {
+          return {
+            result: false,
+            message:
+              'Already in a worktree session. Pass `path` to switch into another existing worktree, or use ExitWorktree to leave this one before creating a new worktree.',
+            errorCode: 2,
+          }
+        }
+        return { result: true }
       },
-      contextLayers: [
-        { kind: 'working_directory', directory: worktreeSession.worktreePath },
-      ],
+      /**
+       * Official 2.1.206/207: entering a model-supplied path outside
+       * `.claude/worktrees/` relocates the permission root — force a confirm.
+       * Managed Claude worktrees auto-allow.
+       */
+      async checkPermissions(input) {
+        if (!input.path) {
+          return { behavior: 'allow', updatedInput: input }
+        }
+        const classified = await classifyManagedClaudeWorktree(input.path)
+        if (classified.managed) {
+          return {
+            behavior: 'allow',
+            updatedInput: { ...input, path: classified.targetReal },
+          }
+        }
+        const resolved = resolve(deps.cwd?.() ?? getCwd(), input.path)
+        return {
+          behavior: 'ask',
+          message:
+            `Enter the worktree at "${resolved}"? This moves the session's ` +
+            `working directory and write access there, and loads project ` +
+            `configuration (CLAUDE.md, settings) from that location.`,
+          updatedInput: { ...input, path: resolved },
+          decisionReason: {
+            type: 'safetyCheck',
+            reason: `permission-root relocation to "${resolved}" — a model-supplied worktree outside .claude/worktrees/`,
+            classifierApprovable: false,
+          },
+        }
+      },
+      async call(input) {
+        const preEnterCwd = deps.cwd?.() ?? getCwd()
+        const launchProjectRoot = getOriginalCwd()
+        const priorWorktree = getCurrentWorktreeSession() as
+          | (ReturnType<typeof getCurrentWorktreeSession> & {
+              extensionRoot?: string
+            })
+          | null
+        const preservedExtensionRoot =
+          priorWorktree?.extensionRoot ??
+          (preEnterCwd === launchProjectRoot ? launchProjectRoot : undefined)
+
+        if (input.path) {
+          const classified = await classifyManagedClaudeWorktree(input.path)
+          const target = classified.managed
+            ? classified.targetReal
+            : resolve(preEnterCwd, input.path)
+
+          const worktreeSession = await enterExistingWorktreeSession(
+            target,
+            getSessionId(),
+          )
+          // Official 325 #1871: preserve original extensionRoot so project skills,
+          // commands, and agents stay visible in SDK / Desktop menus after entering a worktree.
+          if (
+            preservedExtensionRoot !== undefined &&
+            !(worktreeSession as { nestedRepoRoot?: string }).nestedRepoRoot
+          ) {
+            ;(
+              worktreeSession as typeof worktreeSession & {
+                extensionRoot?: string
+              }
+            ).extensionRoot = preservedExtensionRoot
+          }
+
+          // Official 2.1.326 #299: hold sandbox across worktree root moves so
+          // entering a worktree whose repo settings lack sandbox.enabled cannot
+          // silently weaken or drop an active sandbox.
+          captureSandboxRootMoveHold()
+          if (!hasActiveSessionAls() && !hasScopedCwd()) {
+            process.chdir(worktreeSession.worktreePath)
+          }
+          setCwd(worktreeSession.worktreePath)
+          setOriginalCwd(getCwd())
+          // densable tNt after chdir+mN — soft fail (Cin) so enter still succeeds
+          try {
+            await relocateSessionTranscript()
+          } catch (e) {
+            logForDebugging(
+              `EnterWorktree: transcript relocation failed: ${e}`,
+              {
+                level: 'error',
+              },
+            )
+            logError(e)
+          }
+          saveWorktreeState(worktreeSession)
+          clearSystemPromptSections()
+          clearMemoryFileCaches()
+          getPlansDirectory.cache.clear?.()
+
+          logEvent('tengu_worktree_entered_existing', {
+            mid_session: true,
+          })
+
+          const branchInfo = worktreeSession.worktreeBranch
+            ? ` on branch ${worktreeSession.worktreeBranch}`
+            : ''
+
+          return {
+            data: {
+              worktreePath: worktreeSession.worktreePath,
+              worktreeBranch: worktreeSession.worktreeBranch,
+              message:
+                `Entered worktree at ${worktreeSession.worktreePath}${branchInfo}. ` +
+                `This agent's working directory and write access now point at the worktree; ` +
+                `the previous directory was left untouched.`,
+            },
+            contextLayers: [
+              {
+                kind: 'working_directory',
+                directory: worktreeSession.worktreePath,
+              },
+            ],
+          }
+        }
+
+        // Validate not already in a worktree created by this session
+        if (getCurrentWorktreeSession()) {
+          throw new Error('Already in a worktree session')
+        }
+
+        // Resolve to main repo root so worktree creation works from within a worktree
+        const mainRepoRoot = findCanonicalGitRoot(preEnterCwd)
+        const sameRepoRoot =
+          mainRepoRoot !== null &&
+          mainRepoRoot === findCanonicalGitRoot(launchProjectRoot)
+        // Official 2.1.326 #299: capture sandbox hold before moving across root.
+        captureSandboxRootMoveHold()
+        if (mainRepoRoot && mainRepoRoot !== getCwd()) {
+          if (!hasActiveSessionAls() && !hasScopedCwd()) {
+            process.chdir(mainRepoRoot)
+          }
+          setCwd(mainRepoRoot)
+        }
+
+        const slug = input.name ?? getPlanSlug()
+
+        const worktreeSession = await createWorktreeForSession(
+          getSessionId(),
+          slug,
+        )
+        // Official 325 #1871: record extensionRoot when entering from the launch project root.
+        if (preservedExtensionRoot !== undefined && sameRepoRoot) {
+          ;(
+            worktreeSession as typeof worktreeSession & {
+              extensionRoot?: string
+            }
+          ).extensionRoot = preservedExtensionRoot
+        }
+
+        captureSandboxRootMoveHold()
+        if (!hasActiveSessionAls() && !hasScopedCwd()) {
+          process.chdir(worktreeSession.worktreePath)
+        }
+        setCwd(worktreeSession.worktreePath)
+        setOriginalCwd(getCwd())
+        // densable tNt after chdir+mN — soft fail (Cin)
+        try {
+          await relocateSessionTranscript()
+        } catch (e) {
+          logForDebugging(`EnterWorktree: transcript relocation failed: ${e}`, {
+            level: 'error',
+          })
+          logError(e)
+        }
+        saveWorktreeState(worktreeSession)
+        // Clear cached system prompt sections so env_info_simple recomputes with worktree context
+        clearSystemPromptSections()
+        // Clear memoized caches that depend on CWD
+        clearMemoryFileCaches()
+        getPlansDirectory.cache.clear?.()
+
+        logEvent('tengu_worktree_created', {
+          mid_session: true,
+        })
+
+        const branchInfo = worktreeSession.worktreeBranch
+          ? ` on branch ${worktreeSession.worktreeBranch}`
+          : ''
+
+        return {
+          data: {
+            worktreePath: worktreeSession.worktreePath,
+            worktreeBranch: worktreeSession.worktreeBranch,
+            message: `Created worktree at ${worktreeSession.worktreePath}${branchInfo}. The session is now working in the worktree. Use ExitWorktree to leave mid-session, or exit the session to be prompted.`,
+          },
+          contextLayers: [
+            {
+              kind: 'working_directory',
+              directory: worktreeSession.worktreePath,
+            },
+          ],
+        }
+      },
     }
   },
   mapToolResultToToolResultBlockParam({ message }, toolUseID) {
