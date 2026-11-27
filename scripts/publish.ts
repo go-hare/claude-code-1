@@ -261,10 +261,13 @@ function copyWinSandboxToPlatformPkg(platformKey: string): void {
       ? [
           join(targetDir, 'aarch64-pc-windows-msvc', 'release', binaryName),
           join(targetDir, 'aarch64-pc-windows-gnullvm', 'release', binaryName),
+          join(ROOT, 'vendor', 'win-sandbox', 'arm64-win32', binaryName),
         ]
       : [
           join(targetDir, 'x86_64-pc-windows-msvc', 'release', binaryName),
           join(targetDir, 'x86_64-pc-windows-gnu', 'release', binaryName),
+          join(targetDir, 'x86_64-pc-windows-gnullvm', 'release', binaryName),
+          join(ROOT, 'vendor', 'win-sandbox', 'x64-win32', binaryName),
         ]
 
   const sourceCandidates = [

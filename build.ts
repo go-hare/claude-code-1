@@ -103,25 +103,68 @@ const staleNonPeBin = join(winSandboxDir, 'srt-win')
 if (existsSync(staleNonPeBin)) {
   rmSync(staleNonPeBin, { force: true })
 }
-const winSandboxCandidates = [
-  join(
-    'packages',
-    'win-sandbox-native',
-    'target',
-    'x86_64-pc-windows-msvc',
-    'release',
-    'srt-win.exe',
-  ),
-  join(
-    'packages',
-    'win-sandbox-native',
-    'target',
-    'x86_64-pc-windows-gnu',
-    'release',
-    'srt-win.exe',
-  ),
-  join('packages', 'win-sandbox-native', 'target', 'release', 'srt-win.exe'),
-]
+const isWinArm64 = process.platform === 'win32' && process.arch === 'arm64'
+const winSandboxCandidates = isWinArm64
+  ? [
+      join(
+        'packages',
+        'win-sandbox-native',
+        'target',
+        'aarch64-pc-windows-msvc',
+        'release',
+        'srt-win.exe',
+      ),
+      join(
+        'packages',
+        'win-sandbox-native',
+        'target',
+        'aarch64-pc-windows-gnullvm',
+        'release',
+        'srt-win.exe',
+      ),
+      join('vendor', 'win-sandbox', 'arm64-win32', 'srt-win.exe'),
+      join(
+        'packages',
+        'win-sandbox-native',
+        'target',
+        'release',
+        'srt-win.exe',
+      ),
+    ]
+  : [
+      join(
+        'packages',
+        'win-sandbox-native',
+        'target',
+        'x86_64-pc-windows-msvc',
+        'release',
+        'srt-win.exe',
+      ),
+      join(
+        'packages',
+        'win-sandbox-native',
+        'target',
+        'x86_64-pc-windows-gnu',
+        'release',
+        'srt-win.exe',
+      ),
+      join(
+        'packages',
+        'win-sandbox-native',
+        'target',
+        'x86_64-pc-windows-gnullvm',
+        'release',
+        'srt-win.exe',
+      ),
+      join('vendor', 'win-sandbox', 'x64-win32', 'srt-win.exe'),
+      join(
+        'packages',
+        'win-sandbox-native',
+        'target',
+        'release',
+        'srt-win.exe',
+      ),
+    ]
 const srcPath = winSandboxCandidates.find(candidate => existsSync(candidate))
 if (srcPath && existsSync(srcPath)) {
   const header = await readFile(srcPath)
